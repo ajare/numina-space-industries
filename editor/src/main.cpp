@@ -10,9 +10,12 @@
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_opengl3_loader.h"
 
+#include "OverviewRenderer.h"
+
 #include <SDL.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 
 namespace {
@@ -104,6 +107,30 @@ int main() {
         return 1;
     }
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
+
+    // MPP renders the Overview tab offscreen into a render texture that
+    // ImGui presents as an image. It must initialise with the GL context
+    // current, and shut down before that context dies.
+    OverviewRenderer overview;
+    {
+        int drawable_width = 0;
+        int drawable_height = 0;
+        SDL_GL_GetDrawableSize(window, &drawable_width, &drawable_height);
+        try {
+            overview.initialise(static_cast<std::size_t>(drawable_width),
+                               static_cast<std::size_t>(drawable_height));
+        } catch (const std::exception& error) {
+            SDL_Log("MPP initialisation failed: %s", error.what());
+            overview.shutdown();
+            ImGui_ImplSDL2_Shutdown();
+            ImGui_ImplOpenGL3_Shutdown();
+            ImGui::DestroyContext(context);
+            SDL_GL_DeleteContext(gl_context);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 1;
+        }
+    }
 
     bool running = true;
     bool first_frame = true;
@@ -212,6 +239,18 @@ int main() {
         // p_open is null: the tab carries no close button.
         if (overview_ready) {
             ImGui::Begin(kOverviewTitle);
+            const ImVec2 available = ImGui::GetContentRegionAvail();
+            const auto grid_width = static_cast<std::size_t>(
+                std::max(1.0f, std::floor(available.x)));
+            const auto grid_height = static_cast<std::size_t>(
+                std::max(1.0f, std::floor(available.y)));
+            const std::uint32_t texture_id =
+                overview.render(grid_width, grid_height);
+            ImGui::Image(
+                reinterpret_cast<ImTextureID>(
+                    static_cast<std::uintptr_t>(texture_id)),
+                ImVec2(static_cast<float>(grid_width),
+                       static_cast<float>(grid_height)));
             ImGui::End();
         }
 
@@ -226,6 +265,9 @@ int main() {
         SDL_GL_SwapWindow(window);
     }
 
+    // MPP owns GPU resources created against the GL context; release them
+    // while that context is still current.
+    overview.shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext(context);

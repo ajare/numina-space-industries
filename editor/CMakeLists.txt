@@ -46,8 +46,15 @@ else()
     target_compile_options(editor-imgui PRIVATE -w)
 endif()
 
-add_executable(editor src/main.cpp)
+add_executable(editor
+    src/main.cpp
+    src/OverviewRenderer.cpp
+)
 target_compile_features(editor PRIVATE cxx_std_20)
+# MPP logger output lives in the build tree regardless of launch directory,
+# mirroring the sibling Promethium application's PF_RENDER_LOG_DIR.
+target_compile_definitions(editor PRIVATE
+    EDITOR_MPP_LOG_DIR="${CMAKE_BINARY_DIR}/logs/$<CONFIG>")
 # Binaries land under bin/<platform>/<config>, matching the sibling
 # Promethium application's output layout.
 set_target_properties(editor PROPERTIES
@@ -57,7 +64,14 @@ if(MSVC)
 else()
     target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)
 endif()
-target_link_libraries(editor PRIVATE editor::imgui SDL2::SDL2-static)
+target_link_libraries(editor PRIVATE
+    editor::imgui
+    SDL2::SDL2-static
+    ext::mpp
+    ext::mpp-mesh
+    ext::mpp-helper
+    ext::mpp-program
+)
 if(WIN32)
     target_link_libraries(editor PRIVATE SDL2::SDL2main)
     set_target_properties(editor PROPERTIES WIN32_EXECUTABLE TRUE)
