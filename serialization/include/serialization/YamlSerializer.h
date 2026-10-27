@@ -105,6 +105,8 @@ namespace serialization
 		void writeFloat(std::string const& name, float value) override;
 		void writeDouble(std::string const& name, double value) override;
 		void writeString(std::string const& name, char const* text, size_t length) override;
+		// Explicit presentation for readable formats containing YAML punctuation.
+		void writeQuotedString(std::string const& name, std::string const& text);
 
 		void beginMap(std::string const& name) override;
 		void endMap() override;

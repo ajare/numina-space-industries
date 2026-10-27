@@ -12,6 +12,7 @@
 #pragma once
 
 #include "station/editor/CellState.h"
+#include "station/editor/DocumentIO.h"
 #include "station/editor/SpaceStation.h"
 
 #include <cstdint>
@@ -37,6 +38,14 @@ public:
     void replaceDocument(SpaceStation station);
 
     const SpaceStation& station() const noexcept { return mStation; }
+    const std::filesystem::path& path() const noexcept { return mPath; }
+    bool unsavedChanges() const { return !(mStation == mBaseline); }
+
+    // Cancellation and failures leave document identity, geometry, baseline,
+    // and history intact. Only successful Open resets history.
+    FileResult open(FileDialogs& dialogs, DocumentFiles& files);
+    FileResult save(FileDialogs& dialogs, DocumentFiles& files);
+    FileResult saveAs(FileDialogs& dialogs, DocumentFiles& files);
 
     // Toggle one Cell as a complete one-Cell gesture: one undo step. Throw
     // std::out_of_range for an unknown Deck or coordinate.
@@ -91,7 +100,11 @@ private:
     void applyGesture(Gesture& gesture, bool forward);
     void clearHistory();
 
+    FileResult saveTo(const FileSelection& selection, DocumentFiles& files);
+
     SpaceStation mStation;
+    SpaceStation mBaseline;
+    std::filesystem::path mPath;
     std::size_t mStrokeDeck = 0;
     std::optional<CellState> mStrokeState;
     std::optional<Gesture> mStroke;

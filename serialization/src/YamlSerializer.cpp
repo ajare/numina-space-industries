@@ -139,6 +139,14 @@ namespace serialization
 		write(name, std::string(text, length));
 	}
 
+	void YamlSerializer::writeQuotedString(std::string const& name, std::string const& text)
+	{
+		requireSerializing("write quoted string");
+		mEmitter << YAML::DoubleQuoted;
+		write(name, text);
+		mEmitter << YAML::Auto;
+	}
+
 	void YamlSerializer::beginMap(std::string const& name)
 	{
 		if (mSerializing)

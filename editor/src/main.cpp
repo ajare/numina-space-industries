@@ -1,12 +1,12 @@
 // Editor application shell.
 //
-// A full-viewport host frame owns the menubar (File > New, Exit), an empty
-// toolbar strip and a "Ready" statusbar; a DockSpace between them holds the
+// A full-viewport host frame owns the document File menu, toolbar,
+// and statusbar; a DockSpace between them holds the
 // single "Editor" panel docked to the left and the "Overview" tab in the
 // central node. The Editor panel edits the active session's Deck geometry
 // and the Overview previews that same live geometry. All editing behaviour
 // lives in the headless station::editor::EditorSession; this file only
-// draws, forwards input, and owns the undo/redo hotkeys.
+// draws, forwards input, and supplies native-dialog and storage adapters.
 
 #include "imgui.h"
 #include "imgui_internal.h"  // DockBuilder* (initial dock layout) is internal API
@@ -16,6 +16,7 @@
 
 #include "DeckGridWidget.h"
 #include "OverviewRenderer.h"
+#include "NativeFileDialogs.h"
 
 #include "station/editor/EditorSession.h"
 #include "station/editor/SpaceStation.h"
@@ -67,7 +68,9 @@ void buildInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size) {
 
 }  // namespace
 
-int main() {
+int runEditor() {
+    NativeFileDialogs dialogs;
+    station::editor::YamlDocumentFiles files;
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return 1;
@@ -145,6 +148,18 @@ int main() {
     // The one headless editing session: the GUI holds no geometry of its
     // own, it only renders and drives what the session reports.
     station::editor::EditorSession session;
+    std::string file_status;
+    auto report = [&](const station::editor::FileResult& result) {
+        using station::editor::FileOutcome;
+        if (result.outcome == FileOutcome::Failed) {
+            file_status = result.diagnostic;
+            SDL_Log("%s", file_status.c_str());
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Space Station file error",
+                                     file_status.c_str(), window);
+        } else if (result.outcome == FileOutcome::Success) {
+            file_status = "File operation completed";
+        }
+    };
 
     while (running) {
         SDL_Event event;
@@ -190,6 +205,16 @@ int main() {
             if (ImGui::BeginMenu("File")) {
                 if (ImGui::MenuItem("New")) {
                     session.newDocument();
+                    file_status.clear();
+                }
+                if (ImGui::MenuItem("Open...")) {
+                    report(session.open(dialogs, files));
+                }
+                if (ImGui::MenuItem("Save")) {
+                    report(session.save(dialogs, files));
+                }
+                if (ImGui::MenuItem("Save As...")) {
+                    report(session.saveAs(dialogs, files));
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Exit")) {
@@ -258,7 +283,14 @@ int main() {
         ImGui::Text("Ready - %zu of %zu Cells Filled",
                    session.station().deck(0).filledCount(),
                    session.station().deck(0).cellCount());
+        if (!file_status.empty()) {
+            ImGui::SameLine();
+            ImGui::TextUnformatted(file_status.c_str());
+        }
         ImGui::End();
+        const std::string title = "Editor - " +
+            (session.path().empty() ? std::string("Untitled") : session.path().string());
+        SDL_SetWindowTitle(window, title.c_str());
 
         // --- The Editor panel ----------------------------------------------
         // The active session's Deck, drawn top-down and clickable. The panel
@@ -344,4 +376,13 @@ int main() {
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;
+}
+
+int main() {
+    try {
+        return runEditor();
+    } catch (const std::exception& error) {
+        SDL_Log("Editor startup failed: %s", error.what());
+        return 1;
+    }
 }
