@@ -224,6 +224,226 @@ void invalidDocuments(TempFiles& temp) {
         require(session.station() == before, name + " preserves undo content");
     }
 }
+struct Prompt : UnsavedChangesPrompt {
+    UnsavedDecision decision = UnsavedDecision::Cancel;
+    int requests = 0;
+    DocumentAction requestedAction = DocumentAction::New;
+    fs::path requestedPath;
+    bool fail = false;
+    UnsavedDecision confirm(DocumentAction action, const fs::path& path) override {
+        ++requests;
+        requestedAction = action;
+        requestedPath = path;
+        if (fail) throw std::runtime_error("prompt unavailable");
+        return decision;
+    }
+};
+
+struct GuardDialogs : FileDialogs {
+    FileSelection destination{FileOutcome::Cancelled, {}, {}};
+    FileSelection source{FileOutcome::Cancelled, {}, {}};
+    int opens = 0;
+    int saves = 0;
+    FileSelection openYaml() override { ++opens; return source; }
+    FileSelection saveYaml(const fs::path&) override { ++saves; return destination; }
+};
+
+constexpr DocumentAction actions[] = {DocumentAction::New, DocumentAction::Open, DocumentAction::Exit};
+
+void guardedActionMatrix(TempFiles& temp) {
+    YamlDocumentFiles files;
+    const auto savedPath = temp.dir / "guard-saved.yaml";
+    const auto openedPath = temp.dir / "guard-opened.yaml";
+    EditorSession fixture;
+    fixture.toggleCell(0, 13, 2);
+    files.write(openedPath, fixture.station());
+    const auto loaded = fixture.station();
+    for (bool named : {false, true}) {
+        for (auto action : actions) {
+            for (auto decision : {UnsavedDecision::Save, UnsavedDecision::Discard, UnsavedDecision::Cancel}) {
+                EditorSession session;
+                GuardDialogs dialogs;
+                dialogs.destination = {FileOutcome::Success, savedPath, {}};
+                dialogs.source = {FileOutcome::Success, openedPath, {}};
+                Prompt prompt;
+                prompt.decision = decision;
+                if (named) require(session.save(dialogs, files).outcome == FileOutcome::Success, "named matrix setup");
+                dialogs.saves = 0;
+                session.toggleCell(0, 3, 7);
+                session.toggleCell(0, 8, 11);
+                session.undo(); // both branches must survive cancellation/Exit
+                const auto before = session.station();
+                const auto beforePath = session.path();
+                require(session.unsavedChanges(), "matrix starts dirty");
+                const auto result = session.request(action, prompt, dialogs, files);
+                require(prompt.requests == 1 && prompt.requestedAction == action && prompt.requestedPath == beforePath,
+                        "dirty action prompts with current document identity");
+                const bool cancelled = decision == UnsavedDecision::Cancel;
+                const bool saved = decision == UnsavedDecision::Save;
+                require(result.outcome == (cancelled ? FileOutcome::Cancelled : FileOutcome::Success),
+                        "Save/Discard continue, Cancel aborts action");
+                require(dialogs.saves == (saved && !named ? 1 : 0), "first-save destination requested only when necessary");
+                require(dialogs.opens == (action == DocumentAction::Open && !cancelled ? 1 : 0),
+                        "Open selection is not requested before consent/save succeeds");
+                if (saved) {
+                    EditorSession disk;
+                    Dialogs chooser;
+                    chooser.choose(savedPath);
+                    require(disk.open(chooser, files).outcome == FileOutcome::Success && disk.station() == before,
+                            "pending action saves the old document, not its replacement");
+                }
+                if (!cancelled && action != DocumentAction::Exit) {
+                    require(session.station() == (action == DocumentAction::New ? SpaceStation::createDefault() : loaded),
+                            "permitted New/Open replaces geometry");
+                    require(session.path() == (action == DocumentAction::New ? fs::path{} : openedPath),
+                            "permitted New/Open establishes correct identity");
+                    require(!session.unsavedChanges() && !session.canUndo() && !session.canRedo(),
+                            "permitted replacement resets baseline and history");
+                } else {
+                    require(session.station() == before, "Cancel/Exit never replaces geometry");
+                    require(session.path() == (saved ? savedPath : beforePath), "only successful Save adopts destination");
+                    require(session.unsavedChanges() == !saved, "Cancel/Discard do not clear dirty baseline");
+                    require(session.canUndo() && session.canRedo(), "Cancel/Exit preserves history");
+                    session.redo();
+                    require(session.station().deck(0).cell(8, 11) == CellState::Void, "redo content preserved");
+                    session.undo();
+                    require(session.station() == before, "undo content preserved");
+                }
+            }
+        }
+    }
+    // Launch, freshly saved and freshly opened documents all bypass the prompt.
+    for (int baseline = 0; baseline < 3; ++baseline) {
+        for (auto action : actions) {
+            EditorSession session;
+            GuardDialogs dialogs;
+            dialogs.destination = {FileOutcome::Success, savedPath, {}};
+            dialogs.source = {FileOutcome::Success, openedPath, {}};
+            if (baseline == 1) session.save(dialogs, files);
+            if (baseline == 2) session.open(dialogs, files);
+            dialogs.opens = dialogs.saves = 0;
+            Prompt prompt; // default Cancel would block if erroneously asked
+            require(session.request(action, prompt, dialogs, files).outcome == FileOutcome::Success,
+                    "clean action proceeds without consent");
+            require(prompt.requests == 0 && dialogs.saves == 0, "clean baseline never prompts or saves");
+            require(dialogs.opens == (action == DocumentAction::Open ? 1 : 0), "clean Open still selects input");
+        }
+    }
+}
+
+void unsuccessfulGuards(TempFiles& temp) {
+    YamlDocumentFiles files;
+    const auto savedPath = temp.dir / "blocked-saved.yaml";
+    for (auto action : actions) {
+        // Native destination cancel/error, failed first write, failed named
+        // write, and prompt failure must all prevent every destructive action.
+        for (int failure = 0; failure < 5; ++failure) {
+            EditorSession session;
+            GuardDialogs dialogs;
+            Prompt prompt;
+            prompt.decision = UnsavedDecision::Save;
+            dialogs.destination = {FileOutcome::Success, savedPath, {}};
+            dialogs.source = {FileOutcome::Success, temp.dir / "must-not-open.yaml", {}};
+            if (failure == 3) session.save(dialogs, files);
+            const auto originalPath = session.path();
+            session.toggleCell(0, 5, 9);
+            session.toggleCell(0, 1, 2);
+            session.undo();
+            const auto before = session.station();
+            if (failure == 0) dialogs.destination = {FileOutcome::Cancelled, {}, {}};
+            if (failure == 1) dialogs.destination = {FileOutcome::Failed, {}, "native dialog failure"};
+            if (failure == 2) dialogs.destination.path = temp.dir / "nonexistent" / "bad.yaml";
+            if (failure == 3) serialization::setTransactionalWriteFailureAfterBytesForTesting(8);
+            if (failure == 4) prompt.fail = true;
+            const auto result = session.request(action, prompt, dialogs, files);
+            serialization::setTransactionalWriteFailureAfterBytesForTesting(0);
+            require(result.outcome == (failure == 0 ? FileOutcome::Cancelled : FileOutcome::Failed),
+                    "unsuccessful guard blocks pending action with distinct outcome");
+            require((failure == 0) == result.diagnostic.empty(), "failed guard reports diagnostic, cancellation does not");
+            require(dialogs.opens == 0, "failed save never reaches pending Open");
+            require(session.station() == before && session.path() == originalPath && session.unsavedChanges(),
+                    "blocked action retains editable unsaved document and identity");
+            require(session.canUndo() && session.canRedo(), "blocked action retains history");
+            session.redo();
+            require(session.station().deck(0).cell(1, 2) == CellState::Void, "blocked action preserves redo content");
+            session.undo();
+            require(session.station() == before, "blocked action preserves undo content");
+        }
+    }
+    // Consent to discard is not an eager reset. A cancelled/refused Open
+    // leaves the current document intact. A preceding Save remains committed.
+    for (auto decision : {UnsavedDecision::Save, UnsavedDecision::Discard}) {
+        for (int failure = 0; failure < 3; ++failure) {
+            EditorSession session;
+            GuardDialogs dialogs;
+            dialogs.destination = {FileOutcome::Success, savedPath, {}};
+            session.save(dialogs, files);
+            session.toggleCell(0, 9, 4);
+            session.toggleCell(0, 12, 3);
+            session.undo();
+            const auto before = session.station();
+            Prompt prompt;
+            prompt.decision = decision;
+            dialogs.source = failure == 0 ? FileSelection{FileOutcome::Cancelled, {}, {}} :
+                failure == 1 ? FileSelection{FileOutcome::Failed, {}, "native Open failure"} :
+                FileSelection{FileOutcome::Success, temp.dir / "refused.yaml", {}};
+            writeText(temp.dir / "refused.yaml", "version: 99\n");
+            auto result = session.request(DocumentAction::Open, prompt, dialogs, files);
+            require(result.outcome == (failure == 0 ? FileOutcome::Cancelled : FileOutcome::Failed), "unsuccessful Open reported");
+            require(session.station() == before && session.path() == savedPath, "unsuccessful Open preserves geometry and path after consent");
+            require(session.unsavedChanges() == (decision != UnsavedDecision::Save), "only preceding successful Save changes baseline");
+            require(session.canUndo() && session.canRedo(), "unsuccessful Open preserves both history branches");
+        }
+    }
+}
+
+void baselineAndInterruptedGesture(TempFiles& temp) {
+    EditorSession session;
+    YamlDocumentFiles files;
+    GuardDialogs dialogs;
+    dialogs.destination = {FileOutcome::Success, temp.dir / "branch.yaml", {}};
+    Prompt prompt;
+    session.toggleCell(0, 2, 3);
+    require(session.unsavedChanges(), "edit dirties initial baseline");
+    session.undo();
+    require(!session.unsavedChanges(), "undo to initial geometry is clean");
+    session.redo();
+    session.save(dialogs, files);
+    require(!session.unsavedChanges(), "Save establishes edited baseline");
+    session.undo();
+    require(session.unsavedChanges(), "undo across saved baseline is dirty");
+    session.toggleCell(0, 7, 8); // different geometry at the same history depth
+    require(session.unsavedChanges() && !session.canRedo(), "branch is dirty even at saved history depth");
+    session.toggleCell(0, 7, 8);
+    session.toggleCell(0, 2, 3);
+    require(!session.unsavedChanges(), "equivalent geometry is clean even on another history branch");
+    const auto baseline = session.station();
+    session.beginStroke(0, 10, 10);
+    session.paintStroke(10, 10);
+    session.paintStroke(10, 11);
+    require(session.unsavedChanges(), "in-flight geometry is already dirty");
+    require(session.request(DocumentAction::Exit, prompt, dialogs, files).outcome == FileOutcome::Cancelled,
+            "window-close action during stroke can be cancelled");
+    require(!session.strokeActive(), "interrupted stroke is finalized before prompting");
+    session.undo();
+    require(session.station() == baseline && !session.unsavedChanges(), "cancelled close keeps whole interrupted stroke undoable");
+    session.redo();
+    require(session.unsavedChanges(), "redo interrupted stroke is dirty");
+    prompt.decision = UnsavedDecision::Save;
+    require(session.request(DocumentAction::Exit, prompt, dialogs, files).outcome == FileOutcome::Success,
+            "successful Save authorizes Exit");
+    require(!session.unsavedChanges(), "saved interrupted geometry establishes baseline");
+    // Save As must update the baseline on a branch without destroying history.
+    session.undo();
+    dialogs.destination.path = temp.dir / "branch-copy.yaml";
+    require(session.saveAs(dialogs, files).outcome == FileOutcome::Success, "Save As on branch succeeds");
+    require(session.path() == dialogs.destination.path && !session.unsavedChanges() && session.canRedo(),
+            "Save As adopts clean identity and preserves redo");
+    session.redo();
+    require(session.unsavedChanges(), "redo leaves Save As baseline");
+    session.undo();
+    require(!session.unsavedChanges(), "undo returns to Save As baseline");
+}
 }  // namespace
 
 int main() {
@@ -232,6 +452,9 @@ int main() {
         roundTrips(temp);
         destinationsAndFailures(temp);
         invalidDocuments(temp);
+        guardedActionMatrix(temp);
+        unsuccessfulGuards(temp);
+        baselineAndInterruptedGesture(temp);
         std::cout << "Persistence consumer passed " << checks << " checks\n";
     } catch (const std::exception& error) {
         serialization::setTransactionalWriteFailureAfterBytesForTesting(0);

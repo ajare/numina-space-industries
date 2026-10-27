@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <stdexcept>
 
 namespace {
 
@@ -34,6 +35,41 @@ constexpr int kInitialWindowHeight = 800;
 constexpr float kInitialLeftDockWidthPx = 500.0f;
 constexpr const char* kPanelTitle = "Editor";
 constexpr const char* kOverviewTitle = "Overview";
+
+class SdlUnsavedChangesPrompt final : public station::editor::UnsavedChangesPrompt {
+public:
+    explicit SdlUnsavedChangesPrompt(SDL_Window* window) : mWindow(window) {}
+
+    station::editor::UnsavedDecision confirm(station::editor::DocumentAction action,
+                                            const std::filesystem::path& path) override {
+        using station::editor::DocumentAction;
+        using station::editor::UnsavedDecision;
+        const char* next = action == DocumentAction::New ? "creating a new Space Station" :
+                           action == DocumentAction::Open ? "opening another Space Station" :
+                           "exiting the Editor";
+        const std::string message = "Save changes to " +
+            (path.empty() ? std::string("Untitled") : path.filename().string()) +
+            " before " + next + "?";
+        const SDL_MessageBoxButtonData buttons[] = {
+            {0, 1, "Save"},
+            {0, 2, "Discard"},
+            {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,
+             0, "Cancel"}
+        };
+        const SDL_MessageBoxData data = {SDL_MESSAGEBOX_WARNING, mWindow,
+            "Unsaved Space Station changes", message.c_str(), 3, buttons, nullptr};
+        int chosen = 0;
+        if (SDL_ShowMessageBox(&data, &chosen) != 0) {
+            throw std::runtime_error(std::string("Unsaved prompt failed: ") + SDL_GetError());
+        }
+        if (chosen == 1) return UnsavedDecision::Save;
+        if (chosen == 2) return UnsavedDecision::Discard;
+        return UnsavedDecision::Cancel;
+    }
+
+private:
+    SDL_Window* mWindow;
+};
 
 // ImGui loads imgui.ini during the first NewFrame(), so the presence of a saved
 // layout must be sampled before then. When one exists it wins over the built-in
@@ -148,6 +184,7 @@ int runEditor() {
     // The one headless editing session: the GUI holds no geometry of its
     // own, it only renders and drives what the session reports.
     station::editor::EditorSession session;
+    SdlUnsavedChangesPrompt unsaved_prompt(window);
     std::string file_status;
     auto report = [&](const station::editor::FileResult& result) {
         using station::editor::FileOutcome;
@@ -161,14 +198,30 @@ int runEditor() {
         }
     };
 
+    auto perform = [&](station::editor::DocumentAction action) {
+        const auto result = session.request(action, unsaved_prompt, dialogs, files);
+        if (result.outcome == station::editor::FileOutcome::Success) {
+            file_status.clear();
+            if (action == station::editor::DocumentAction::Exit) running = false;
+        } else {
+            report(result);
+        }
+    };
+
     while (running) {
+        bool close_requested = false;
         SDL_Event event;
         while (SDL_WaitEventTimeout(&event, 16) != 0) {
             ImGui_ImplSDL2_ProcessEvent(&event);
-            if (event.type == SDL_QUIT) {
-                running = false;
+            if (event.type == SDL_QUIT ||
+                (event.type == SDL_WINDOWEVENT &&
+                 event.window.windowID == SDL_GetWindowID(window) &&
+                 event.window.event == SDL_WINDOWEVENT_CLOSE)) {
+                close_requested = true;
             }
         }
+        // Coalesce duplicate close events; Cancel keeps the application alive.
+        if (close_requested) perform(station::editor::DocumentAction::Exit);
         if (!running) {
             break;
         }
@@ -204,11 +257,10 @@ int runEditor() {
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
                 if (ImGui::MenuItem("New")) {
-                    session.newDocument();
-                    file_status.clear();
+                    perform(station::editor::DocumentAction::New);
                 }
                 if (ImGui::MenuItem("Open...")) {
-                    report(session.open(dialogs, files));
+                    perform(station::editor::DocumentAction::Open);
                 }
                 if (ImGui::MenuItem("Save")) {
                     report(session.save(dialogs, files));
@@ -218,7 +270,7 @@ int runEditor() {
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Exit")) {
-                    running = false;
+                    perform(station::editor::DocumentAction::Exit);
                 }
                 ImGui::EndMenu();
             }
@@ -280,7 +332,8 @@ int runEditor() {
                         ImGuiDockNodeFlags_None);
 
         ImGui::Separator();
-        ImGui::Text("Ready - %zu of %zu Cells Filled",
+        ImGui::Text("%s - %zu of %zu Cells Filled",
+                   session.unsavedChanges() ? "Unsaved changes" : "Ready",
                    session.station().deck(0).filledCount(),
                    session.station().deck(0).cellCount());
         if (!file_status.empty()) {
@@ -289,7 +342,8 @@ int runEditor() {
         }
         ImGui::End();
         const std::string title = "Editor - " +
-            (session.path().empty() ? std::string("Untitled") : session.path().string());
+            (session.path().empty() ? std::string("Untitled") : session.path().string()) +
+            (session.unsavedChanges() ? " *" : "");
         SDL_SetWindowTitle(window, title.c_str());
 
         // --- The Editor panel ----------------------------------------------

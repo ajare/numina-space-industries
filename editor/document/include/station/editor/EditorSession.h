@@ -13,6 +13,7 @@
 
 #include "station/editor/CellState.h"
 #include "station/editor/DocumentIO.h"
+#include "station/editor/DocumentActions.h"
 #include "station/editor/SpaceStation.h"
 
 #include <cstdint>
@@ -27,8 +28,15 @@ public:
     // with no history.
     EditorSession();
 
-    // File > New: replace the document with a fresh default Space Station
-    // and drop its history.
+    // Guarded application commands. The GUI routes New, Open, menu Exit and
+    // window close here. Success authorizes Exit; Cancelled/Failed never do.
+    // Save continues the action only after a successful write. Discard alone
+    // does not mutate state (a subsequent cancelled Open still preserves it).
+    FileResult request(DocumentAction action, UnsavedChangesPrompt& prompt,
+                       FileDialogs& dialogs, DocumentFiles& files);
+
+    // Unconditional document operations, also used by request after consent.
+    // New replaces the document with a fresh default and drops its history.
     void newDocument();
 
     // Establish another document as the active one, with no history: the

@@ -7,6 +7,40 @@ namespace station::editor {
 EditorSession::EditorSession()
     : mStation(SpaceStation::createDefault()), mBaseline(mStation) {}
 
+FileResult EditorSession::request(DocumentAction action, UnsavedChangesPrompt& prompt,
+                                  FileDialogs& dialogs, DocumentFiles& files) {
+    // A window close can interrupt a held pointer gesture. Keep that whole
+    // edit undoable if the user cancels, and save exactly the visible geometry.
+    endStroke();
+    try {
+        if (unsavedChanges()) {
+            switch (prompt.confirm(action, mPath)) {
+                case UnsavedDecision::Cancel:
+                    return {FileOutcome::Cancelled, {}};
+                case UnsavedDecision::Save: {
+                    auto result = save(dialogs, files);
+                    if (result.outcome != FileOutcome::Success) return result;
+                    break;
+                }
+                case UnsavedDecision::Discard:
+                    break;
+            }
+        }
+        switch (action) {
+            case DocumentAction::New:
+                newDocument();
+                return {FileOutcome::Success, {}};
+            case DocumentAction::Open:
+                return open(dialogs, files);
+            case DocumentAction::Exit:
+                return {FileOutcome::Success, {}};
+        }
+        return {FileOutcome::Failed, "Unknown document action"};
+    } catch (const std::exception& error) {
+        return {FileOutcome::Failed, std::string("Document action failed: ") + error.what()};
+    }
+}
+
 void EditorSession::newDocument() {
     replaceDocument(SpaceStation::createDefault());
 }
