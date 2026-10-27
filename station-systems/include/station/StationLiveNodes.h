@@ -21,7 +21,7 @@
 namespace station
 {
 	template <class Settings>
-	struct LiveNode; // undefined: specialise below via PF_STATION_LIVE_NODE
+	struct LiveNode; // undefined: specialise below via NSI_STATION_LIVE_NODE
 
 	// #844: the shared repair-parts frozen-topology rule (#842): the
 	// parts store identity and the per-mode plan identities - which
@@ -72,7 +72,7 @@ namespace station
 	}
 
 	// A node type whose settings carry no initial-condition fields.
-#define PF_STATION_LIVE_NODE(SETTINGS, MEMBER, LABEL) \
+#define NSI_STATION_LIVE_NODE(SETTINGS, MEMBER, LABEL) \
 	template <> \
 	struct LiveNode<SETTINGS> \
 	{ \
@@ -82,7 +82,7 @@ namespace station
 		static bool restoreInitial(SETTINGS const&, SETTINGS&) { return false; } \
 	};
 
-#define PF_STATION_LIVE_NODE_WITH(SETTINGS, MEMBER, LABEL, ...) \
+#define NSI_STATION_LIVE_NODE_WITH(SETTINGS, MEMBER, LABEL, ...) \
 	template <> \
 	struct LiveNode<SETTINGS> \
 	{ \
@@ -93,11 +93,11 @@ namespace station
 		{ return restoreStationInitialFields(running, offered, __VA_ARGS__); } \
 	};
 
-	PF_STATION_LIVE_NODE_WITH(ResourceStoreSettings, stores, "Store",
+	NSI_STATION_LIVE_NODE_WITH(ResourceStoreSettings, stores, "Store",
 		&ResourceStoreSettings::startingQualified,
 		&ResourceStoreSettings::startingUnqualified)
-	PF_STATION_LIVE_NODE(ResourceTransferSettings, transfers, "Transfer")
-	PF_STATION_LIVE_NODE(ResourceConversionSettings, conversions, "Conversion")
+	NSI_STATION_LIVE_NODE(ResourceTransferSettings, transfers, "Transfer")
+	NSI_STATION_LIVE_NODE(ResourceConversionSettings, conversions, "Conversion")
 	// #845: which fault modes a solar array can suffer is a run-shape
 	// decision frozen at construction; the loss fraction and the fixed
 	// availability inside each block stay live-tunable parameters whose
@@ -114,7 +114,7 @@ namespace station
 				|| a.trackingFailure.has_value() != b.trackingFailure.has_value();
 		}
 	};
-	PF_STATION_LIVE_NODE(EquipmentLoadSettings, equipmentLoads, "Equipment")
+	NSI_STATION_LIVE_NODE(EquipmentLoadSettings, equipmentLoads, "Equipment")
 	template <> struct LiveNode<BatterySettings>
 	{
 		static constexpr std::string_view nodeType = "Battery";
@@ -137,10 +137,10 @@ namespace station
 					&& a.thermalRunaway->compartmentId != b.thermalRunaway->compartmentId);
 		}
 	};
-	PF_STATION_LIVE_NODE(ResourceDeliverySettings, deliveries, "Delivery")
-	PF_STATION_LIVE_NODE(WasteEjectionSettings, wasteEjections, "Waste ejection")
-	PF_STATION_LIVE_NODE(InstallationOutageSettings, outages, "Outage")
-	PF_STATION_LIVE_NODE_WITH(ThermalReservoirSettings, thermalReservoirs, "Reservoir",
+	NSI_STATION_LIVE_NODE(ResourceDeliverySettings, deliveries, "Delivery")
+	NSI_STATION_LIVE_NODE(WasteEjectionSettings, wasteEjections, "Waste ejection")
+	NSI_STATION_LIVE_NODE(InstallationOutageSettings, outages, "Outage")
+	NSI_STATION_LIVE_NODE_WITH(ThermalReservoirSettings, thermalReservoirs, "Reservoir",
 		&ThermalReservoirSettings::startingTemperatureC)
 	// #844: a radiator's puncture opt-in, its destination compartment and
 	// its panel charge size are frozen topology - the charge is the audit
@@ -352,8 +352,8 @@ namespace station
 					&& a.interlockFailure->pathwayId != b.interlockFailure->pathwayId);
 		}
 	};
-	PF_STATION_LIVE_NODE(CrewSettings, crews, "Crew")
-	PF_STATION_LIVE_NODE(WaterCollectorSettings, waterCollectors, "Water collector")
+	NSI_STATION_LIVE_NODE(CrewSettings, crews, "Crew")
+	NSI_STATION_LIVE_NODE(WaterCollectorSettings, waterCollectors, "Water collector")
 	template <> struct LiveNode<WaterTreatmentSettings>
 	{
 		static constexpr std::string_view nodeType = "Water treatment";
@@ -420,16 +420,16 @@ namespace station
 		{ return wearTopologyChanged(a.catalystDeactivation, b.catalystDeactivation)
 			|| a.overtempRunaway.has_value() != b.overtempRunaway.has_value(); }
 	};
-	PF_STATION_LIVE_NODE_WITH(MicrobialProcessorSettings, microbialProcessors, "Microbial processor",
+	NSI_STATION_LIVE_NODE_WITH(MicrobialProcessorSettings, microbialProcessors, "Microbial processor",
 		&MicrobialProcessorSettings::initialCondition)
-	PF_STATION_LIVE_NODE_WITH(ThermalBufferSettings, thermalBuffers, "Thermal buffer",
+	NSI_STATION_LIVE_NODE_WITH(ThermalBufferSettings, thermalBuffers, "Thermal buffer",
 		&ThermalBufferSettings::startingEnergyKJ)
-	PF_STATION_LIVE_NODE_WITH(CropPopulationSettings, cropPopulations, "Crops",
+	NSI_STATION_LIVE_NODE_WITH(CropPopulationSettings, cropPopulations, "Crops",
 		&CropPopulationSettings::initialBiomassKg)
-	PF_STATION_LIVE_NODE_WITH(AlgaeCultureSettings, algaeCultures, "Algae",
+	NSI_STATION_LIVE_NODE_WITH(AlgaeCultureSettings, algaeCultures, "Algae",
 		&AlgaeCultureSettings::initialBiomassKg)
-	PF_STATION_LIVE_NODE(MaintenanceJobSettings, maintenanceJobs, "Maintenance")
+	NSI_STATION_LIVE_NODE(MaintenanceJobSettings, maintenanceJobs, "Maintenance")
 
-#undef PF_STATION_LIVE_NODE
-#undef PF_STATION_LIVE_NODE_WITH
+#undef NSI_STATION_LIVE_NODE
+#undef NSI_STATION_LIVE_NODE_WITH
 }

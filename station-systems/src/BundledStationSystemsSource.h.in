@@ -6,4 +6,4 @@
 // char_traits::length() loop that trips GCC's -fconstexpr-loop-limit once the
 // model grows past ~256 KiB, whereas a char[] takes its size from the literal
 // token directly with no such loop.
-namespace station { inline constexpr char kStationSystemsLua[] = R"PF_STATION(@PF_STATION_SYSTEMS_LUA@)PF_STATION"; }
+namespace station { inline constexpr char kStationSystemsLua[] = R"NSI_STATION(@NSI_STATION_SYSTEMS_LUA@)NSI_STATION"; }

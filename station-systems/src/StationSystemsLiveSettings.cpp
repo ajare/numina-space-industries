@@ -627,12 +627,12 @@ namespace station
 		}
 
 		// One line per live-editable type: settings type -> live state vector.
-#define PF_LIVE_ENTRY(SETTINGS, MEMBER) \
+#define NSI_LIVE_ENTRY(SETTINGS, MEMBER) \
 	if constexpr (std::is_same_v<Settings, SETTINGS>) \
 		return findLiveAuthored(mImpl->MEMBER, nodeId, index); \
 	else
 		// settings type -> the priority ordering it participates in, if any.
-#define PF_LIVE_RESORT(SETTINGS, ORDER, STATES) \
+#define NSI_LIVE_RESORT(SETTINGS, ORDER, STATES) \
 	if constexpr (std::is_same_v<Settings, SETTINGS>) \
 		resortPriority(mImpl->ORDER, mImpl->STATES); \
 	else
@@ -641,43 +641,43 @@ namespace station
 	template <class Settings>
 	Settings* StationSystemsRuntime::liveAuthoredEntry(std::string_view nodeId, size_t* index)
 	{
-		PF_LIVE_ENTRY(AtmospherePathwaySettings, atmospherePathways)
-		PF_LIVE_ENTRY(ResourceStoreSettings, stores)
-		PF_LIVE_ENTRY(ResourceTransferSettings, transfers)
-		PF_LIVE_ENTRY(ResourceConversionSettings, conversions)
-		PF_LIVE_ENTRY(SolarArraySettings, solarArrays)
-		PF_LIVE_ENTRY(EquipmentLoadSettings, loads)
-		PF_LIVE_ENTRY(BatterySettings, batteries)
-		PF_LIVE_ENTRY(ResourceDeliverySettings, deliveries)
-		PF_LIVE_ENTRY(WasteEjectionSettings, wasteEjections)
-		PF_LIVE_ENTRY(InstallationOutageSettings, outages)
-		PF_LIVE_ENTRY(ThermalReservoirSettings, reservoirs)
-		PF_LIVE_ENTRY(RadiatorSettings, radiators)
-		PF_LIVE_ENTRY(CoolantLoopSettings, coolantLoops)
-		PF_LIVE_ENTRY(ChillerSettings, chillers)
-		PF_LIVE_ENTRY(LightingFixtureSettings, lightingFixtures)
-		PF_LIVE_ENTRY(HeatSourceSettings, heatSources)
-		PF_LIVE_ENTRY(HeatEngineSettings, heatEngines)
-		PF_LIVE_ENTRY(GeneratorSettings, generators)
-		PF_LIVE_ENTRY(AtmosphereSettings, atmospheres)
-		PF_LIVE_ENTRY(ThermalLinkSettings, thermalLinks)
-		PF_LIVE_ENTRY(AirlockCycleSettings, airlockCycles)
-		PF_LIVE_ENTRY(CrewSettings, crews)
-		PF_LIVE_ENTRY(WaterCollectorSettings, waterCollectors)
-		PF_LIVE_ENTRY(WaterTreatmentSettings, waterTreatments)
-		PF_LIVE_ENTRY(ElectrolyzerSettings, electrolyzers)
-		PF_LIVE_ENTRY(Co2CaptureSettings, co2Captures)
-		PF_LIVE_ENTRY(FuelCellSettings, fuelCells)
-		PF_LIVE_ENTRY(SabatierReactorSettings, sabatierReactors)
-		PF_LIVE_ENTRY(MethaneProcessorSettings, methaneProcessors)
-		PF_LIVE_ENTRY(MicrobialProcessorSettings, microbialProcessors)
-		PF_LIVE_ENTRY(ThermalBufferSettings, thermalBuffers)
-		PF_LIVE_ENTRY(CropPopulationSettings, cropPopulations)
-		PF_LIVE_ENTRY(AlgaeCultureSettings, algaeCultures)
-		PF_LIVE_ENTRY(MaintenanceJobSettings, maintenanceJobs)
+		NSI_LIVE_ENTRY(AtmospherePathwaySettings, atmospherePathways)
+		NSI_LIVE_ENTRY(ResourceStoreSettings, stores)
+		NSI_LIVE_ENTRY(ResourceTransferSettings, transfers)
+		NSI_LIVE_ENTRY(ResourceConversionSettings, conversions)
+		NSI_LIVE_ENTRY(SolarArraySettings, solarArrays)
+		NSI_LIVE_ENTRY(EquipmentLoadSettings, loads)
+		NSI_LIVE_ENTRY(BatterySettings, batteries)
+		NSI_LIVE_ENTRY(ResourceDeliverySettings, deliveries)
+		NSI_LIVE_ENTRY(WasteEjectionSettings, wasteEjections)
+		NSI_LIVE_ENTRY(InstallationOutageSettings, outages)
+		NSI_LIVE_ENTRY(ThermalReservoirSettings, reservoirs)
+		NSI_LIVE_ENTRY(RadiatorSettings, radiators)
+		NSI_LIVE_ENTRY(CoolantLoopSettings, coolantLoops)
+		NSI_LIVE_ENTRY(ChillerSettings, chillers)
+		NSI_LIVE_ENTRY(LightingFixtureSettings, lightingFixtures)
+		NSI_LIVE_ENTRY(HeatSourceSettings, heatSources)
+		NSI_LIVE_ENTRY(HeatEngineSettings, heatEngines)
+		NSI_LIVE_ENTRY(GeneratorSettings, generators)
+		NSI_LIVE_ENTRY(AtmosphereSettings, atmospheres)
+		NSI_LIVE_ENTRY(ThermalLinkSettings, thermalLinks)
+		NSI_LIVE_ENTRY(AirlockCycleSettings, airlockCycles)
+		NSI_LIVE_ENTRY(CrewSettings, crews)
+		NSI_LIVE_ENTRY(WaterCollectorSettings, waterCollectors)
+		NSI_LIVE_ENTRY(WaterTreatmentSettings, waterTreatments)
+		NSI_LIVE_ENTRY(ElectrolyzerSettings, electrolyzers)
+		NSI_LIVE_ENTRY(Co2CaptureSettings, co2Captures)
+		NSI_LIVE_ENTRY(FuelCellSettings, fuelCells)
+		NSI_LIVE_ENTRY(SabatierReactorSettings, sabatierReactors)
+		NSI_LIVE_ENTRY(MethaneProcessorSettings, methaneProcessors)
+		NSI_LIVE_ENTRY(MicrobialProcessorSettings, microbialProcessors)
+		NSI_LIVE_ENTRY(ThermalBufferSettings, thermalBuffers)
+		NSI_LIVE_ENTRY(CropPopulationSettings, cropPopulations)
+		NSI_LIVE_ENTRY(AlgaeCultureSettings, algaeCultures)
+		NSI_LIVE_ENTRY(MaintenanceJobSettings, maintenanceJobs)
 		{
 			static_assert(sizeof(Settings) == 0,
-				"settings type has no live-editable collection; add it to PF_LIVE_ENTRY");
+				"settings type has no live-editable collection; add it to NSI_LIVE_ENTRY");
 			return nullptr;
 		}
 	}
@@ -707,60 +707,60 @@ namespace station
 	template <class Settings>
 	void StationSystemsRuntime::resortLiveNode()
 	{
-		PF_LIVE_RESORT(ResourceTransferSettings, transferOrder, transfers)
-		PF_LIVE_RESORT(ResourceConversionSettings, conversionOrder, conversions)
-		PF_LIVE_RESORT(EquipmentLoadSettings, loadOrder, loads)
-		PF_LIVE_RESORT(WaterTreatmentSettings, waterTreatmentOrder, waterTreatments)
-		PF_LIVE_RESORT(ElectrolyzerSettings, electrolyzerOrder, electrolyzers)
-		PF_LIVE_RESORT(Co2CaptureSettings, co2CaptureOrder, co2Captures)
-		PF_LIVE_RESORT(SabatierReactorSettings, sabatierOrder, sabatierReactors)
-		PF_LIVE_RESORT(MethaneProcessorSettings, methaneProcessorOrder, methaneProcessors)
-		PF_LIVE_RESORT(MicrobialProcessorSettings, microbialProcessorOrder, microbialProcessors)
-		PF_LIVE_RESORT(CropPopulationSettings, cropOrder, cropPopulations)
-		PF_LIVE_RESORT(AlgaeCultureSettings, algaeOrder, algaeCultures)
-		PF_LIVE_RESORT(MaintenanceJobSettings, maintenanceOrder, maintenanceJobs)
+		NSI_LIVE_RESORT(ResourceTransferSettings, transferOrder, transfers)
+		NSI_LIVE_RESORT(ResourceConversionSettings, conversionOrder, conversions)
+		NSI_LIVE_RESORT(EquipmentLoadSettings, loadOrder, loads)
+		NSI_LIVE_RESORT(WaterTreatmentSettings, waterTreatmentOrder, waterTreatments)
+		NSI_LIVE_RESORT(ElectrolyzerSettings, electrolyzerOrder, electrolyzers)
+		NSI_LIVE_RESORT(Co2CaptureSettings, co2CaptureOrder, co2Captures)
+		NSI_LIVE_RESORT(SabatierReactorSettings, sabatierOrder, sabatierReactors)
+		NSI_LIVE_RESORT(MethaneProcessorSettings, methaneProcessorOrder, methaneProcessors)
+		NSI_LIVE_RESORT(MicrobialProcessorSettings, microbialProcessorOrder, microbialProcessors)
+		NSI_LIVE_RESORT(CropPopulationSettings, cropOrder, cropPopulations)
+		NSI_LIVE_RESORT(AlgaeCultureSettings, algaeOrder, algaeCultures)
+		NSI_LIVE_RESORT(MaintenanceJobSettings, maintenanceOrder, maintenanceJobs)
 		{}
 	}
 
 	// Explicit instantiations: the header template calls these, and the
 	// mutator lambda never crosses into this translation unit.
-#define PF_LIVE_INSTANTIATE(SETTINGS) \
+#define NSI_LIVE_INSTANTIATE(SETTINGS) \
 	template SETTINGS* StationSystemsRuntime::liveAuthoredEntry<SETTINGS>(std::string_view, size_t*); \
 	template void StationSystemsRuntime::syncLiveNodeMirror<SETTINGS>(size_t, SETTINGS const&); \
 	template void StationSystemsRuntime::resortLiveNode<SETTINGS>();
 
-	PF_LIVE_INSTANTIATE(ResourceStoreSettings)
-	PF_LIVE_INSTANTIATE(ResourceTransferSettings)
-	PF_LIVE_INSTANTIATE(ResourceConversionSettings)
-	PF_LIVE_INSTANTIATE(SolarArraySettings)
-	PF_LIVE_INSTANTIATE(EquipmentLoadSettings)
-	PF_LIVE_INSTANTIATE(BatterySettings)
-	PF_LIVE_INSTANTIATE(ResourceDeliverySettings)
-	PF_LIVE_INSTANTIATE(WasteEjectionSettings)
-	PF_LIVE_INSTANTIATE(InstallationOutageSettings)
-	PF_LIVE_INSTANTIATE(ThermalReservoirSettings)
-	PF_LIVE_INSTANTIATE(RadiatorSettings)
-	PF_LIVE_INSTANTIATE(CoolantLoopSettings)
-	PF_LIVE_INSTANTIATE(ChillerSettings)
-	PF_LIVE_INSTANTIATE(LightingFixtureSettings)
-	PF_LIVE_INSTANTIATE(HeatSourceSettings)
-	PF_LIVE_INSTANTIATE(HeatEngineSettings)
-	PF_LIVE_INSTANTIATE(GeneratorSettings)
-	PF_LIVE_INSTANTIATE(AtmosphereSettings)
-	PF_LIVE_INSTANTIATE(AtmospherePathwaySettings)
-	PF_LIVE_INSTANTIATE(ThermalLinkSettings)
-	PF_LIVE_INSTANTIATE(AirlockCycleSettings)
-	PF_LIVE_INSTANTIATE(CrewSettings)
-	PF_LIVE_INSTANTIATE(WaterCollectorSettings)
-	PF_LIVE_INSTANTIATE(WaterTreatmentSettings)
-	PF_LIVE_INSTANTIATE(ElectrolyzerSettings)
-	PF_LIVE_INSTANTIATE(Co2CaptureSettings)
-	PF_LIVE_INSTANTIATE(FuelCellSettings)
-	PF_LIVE_INSTANTIATE(SabatierReactorSettings)
-	PF_LIVE_INSTANTIATE(MethaneProcessorSettings)
-	PF_LIVE_INSTANTIATE(MicrobialProcessorSettings)
-	PF_LIVE_INSTANTIATE(ThermalBufferSettings)
-	PF_LIVE_INSTANTIATE(CropPopulationSettings)
-	PF_LIVE_INSTANTIATE(AlgaeCultureSettings)
-	PF_LIVE_INSTANTIATE(MaintenanceJobSettings)
+	NSI_LIVE_INSTANTIATE(ResourceStoreSettings)
+	NSI_LIVE_INSTANTIATE(ResourceTransferSettings)
+	NSI_LIVE_INSTANTIATE(ResourceConversionSettings)
+	NSI_LIVE_INSTANTIATE(SolarArraySettings)
+	NSI_LIVE_INSTANTIATE(EquipmentLoadSettings)
+	NSI_LIVE_INSTANTIATE(BatterySettings)
+	NSI_LIVE_INSTANTIATE(ResourceDeliverySettings)
+	NSI_LIVE_INSTANTIATE(WasteEjectionSettings)
+	NSI_LIVE_INSTANTIATE(InstallationOutageSettings)
+	NSI_LIVE_INSTANTIATE(ThermalReservoirSettings)
+	NSI_LIVE_INSTANTIATE(RadiatorSettings)
+	NSI_LIVE_INSTANTIATE(CoolantLoopSettings)
+	NSI_LIVE_INSTANTIATE(ChillerSettings)
+	NSI_LIVE_INSTANTIATE(LightingFixtureSettings)
+	NSI_LIVE_INSTANTIATE(HeatSourceSettings)
+	NSI_LIVE_INSTANTIATE(HeatEngineSettings)
+	NSI_LIVE_INSTANTIATE(GeneratorSettings)
+	NSI_LIVE_INSTANTIATE(AtmosphereSettings)
+	NSI_LIVE_INSTANTIATE(AtmospherePathwaySettings)
+	NSI_LIVE_INSTANTIATE(ThermalLinkSettings)
+	NSI_LIVE_INSTANTIATE(AirlockCycleSettings)
+	NSI_LIVE_INSTANTIATE(CrewSettings)
+	NSI_LIVE_INSTANTIATE(WaterCollectorSettings)
+	NSI_LIVE_INSTANTIATE(WaterTreatmentSettings)
+	NSI_LIVE_INSTANTIATE(ElectrolyzerSettings)
+	NSI_LIVE_INSTANTIATE(Co2CaptureSettings)
+	NSI_LIVE_INSTANTIATE(FuelCellSettings)
+	NSI_LIVE_INSTANTIATE(SabatierReactorSettings)
+	NSI_LIVE_INSTANTIATE(MethaneProcessorSettings)
+	NSI_LIVE_INSTANTIATE(MicrobialProcessorSettings)
+	NSI_LIVE_INSTANTIATE(ThermalBufferSettings)
+	NSI_LIVE_INSTANTIATE(CropPopulationSettings)
+	NSI_LIVE_INSTANTIATE(AlgaeCultureSettings)
+	NSI_LIVE_INSTANTIATE(MaintenanceJobSettings)
 }

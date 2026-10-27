@@ -8,7 +8,7 @@ namespace station_test {
 ReferenceFixture const& bundledStationReference()
 {
     static auto const fixture = [] {
-        auto const path = std::filesystem::path(PF_SMOKE_SHARED_SOURCE_ROOT)
+        auto const path = std::filesystem::path(NSI_SMOKE_SHARED_SOURCE_ROOT)
             / "resources/station-systems/reference-station.yaml";
         std::ifstream file(path, std::ios::binary);
         if (!file) throw std::runtime_error("Missing Station fixture: " + path.string());

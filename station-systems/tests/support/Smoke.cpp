@@ -21,7 +21,7 @@ namespace smoke
 		std::random_device random;
 		for (unsigned attempt = 0; attempt < 100; ++attempt)
 		{
-			auto candidate = parent / ("pf-smoke-" + std::to_string(random()) + "-" + std::to_string(random()));
+			auto candidate = parent / ("nsi-smoke-" + std::to_string(random()) + "-" + std::to_string(random()));
 			// Atomic creation, not a check-then-create race, establishes ownership.
 			if (std::filesystem::create_directory(candidate))
 			{
@@ -60,9 +60,9 @@ namespace smoke
 		require(!relative.empty() && !relative.has_root_path(), "Fixture path must be repository-relative");
 		for (auto const& component : relative)
 			require(component != "..", "Fixture path must not escape the repository root");
-		auto const shared = std::filesystem::path(PF_SMOKE_SHARED_SOURCE_ROOT) / relative;
+		auto const shared = std::filesystem::path(NSI_SMOKE_SHARED_SOURCE_ROOT) / relative;
 		auto const path = std::filesystem::is_regular_file(shared)
-			? shared : std::filesystem::path(PF_SMOKE_SOURCE_ROOT) / relative;
+			? shared : std::filesystem::path(NSI_SMOKE_SOURCE_ROOT) / relative;
 		require(std::filesystem::is_regular_file(path), "Missing required fixture: " + path.string());
 		return path;
 	}

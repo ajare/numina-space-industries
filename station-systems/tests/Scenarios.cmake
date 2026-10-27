@@ -13,8 +13,8 @@ add_executable(station-scenario-consumer
 target_link_libraries(station-scenario-consumer PRIVATE StationSystems::StationSystems)
 target_include_directories(station-scenario-consumer PRIVATE support scenarios)
 target_compile_definitions(station-scenario-consumer PRIVATE
-    PF_SMOKE_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../.."
-    PF_SMOKE_SHARED_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../..")
+    NSI_SMOKE_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    NSI_SMOKE_SHARED_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../..")
 foreach(check IN ITEMS
     invariance
     invarianceRegistry

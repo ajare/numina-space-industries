@@ -62,8 +62,8 @@ set_tests_properties(station-library-authoring PROPERTIES
 add_executable(station-configuration-consumer ConfigurationConsumer.cpp)
 # The standalone build-and-test entry point builds all public API consumers.
 add_dependencies(station-configuration-consumer station-public-header-checks station-step-timing-consumer station-scenario-consumer station-command-consumer station-persistence-consumer station-authoring-consumer station-runtime-consumer station-reporting-consumer)
-if(TARGET pf-serialization-consumer)
-    add_dependencies(station-configuration-consumer pf-serialization-consumer)
+if(TARGET nsi-serialization-consumer)
+    add_dependencies(station-configuration-consumer nsi-serialization-consumer)
 endif()
 # Deliberately only the public target: no parent includes, helpers or core.
 target_link_libraries(station-configuration-consumer PRIVATE StationSystems::StationSystems)

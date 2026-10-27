@@ -5,7 +5,7 @@ FetchContent_Declare(lua
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(lua)
-add_library(pf-lua STATIC
+add_library(nsi-lua STATIC
     "${lua_SOURCE_DIR}/src/lapi.c"
     "${lua_SOURCE_DIR}/src/lauxlib.c"
     "${lua_SOURCE_DIR}/src/lbaselib.c"
@@ -39,12 +39,12 @@ add_library(pf-lua STATIC
     "${lua_SOURCE_DIR}/src/lvm.c"
     "${lua_SOURCE_DIR}/src/lzio.c"
 )
-target_include_directories(pf-lua SYSTEM PUBLIC "${lua_SOURCE_DIR}/src")
-target_compile_definitions(pf-lua PRIVATE
+target_include_directories(nsi-lua SYSTEM PUBLIC "${lua_SOURCE_DIR}/src")
+target_compile_definitions(nsi-lua PRIVATE
     $<$<PLATFORM_ID:Linux>:LUA_USE_POSIX>
     $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
 )
-set_target_properties(pf-lua PROPERTIES
+set_target_properties(nsi-lua PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_STANDARD 11
     C_STANDARD_REQUIRED YES
@@ -52,5 +52,5 @@ set_target_properties(pf-lua PROPERTIES
 )
 
 if(UNIX)
-    target_link_libraries(pf-lua PUBLIC ${CMAKE_DL_LIBS} m)
+    target_link_libraries(nsi-lua PUBLIC ${CMAKE_DL_LIBS} m)
 endif()

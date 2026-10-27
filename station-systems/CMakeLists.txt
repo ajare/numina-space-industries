@@ -19,14 +19,14 @@ if(NOT TARGET Promethium::Serialization)
     add_subdirectory(../serialization "${CMAKE_CURRENT_BINARY_DIR}/serialization")
 endif()
 
-if(NOT TARGET pf-lua)
+if(NOT TARGET nsi-lua)
     include(cmake/Lua.cmake)
 endif()
 
 # The library owns its default script and invalidates embedding on source edits.
-set(PF_STATION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/lifecycle.lua")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PF_STATION_SOURCE}")
-file(READ "${PF_STATION_SOURCE}" PF_STATION_SYSTEMS_LUA)
+set(NSI_STATION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/lifecycle.lua")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${NSI_STATION_SOURCE}")
+file(READ "${NSI_STATION_SOURCE}" NSI_STATION_SYSTEMS_LUA)
 configure_file(src/BundledStationSystemsSource.h.in
     "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationSystemsSource.h" @ONLY)
 
@@ -85,7 +85,7 @@ add_library(StationSystems::StationSystems ALIAS StationSystems)
 target_compile_features(StationSystems PUBLIC cxx_std_20)
 # The shared source-level script support headers include lua.hpp. Consumers
 # must receive that requirement through the public target too.
-target_link_libraries(StationSystems PUBLIC Promethium::Serialization pf-lua)
+target_link_libraries(StationSystems PUBLIC Promethium::Serialization nsi-lua)
 target_include_directories(StationSystems PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
