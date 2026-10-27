@@ -48,6 +48,10 @@ endif()
 
 add_executable(editor src/main.cpp)
 target_compile_features(editor PRIVATE cxx_std_20)
+# Binaries land under bin/<platform>/<config>, matching the sibling
+# Promethium application's output layout.
+set_target_properties(editor PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/x64/$<CONFIG>")
 if(MSVC)
     target_compile_options(editor PRIVATE /W3 /permissive-)
 else()
