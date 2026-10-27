@@ -26,6 +26,12 @@ solid block of material. Rooms, walls, and equipment are separate concepts.
 **Void**:
 The Cell state indicating empty space with no station floor at that position.
 
+**Paint Stroke**:
+One continuous pointer gesture over a Deck; a click is a stroke of one
+Cell. Its painted state is fixed when the stroke begins, as the opposite of
+the starting Cell's state, and the whole stroke is one undo step however
+many Cells it crosses.
+
 **Editor**:
 The standalone GUI application in this repository (`editor/`) that hosts
 dockable panels over a shared frame (menubar, toolbar, statusbar). Not to be

@@ -6,7 +6,7 @@
 // central node. The Editor panel edits the active session's Deck geometry
 // and the Overview previews that same live geometry. All editing behaviour
 // lives in the headless station::editor::EditorSession; this file only
-// draws and forwards input.
+// draws, forwards input, and owns the undo/redo hotkeys.
 
 #include "imgui.h"
 #include "imgui_internal.h"  // DockBuilder* (initial dock layout) is internal API
@@ -162,6 +162,16 @@ int main() {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
+        // Undo/redo hotkeys, handled here rather than as menu shortcuts so
+        // one press fires exactly one step whether or not the Edit menu is
+        // open (a MenuItem shortcut would fire again from the menu).
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+            session.undo();
+        }
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
+            session.redo();
+        }
+
         // --- Host frame: menubar + toolbar + dockspace + statusbar ----------
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -184,6 +194,19 @@ int main() {
                 ImGui::Separator();
                 if (ImGui::MenuItem("Exit")) {
                     running = false;
+                }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Edit")) {
+                // The chord is spelled out in the label: passing it as the
+                // shortcut would register a second handler for it.
+                if (ImGui::MenuItem("Undo  (Ctrl+Z)", nullptr, false,
+                                   session.canUndo())) {
+                    session.undo();
+                }
+                if (ImGui::MenuItem("Redo  (Ctrl+Y)", nullptr, false,
+                                   session.canRedo())) {
+                    session.redo();
                 }
                 ImGui::EndMenu();
             }
@@ -251,8 +274,30 @@ int main() {
             panel->DockNode != nullptr) {
             panel->DockNode->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
         }
-        if (const auto clicked = drawDeckGrid("DeckGrid", deck); clicked) {
-            session.toggleCell(0, clicked->x, clicked->y);
+        // Pointer phases drive the session's gestures: a press opens a
+        // stroke whose paint state is the opposite of the Cell it started
+        // on, dragging paints every Cell it visits, and the release
+        // commits the whole gesture as one undo step.
+        const DeckPointerEvent pointer = drawDeckGrid("DeckGrid", deck);
+        switch (pointer.phase) {
+            case DeckPointerPhase::Press:
+                if (pointer.cell.has_value()) {
+                    // The press paints its own Cell, so a click with no
+                    // drag is a one-Cell gesture.
+                    session.beginStroke(0, pointer.cell->x, pointer.cell->y);
+                    session.paintStroke(pointer.cell->x, pointer.cell->y);
+                }
+                break;
+            case DeckPointerPhase::Drag:
+                if (pointer.cell.has_value()) {
+                    session.paintStroke(pointer.cell->x, pointer.cell->y);
+                }
+                break;
+            case DeckPointerPhase::Release:
+                session.endStroke();
+                break;
+            case DeckPointerPhase::None:
+                break;
         }
         ImGui::End();
 

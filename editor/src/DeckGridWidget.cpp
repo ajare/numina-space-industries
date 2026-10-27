@@ -25,8 +25,10 @@ std::optional<DeckCellCoord> cellAt(const ImVec2& origin, float cell,
     if (point.x < origin.x || point.y < origin.y) {
         return std::nullopt;
     }
-    const std::uint32_t x = static_cast<std::uint32_t>((point.x - origin.x) / cell);
-    const std::uint32_t y = static_cast<std::uint32_t>((point.y - origin.y) / cell);
+    const std::uint32_t x =
+        static_cast<std::uint32_t>((point.x - origin.x) / cell);
+    const std::uint32_t y =
+        static_cast<std::uint32_t>((point.y - origin.y) / cell);
     if (!deck.contains(x, y)) {
         return std::nullopt;
     }
@@ -35,8 +37,10 @@ std::optional<DeckCellCoord> cellAt(const ImVec2& origin, float cell,
 
 }  // namespace
 
-std::optional<DeckCellCoord> drawDeckGrid(const char* id,
-                                        const station::editor::Deck& deck) {
+DeckPointerEvent drawDeckGrid(const char* id,
+                             const station::editor::Deck& deck) {
+    DeckPointerEvent event;
+
     const float available_width = ImGui::GetContentRegionAvail().x;
     const float columns =
         static_cast<float>(std::max<std::uint32_t>(1, deck.width()));
@@ -73,31 +77,43 @@ std::optional<DeckCellCoord> drawDeckGrid(const char* id,
     draw->AddRect(origin, ImVec2(origin.x + grid_size.x, origin.y + grid_size.y),
                  ImGui::GetColorU32(ImGuiCol_Border));
 
-    std::optional<DeckCellCoord> hovered;
-    std::optional<DeckCellCoord> toggled;
-    if (ImGui::IsItemHovered()) {
-        hovered = cellAt(origin, cell, deck, ImGui::GetIO().MousePos);
-        if (hovered.has_value()) {
-            const ImVec2 a(origin.x + cell * static_cast<float>(hovered->x),
-                          origin.y + cell * static_cast<float>(hovered->y));
-            draw->AddRectFilled(a, ImVec2(a.x + cell, a.y + cell),
-                               IM_COL32(255, 255, 255, 46));
-        }
-    }
-    if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-        toggled = cellAt(origin, cell, deck, ImGui::GetIO().MousePos);
+    const ImGuiIO& io = ImGui::GetIO();
+    const std::optional<DeckCellCoord> under =
+        cellAt(origin, cell, deck, io.MousePos);
+
+    if (ImGui::IsItemHovered() && under.has_value()) {
+        const ImVec2 a(origin.x + cell * static_cast<float>(under->x),
+                      origin.y + cell * static_cast<float>(under->y));
+        draw->AddRectFilled(a, ImVec2(a.x + cell, a.y + cell),
+                           IM_COL32(255, 255, 255, 46));
     }
 
-    if (hovered.has_value()) {
+    // The press is reported on activation, the drag while this widget still
+    // holds the mouse, and the release globally so a stroke always ends even
+    // if the button came up after the pointer left the grid.
+    if (ImGui::IsItemActivated()) {
+        event.phase = DeckPointerPhase::Press;
+        event.cell = under;
+    } else if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        event.phase = DeckPointerPhase::Drag;
+        event.cell = under;
+    } else if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        event.phase = DeckPointerPhase::Release;
+        event.cell = under;
+    }
+
+    const std::optional<DeckCellCoord> readout =
+        ImGui::IsItemHovered() ? under : std::nullopt;
+    if (readout.has_value()) {
         const station::editor::CellState state =
-            deck.cell(hovered->x, hovered->y);
-        ImGui::Text("Cell (%u, %u): %s", hovered->x, hovered->y,
+            deck.cell(readout->x, readout->y);
+        ImGui::Text("Cell (%u, %u): %s", readout->x, readout->y,
                    state == station::editor::CellState::Filled ? "Filled"
                                                              : "Void");
     } else {
-        ImGui::Text("Click a Cell to toggle Filled / Void (%zu Filled of %zu)",
+        ImGui::Text("Click to toggle, drag to paint (%zu Filled of %zu)",
                    deck.filledCount(), deck.cellCount());
     }
 
-    return toggled;
+    return event;
 }

@@ -31,9 +31,13 @@ public:
     // Throw std::out_of_range when the index has no Deck.
     const Deck& deck(std::size_t index) const;
 
-    // Flip one Cell between Filled and Void. Cell-level editing is allowed;
-    // the Deck collection itself (its size, order, and dimensions) is not.
+    // Set one Cell's state. Cell-level editing is allowed; the Deck
+    // collection itself (its size, order, and dimensions) is not.
     // Throw std::out_of_range for an unknown Deck or coordinate.
+    void setCell(std::size_t deck_index, std::uint32_t x, std::uint32_t y,
+                CellState state);
+
+    // Flip one Cell between Filled and Void.
     void toggleCell(std::size_t deck_index, std::uint32_t x, std::uint32_t y);
 
     bool operator==(const SpaceStation&) const = default;
