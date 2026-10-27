@@ -43,6 +43,12 @@ void buildInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size) {
     ImGuiID right = 0;
     ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, ratio, &left, &right);
 
+    // The left panel renders as a plain window: its dock node never shows a
+    // tab bar, so the content fills the node directly.
+    if (ImGuiDockNode* left_node = ImGui::DockBuilderGetNode(left)) {
+        left_node->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
+    }
+
     ImGui::DockBuilderDockWindow(kPanelTitle, left);
     ImGui::DockBuilderFinish(dockspace_id);
 }
@@ -174,6 +180,12 @@ int main() {
         // p_open is null, so the panel has no close button and cannot be
         // closed into an empty application.
         ImGui::Begin(kPanelTitle);
+        // Layouts restored from an older imgui.ini may still carry a tab bar;
+        // re-assert the flag so the panel always renders as a plain window.
+        if (ImGuiWindow* panel = ImGui::GetCurrentWindow();
+            panel->DockNode != nullptr) {
+            panel->DockNode->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
+        }
         ImGui::End();
 
         ImGui::Render();
