@@ -21,6 +21,7 @@ constexpr int kInitialWindowWidth = 1280;
 constexpr int kInitialWindowHeight = 800;
 constexpr float kInitialLeftDockWidthPx = 500.0f;
 constexpr const char* kPanelTitle = "Editor";
+constexpr const char* kOverviewTitle = "Overview";
 
 // ImGui loads imgui.ini during the first NewFrame(), so the presence of a saved
 // layout must be sampled before then. When one exists it wins over the built-in
@@ -168,6 +169,22 @@ int main() {
                 dockspace_id,
                 ImVec2(avail.x, avail.y - statusbar_reserve));
         }
+        // The Overview window claims the right-hand (central) node, which
+        // keeps its tab bar: future panels docked alongside join as further
+        // tabs. A tree restored from ini only learns its central node during
+        // the first docking update pass, so the claim is retried until it
+        // lands. Once window settings record the dock, the claim is done and
+        // a user-arranged layout survives restarts.
+        if (ImGui::FindWindowSettingsByID(ImHashStr(kOverviewTitle)) ==
+            nullptr) {
+            if (ImGuiDockNode* central =
+                    ImGui::DockBuilderGetCentralNode(dockspace_id)) {
+                ImGui::DockBuilderDockWindow(kOverviewTitle, central->ID);
+            }
+        }
+        const bool overview_ready =
+            ImGui::FindWindowSettingsByID(ImHashStr(kOverviewTitle)) !=
+            nullptr;
         first_frame = false;
         ImGui::DockSpace(dockspace_id, ImVec2(0.0f, -statusbar_reserve),
                         ImGuiDockNodeFlags_None);
@@ -187,6 +204,16 @@ int main() {
             panel->DockNode->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
         }
         ImGui::End();
+
+        // --- The Overview panel --------------------------------------------
+        // Docked right in the tabbed central node: its tab shows now, and
+        // more tabs appear as further panels join the node. Created only
+        // once the dock claim has landed, so it never flashes floating.
+        // p_open is null: the tab carries no close button.
+        if (overview_ready) {
+            ImGui::Begin(kOverviewTitle);
+            ImGui::End();
+        }
 
         ImGui::Render();
         int drawable_width = 0;
