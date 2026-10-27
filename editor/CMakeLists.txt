@@ -1,6 +1,11 @@
-# The Editor: a standalone imgui application shell. It deliberately links
-# nothing from station-systems or serialization; it is a host for future
-# dockable panels.
+# The Editor: a standalone imgui application shell plus the headless
+# document/session seam it edits through. It still links nothing from
+# station-systems or serialization; the document library below is the only
+# editing logic it depends on.
+
+# Headless Space Station -> Deck -> Cell model and session commands, shared
+# by this application and its CTest consumer (see document/CMakeLists.txt).
+add_subdirectory(document)
 
 include(FetchContent)
 
@@ -48,6 +53,7 @@ endif()
 
 add_executable(editor
     src/main.cpp
+    src/DeckGridWidget.cpp
     src/OverviewRenderer.cpp
 )
 target_compile_features(editor PRIVATE cxx_std_20)
@@ -65,6 +71,7 @@ else()
     target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 target_link_libraries(editor PRIVATE
+    editor::document
     editor::imgui
     SDL2::SDL2-static
     ext::mpp

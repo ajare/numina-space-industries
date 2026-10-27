@@ -16,6 +16,8 @@
 #include <mpp/helper/LineBatchRenderer.h>
 #include <mpp/mesh/VertexTypeSpecification.h>
 
+#include "station/editor/SpaceStation.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -27,9 +29,12 @@ public:
     // Call after the OpenGL context is current.
     void initialise(std::size_t width, std::size_t height);
 
-    // Renders the 16x16 grid into the offscreen target (created or
-    // resized on demand) and returns the GL texture id for ImGui::Image.
-    std::uint32_t render(std::size_t width, std::size_t height);
+    // Renders the station's current geometry into the offscreen target
+    // (created or resized on demand) and returns the GL texture id for
+    // ImGui::Image. The grid frame follows the Deck's own dimensions, so
+    // the preview tracks what the Editor panel is editing.
+    std::uint32_t render(std::size_t width, std::size_t height,
+                        const station::editor::SpaceStation& station);
 
     // Releases all GPU resources. Must run before the GL context dies.
     void shutdown();
@@ -40,6 +45,10 @@ private:
         float y0;
         float x1;
         float y1;
+        std::uint8_t red;
+        std::uint8_t green;
+        std::uint8_t blue;
+        std::uint8_t alpha;
     };
 
     using Float = mpp::mesh::DataTypeFloat;
@@ -65,11 +74,11 @@ private:
 
         void colour(std::uint32_t index, std::uint8_t& red, std::uint8_t& green,
                     std::uint8_t& blue, std::uint8_t& alpha) override {
-            static_cast<void>(index);
-            red = 150;
-            green = 160;
-            blue = 170;
-            alpha = 255;
+            const Line& line = mLines.at(index);
+            red = line.red;
+            green = line.green;
+            blue = line.blue;
+            alpha = line.alpha;
         }
 
         mpp::Colour diffuse() override { return mpp::Colour::White; }
@@ -83,8 +92,11 @@ private:
         std::vector<Line> mLines;
     };
 
-    static std::vector<Line> buildGridLines(std::size_t width,
-                                           std::size_t height);
+    // Grid frame plus one outlined plate per Filled Cell, in the station's
+    // current states.
+    static std::vector<Line> buildSceneLines(
+        const station::editor::SpaceStation& station, std::size_t width,
+        std::size_t height);
 
     std::unique_ptr<mpp::Logger> mMppLogger;
     std::unique_ptr<mpp::RenderSystem> mRenderSystem;

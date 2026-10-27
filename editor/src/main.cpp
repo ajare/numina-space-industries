@@ -1,8 +1,12 @@
 // Editor application shell.
 //
-// A full-viewport host frame owns the menubar (File > Exit), an empty toolbar
-// strip and a "Ready" statusbar; a DockSpace between them holds the single
-// "Editor" panel docked to the left. The only functionality is exiting.
+// A full-viewport host frame owns the menubar (File > New, Exit), an empty
+// toolbar strip and a "Ready" statusbar; a DockSpace between them holds the
+// single "Editor" panel docked to the left and the "Overview" tab in the
+// central node. The Editor panel edits the active session's Deck geometry
+// and the Overview previews that same live geometry. All editing behaviour
+// lives in the headless station::editor::EditorSession; this file only
+// draws and forwards input.
 
 #include "imgui.h"
 #include "imgui_internal.h"  // DockBuilder* (initial dock layout) is internal API
@@ -10,7 +14,11 @@
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_opengl3_loader.h"
 
+#include "DeckGridWidget.h"
 #include "OverviewRenderer.h"
+
+#include "station/editor/EditorSession.h"
+#include "station/editor/SpaceStation.h"
 
 #include <SDL.h>
 
@@ -134,6 +142,9 @@ int main() {
 
     bool running = true;
     bool first_frame = true;
+    // The one headless editing session: the GUI holds no geometry of its
+    // own, it only renders and drives what the session reports.
+    station::editor::EditorSession session;
 
     while (running) {
         SDL_Event event;
@@ -167,6 +178,10 @@ int main() {
 
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("New")) {
+                    session.newDocument();
+                }
+                ImGui::Separator();
                 if (ImGui::MenuItem("Exit")) {
                     running = false;
                 }
@@ -217,10 +232,16 @@ int main() {
                         ImGuiDockNodeFlags_None);
 
         ImGui::Separator();
-        ImGui::TextUnformatted("Ready");
+        ImGui::Text("Ready - %zu of %zu Cells Filled",
+                   session.station().deck(0).filledCount(),
+                   session.station().deck(0).cellCount());
         ImGui::End();
 
         // --- The Editor panel ----------------------------------------------
+        // The active session's Deck, drawn top-down and clickable. The panel
+        // reads geometry from the session and sends clicks back to it; it
+        // never keeps a copy of its own.
+        const station::editor::Deck& deck = session.station().deck(0);
         // p_open is null, so the panel has no close button and cannot be
         // closed into an empty application.
         ImGui::Begin(kPanelTitle);
@@ -229,6 +250,9 @@ int main() {
         if (ImGuiWindow* panel = ImGui::GetCurrentWindow();
             panel->DockNode != nullptr) {
             panel->DockNode->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
+        }
+        if (const auto clicked = drawDeckGrid("DeckGrid", deck); clicked) {
+            session.toggleCell(0, clicked->x, clicked->y);
         }
         ImGui::End();
 
@@ -245,7 +269,7 @@ int main() {
             const auto grid_height = static_cast<std::size_t>(
                 std::max(1.0f, std::floor(available.y)));
             const std::uint32_t texture_id =
-                overview.render(grid_width, grid_height);
+                overview.render(grid_width, grid_height, session.station());
             ImGui::Image(
                 reinterpret_cast<ImTextureID>(
                     static_cast<std::uintptr_t>(texture_id)),
