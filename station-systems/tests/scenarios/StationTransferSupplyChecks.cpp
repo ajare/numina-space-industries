@@ -1,0 +1,537 @@
+#include "StationScenarioRig.h"
+#include "Smoke.h"
+#include "NotificationOccurrenceChecks.h"
+
+#include <algorithm>
+#include <string>
+
+namespace
+{
+	using namespace smoke::station;
+	using ::station::AlertSeverity;
+	using ::station::StationSupplyMode;
+	using ::station::StationSupplyTransferSnapshot;
+
+	char const* kTransferMetric = "supply-transfer";
+
+	::station::StationBusPowerSnapshot const& bus(::station::StationSystemsSnapshot const& s, std::string_view id)
+	{
+		auto found = std::find_if(s.power.buses.begin(), s.power.buses.end(),
+			[&](auto const& b) { return b.busId == id; });
+		require(found != s.power.buses.end(), "missing bus snapshot");
+		return *found;
+	}
+	StationSupplyTransferSnapshot const& transfer(::station::StationSystemsSnapshot const& s, std::string_view id)
+	{
+		auto found = std::find_if(s.power.supplyTransfers.begin(), s.power.supplyTransfers.end(),
+			[&](auto const& t) { return t.loadId == id; });
+		require(found != s.power.supplyTransfers.end(), "missing transfer snapshot");
+		return *found;
+	}
+	::station::StationAlertSnapshot const* transferAlert(::station::StationSystemsSnapshot const& s)
+	{
+		auto found = std::find_if(s.activeAlerts.begin(), s.activeAlerts.end(),
+			[](auto const& a) { return a.metric == kTransferMetric; });
+		return found == s.activeAlerts.end() ? nullptr : &*found;
+	}
+	void near(double actual, double expected, char const* message)
+	{
+		require(std::abs(actual - expected) < 1e-8,
+			(std::string(message) + ": actual=" + std::to_string(actual)
+				+ ", expected=" + std::to_string(expected)).c_str());
+	}
+	void is(std::string const& actual, std::string_view expected, char const* message)
+	{
+		require(actual == expected,
+			(std::string(message) + ": actual='" + actual + "', expected='" + std::string(expected) + "'").c_str());
+	}
+
+	// Two independently-solar-fed buses and one Transfer-mode load whose
+	// primary is `main` and whose backup is `backup`. Nothing else is on
+	// either bus, so every kilowatt in the accounts below belongs to this
+	// one switch and can be asserted exactly.
+	::station::StationSystemsSettings transferRig(double dwellSeconds = 30.0,
+		double primaryKW = 20.0, double backupKW = 20.0)
+	{
+		::station::StationSystemsSettings s;
+		s.enabled = true;
+		s.systemsStepWorldTicks = 1;
+		s.powerBuses = {{"main", "Main", 100, 0}, {"backup", "Backup", 100, 0}};
+		for (auto const& [id, kw] : {std::pair{"main", primaryKW}, {"backup", backupKW}})
+		{
+			::station::SolarArraySettings array;
+			array.id = std::string("solar-") + id;
+			array.capacityKW = kw;
+
+			array.busIds = {id};
+			s.solarArrays.push_back(array);
+		}
+		::station::EquipmentLoadSettings lab;
+		lab.id = "lab";
+		lab.electricalDemandKW = 8;
+		lab.operatingProfile.constantLevel = 1;
+		lab.thermalClass = "moderate";
+		lab.maxCurtailment = 1;
+		lab.supplyMode = StationSupplyMode::Transfer;
+		lab.supplyBusIds = {"main", "backup"};
+		lab.transferReturnDwellSeconds = dwellSeconds;
+		s.equipmentLoads.push_back(lab);
+		return s;
+	}
+
+	void restorePrimary(::station::StationSystemsRuntime& runtime, double kw = 20.0)
+	{
+		require(runtime.updateNode<::station::SolarArraySettings>("solar-main",
+			[&](auto& source) { source.capacityKW = kw; }), "primary source restore refused");
+	}
+
+	// #908: configure the consumer cables, not the solar feeders. Transfer
+	// decisions compare delivered service; dispatch still requests gross input.
+	::station::StationSystemsSettings lossyRig(double primaryEta, double backupEta)
+	{
+		auto s = transferRig(4);
+		::station::StationSystemsRuntime topology(s, 1.0f);
+		unsigned cables = 0;
+		for (auto const& flow : topology.snapshot().power.connections)
+			if (!flow.source && flow.key.ownerType == "Equipment" && flow.key.ownerId == "lab")
+			{
+				s.connections[flow.key].efficiency = flow.busId == "main" ? primaryEta : backupEta;
+				++cables;
+			}
+		require(cables == 2, "lossy rig did not configure both consumer cables");
+		return s;
+	}
+
+	void lossyPrimary(smoke::Context const&)
+	{
+		for (auto const& [primaryEta, backupEta] : {std::pair{0.5, 1.0}, {1.0, 0.5}, {0.5, 0.25}})
+		{
+			::station::StationSystemsRuntime runtime(lossyRig(primaryEta, backupEta), 1.0f);
+			require(runtime.advanceTo(5), "lossy primary reproduction failed");
+			auto const snap = runtime.snapshot();
+			require(!transfer(snap, "lab").onBackup, "sufficient lossy primary triggered transfer");
+			require(transfer(snap, "lab").eventAtSimSeconds < 0, "sufficient primary published a switch event");
+			near(bus(snap, "main").suppliedKW, 8, "lossy primary delivered service wrong");
+			near(bus(snap, "backup").suppliedKW, 0, "unused backup supplied service");
+			near(snap.power.dispatchDemandKW, 8 / primaryEta, "dispatch lost gross cable demand");
+		}
+	}
+
+	void lossyCycles(smoke::Context const&)
+	{
+		for (auto const& [primaryEta, backupEta] : {std::pair{0.5, 1.0}, {1.0, 0.5}, {0.5, 0.25}})
+		{
+			auto s = lossyRig(primaryEta, backupEta);
+			// Even the least efficient backup must be able to carry all 8 kW.
+			s.solarArrays[1].capacityKW = 40;
+			::station::StationSystemsRuntime runtime(s, 1.0f);
+			require(runtime.advanceTo(5), "lossy cycle baseline failed");
+			for (unsigned cycle = 0; cycle < 3; ++cycle)
+			{
+				double const start = 5 + cycle * 12;
+				// A real, nonzero shortfall at the consumer boundary: 7.5 < 8.
+				restorePrimary(runtime, 7.5 / primaryEta);
+				require(runtime.advanceTo(start + 1), "lossy shortfall failed");
+				auto snap = runtime.snapshot();
+				require(transfer(snap, "lab").onBackup, "true lossy shortfall did not transfer");
+				near(transfer(snap, "lab").eventAtSimSeconds, start, "lossy failover instant wrong");
+				near(bus(snap, "main").suppliedKW, 0, "failed primary retained partial service");
+				near(bus(snap, "backup").suppliedKW, 8, "lossy backup did not serve whole load");
+				near(snap.power.dispatchDemandKW, 8 / backupEta, "backup gross dispatch demand wrong");
+				restorePrimary(runtime);
+				require(runtime.advanceTo(start + 5), "lossy return dwell failed");
+				snap = runtime.snapshot();
+				require(transfer(snap, "lab").onBackup, "lossy primary returned before dwell");
+				near(transfer(snap, "lab").primaryCapableSeconds, 4, "lossy primary dwell did not accumulate");
+				require(runtime.advanceTo(start + 6), "lossy return failed");
+				snap = runtime.snapshot();
+				require(!transfer(snap, "lab").onBackup, "lossy primary failed to return after dwell");
+				near(transfer(snap, "lab").eventAtSimSeconds, start + 5, "lossy return instant wrong");
+				near(bus(snap, "main").suppliedKW, 8, "returned lossy primary service wrong");
+				near(bus(snap, "backup").suppliedKW, 0, "returned load still drew backup power");
+				near(snap.power.dispatchDemandKW, 8 / primaryEta, "returned gross dispatch demand wrong");
+				require(runtime.advanceTo(start + 12), "lossy repeated hold failed");
+				snap = runtime.snapshot();
+				require(!transfer(snap, "lab").onBackup, "serving cable change caused spurious transfer");
+				near(transfer(snap, "lab").eventAtSimSeconds, start + 5, "spurious switch during steady hold");
+			}
+		}
+	}
+
+	void contention(smoke::Context const&)
+	{
+		for (auto const protectedDemand : {false, true})
+		{
+			auto s = transferRig(4, 10, 20);
+			auto single = s.equipmentLoads.front();
+			single.id = "single";
+			single.supplyMode = StationSupplyMode::Single;
+			single.supplyBusIds = {"main"};
+			single.priority = protectedDemand ? -100 : 100;
+			single.criticalFloorKW = protectedDemand ? 8 : 0;
+			s.equipmentLoads.front().priority = 0;
+			s.equipmentLoads.push_back(single);
+			::station::StationSystemsRuntime runtime(s, 1.0f);
+			require(runtime.advanceTo(5), "contention drive failed");
+			auto snap = runtime.snapshot();
+			require(transfer(snap, "lab").onBackup, "competing primary demand did not trigger failover");
+			near(bus(snap, "main").suppliedKW, 8, "Single service lost during failover");
+			near(bus(snap, "backup").suppliedKW, 8, "backup did not take whole Transfer load");
+			near(bus(snap, "main").unmetKW, 0, "primary contention remained unmet");
+			require(runtime.advanceTo(20), "contention dwell drive failed");
+			require(transfer(runtime.snapshot(), "lab").onBackup, "return ignored competing demand");
+		}
+	}
+
+	void multipleContention(smoke::Context const&)
+	{
+		for (auto const reverse : {false, true})
+		{
+			auto s = transferRig(0, 10, 20);
+			auto high = s.equipmentLoads.front();
+			high.id = "high";
+			high.priority = 100;
+			s.equipmentLoads.front().priority = 0;
+			s.equipmentLoads.push_back(high);
+			if (reverse) std::reverse(s.equipmentLoads.begin(), s.equipmentLoads.end());
+			::station::StationSystemsRuntime runtime(s, 1.0f);
+			require(runtime.advanceTo(10), "multiple contention drive failed");
+			auto const snap = runtime.snapshot();
+			require(!transfer(snap, "high").onBackup, "priority winner left primary");
+			require(transfer(snap, "lab").onBackup, "second Transfer reused primary budget");
+			near(bus(snap, "main").suppliedKW, 8, "priority winner not fully served");
+			near(bus(snap, "backup").suppliedKW, 8, "second Transfer not served whole");
+		}
+	}
+
+	void contentionDwell(smoke::Context const&)
+	{
+		auto s = transferRig(4, 10, 20);
+		auto single = s.equipmentLoads.front();
+		single.id = "single";
+		single.supplyMode = StationSupplyMode::Single;
+		single.supplyBusIds = {"main"};
+		single.priority = 100;
+		s.equipmentLoads.push_back(single);
+		::station::StationSystemsRuntime runtime(s, 1.0f);
+		require(runtime.advanceTo(5), "changing competition baseline failed");
+		auto setDemand = [&](double kw) {
+			require(runtime.updateNode<::station::EquipmentLoadSettings>("single",
+				[&](auto& load) { load.electricalDemandKW = kw; }), "competition update refused");
+		};
+		setDemand(0);
+		require(runtime.advanceTo(8), "competition release failed");
+		require(transfer(runtime.snapshot(), "lab").primaryCapableSeconds >= 2, "return dwell did not start");
+		setDemand(8);
+		require(runtime.advanceTo(11), "competition restoration failed");
+		require(transfer(runtime.snapshot(), "lab").onBackup, "competition did not interrupt return dwell");
+		near(transfer(runtime.snapshot(), "lab").primaryCapableSeconds, 0, "competition failed to reset dwell");
+		setDemand(0);
+		require(runtime.advanceTo(15), "renewed dwell failed");
+		require(transfer(runtime.snapshot(), "lab").onBackup, "returned before renewed dwell completed");
+		require(runtime.advanceTo(16), "renewed return failed");
+		require(!transfer(runtime.snapshot(), "lab").onBackup, "sustainable primary never reclaimed load");
+	}
+
+	void killPrimary(::station::StationSystemsRuntime& runtime)
+	{
+		require(runtime.updateNode<::station::SolarArraySettings>("solar-main",
+			[](auto& source) { source.capacityKW = 0; }), "primary source kill refused");
+	}
+
+	// Steady state: the load sits wholly on its primary and the backup carries
+	// nothing at all.
+	void holdsPrimary(smoke::Context const&)
+	{
+		::station::StationSystemsRuntime runtime(transferRig(), 1.0f);
+		require(runtime.advanceTo(5), "transfer baseline failed");
+		auto const snap = runtime.snapshot();
+		auto const& lab = transfer(snap, "lab");
+		require(!lab.onBackup, "Transfer load left its primary with a healthy primary");
+		is(lab.servingBusId, "main", "Transfer load not served by its primary");
+		is(lab.primaryBusId, "main", "published primary wrong");
+		is(lab.backupBusId, "backup", "published backup wrong");
+		near(lab.returnDwellSeconds, 30.0, "published return dwell wrong");
+		near(lab.primaryCapableSeconds, 0.0, "dwell clock ran while already on the primary");
+		require(lab.eventAtSimSeconds < 0.0, "transfer event published before any transfer");
+		near(bus(snap, "main").suppliedKW, 8.0, "primary did not carry the whole load");
+		near(bus(snap, "backup").suppliedKW, 0.0, "backup carried load before a failover");
+		require(transferAlert(snap) == nullptr, "transfer Alert raised with nothing transferred");
+	}
+
+	// The whole load moves in the same tick its primary goes short, the bus it
+	// leaves keeps nothing, and the move is recorded and announced.
+	void failover(smoke::Context const&)
+	{
+		::station::StationSystemsRuntime runtime(transferRig(), 1.0f);
+		require(runtime.advanceTo(5), "failover baseline failed");
+		killPrimary(runtime);
+		require(runtime.advanceTo(6), "failover drive failed");
+		auto const snap = runtime.snapshot();
+		auto const& lab = transfer(snap, "lab");
+		require(lab.onBackup, "primary shortfall did not transfer the load");
+		is(lab.servingBusId, "backup", "load not served by the backup after failover");
+		near(bus(snap, "backup").suppliedKW, 8.0, "backup did not take the whole load");
+		near(bus(snap, "main").suppliedKW, 0.0, "primary still carried part of a switched load");
+		near(bus(snap, "main").demandKW, 0.0, "switched load still demanded from its primary");
+		near(bus(snap, "main").unmetKW, 0.0, "failover left unmet on the bus the load left");
+		near(bus(snap, "backup").unmetKW, 0.0, "healthy backup reported unmet after failover");
+		// The switch moved at the instant its primary went short, not later.
+		near(lab.eventAtSimSeconds, 5.0, "transfer event sim time wrong");
+		is(lab.eventFromBusId, "main", "transfer event from-bus wrong");
+		is(lab.eventToBusId, "backup", "transfer event to-bus wrong");
+		// Announced on the Alert ledger as Advisory, carrying the route.
+		auto const* alert = transferAlert(snap);
+		require(alert != nullptr, "transfer not recorded on the Alert ledger");
+		require(alert->severity == AlertSeverity::Advisory, "transfer Alert is not Advisory");
+		is(alert->subjectType, "Equipment", "transfer Alert subject type wrong");
+		is(alert->subjectId, "lab", "transfer Alert subject id wrong");
+		near(alert->firedAtSeconds, 5.0, "transfer Alert sim time wrong");
+		is(alert->detail, "main -> backup", "transfer Alert route missing from the announcement");
+		// And on the event stream, where a scenario author reads it off.
+		require(std::any_of(runtime.events().begin(), runtime.events().end(),
+			[](auto const& e)
+			{
+				return e.category == "alert" && e.message.find("supply-transfer") != std::string::npos
+					&& e.message.find("main -> backup") != std::string::npos;
+			}), "transfer not announced on the event stream");
+	}
+
+	// #940: repeat both switch directions while older notifications are active.
+	void alertOccurrences(smoke::Context const&)
+	{
+		auto s = transferRig(0);
+		s.equipmentLoads.clear();
+		::station::AtmosphereSettings air; air.id = "room"; air.volumeM3 = 100;
+		air.thermalCapacityKJPerK = 100; air.startingNitrogenKg = 100;
+		air.minPressureKPa = 1; air.maxPressureKPa = 1000;
+		s.atmospheres = {air};
+		::station::LightingFixtureSettings light; light.id = "light"; light.atmosphereId = "room";
+		light.fixtureType.ratedKW = 8;
+		light.supplyMode = StationSupplyMode::Transfer;
+		light.supplyBusIds = {"main", "backup"};
+		light.transferReturnDwellSeconds = 0;
+		s.lightingFixtures = {light};
+		s.solarCycle.emplace().periodSeconds = 1000;
+		s.solarCycle->segments = {{0, 0}, {1, 1}, {2, 0}, {3, 1}};
+		s.solarArrays.pop_back();
+		::station::BatterySettings bank{"backup-bank", 1, 1, 1, 0, 20};
+		bank.busIds = {"backup"}; s.batteries = {bank};
+		::station::StationSystemsRuntime run(s, 1.0f);
+		checkNotificationOccurrences(run, kTransferMetric);
+	}
+
+	// Advisory, not latched: the Alert retires on its own fixed short window.
+	void alertAutoClears(smoke::Context const&)
+	{
+		::station::StationSystemsRuntime runtime(transferRig(), 1.0f);
+		require(runtime.advanceTo(5), "auto-clear baseline failed");
+		killPrimary(runtime);
+		require(runtime.advanceTo(6), "auto-clear failover failed");
+		require(transferAlert(runtime.snapshot()) != nullptr, "transfer Alert never raised");
+		require(runtime.advanceTo(64), "auto-clear drive failed");
+		require(transferAlert(runtime.snapshot()) != nullptr,
+			"transfer Alert cleared before its window had passed");
+		require(runtime.advanceTo(67), "auto-clear drive failed");
+		require(transferAlert(runtime.snapshot()) == nullptr, "transfer Alert did not auto-clear");
+		require(transfer(runtime.snapshot(), "lab").onBackup,
+			"auto-clearing the Alert moved the load back by itself");
+	}
+
+	// The load comes home only after the primary has held it whole for the
+	// full authored dwell - and then comes home exactly on the dwell.
+	void dwellReturn(smoke::Context const&)
+	{
+		::station::StationSystemsRuntime runtime(transferRig(30.0), 1.0f);
+		require(runtime.advanceTo(5), "dwell baseline failed");
+		killPrimary(runtime);
+		require(runtime.advanceTo(6), "dwell failover failed");
+		require(transfer(runtime.snapshot(), "lab").onBackup, "failover before dwell test failed");
+		// Primary comes back at t=6. It must hold the load for 30 s before the
+		// load returns, so the switch is due at t=36 and not one tick sooner.
+		restorePrimary(runtime);
+		require(runtime.advanceTo(36), "dwell drive failed");
+		require(transfer(runtime.snapshot(), "lab").onBackup,
+			"load returned to the primary before its dwell elapsed");
+		require(transfer(runtime.snapshot(), "lab").primaryCapableSeconds > 29.0,
+			"dwell clock not accumulating on a capable primary");
+		require(runtime.advanceTo(37), "return drive failed");
+		auto const snap = runtime.snapshot();
+		auto const& lab = transfer(snap, "lab");
+		require(!lab.onBackup, "load did not return once its dwell was satisfied");
+		is(lab.servingBusId, "main", "returned load not served by its primary");
+		near(lab.eventAtSimSeconds, 36.0, "return happened off the dwell boundary");
+		is(lab.eventFromBusId, "backup", "return event from-bus wrong");
+		is(lab.eventToBusId, "main", "return event to-bus wrong");
+		near(bus(snap, "main").suppliedKW, 8.0, "primary did not take the load back");
+		near(bus(snap, "backup").suppliedKW, 0.0, "backup still carried a returned load");
+	}
+
+	// A zero dwell means no wait: the load returns the first tick the primary
+	// can carry it.
+	void zeroDwell(smoke::Context const&)
+	{
+		::station::StationSystemsRuntime runtime(transferRig(0.0), 1.0f);
+		require(runtime.advanceTo(5), "zero-dwell baseline failed");
+		killPrimary(runtime);
+		require(runtime.advanceTo(6), "zero-dwell failover failed");
+		restorePrimary(runtime);
+		require(runtime.advanceTo(7), "zero-dwell return failed");
+		require(!transfer(runtime.snapshot(), "lab").onBackup,
+			"a zero dwell still made the load wait");
+		near(transfer(runtime.snapshot(), "lab").eventAtSimSeconds, 6.0, "zero-dwell return instant wrong");
+	}
+
+	// A primary that can carry the load only every other tick never gets to
+	// hold it for the dwell, so the switch never flaps.
+	void noFlapping(smoke::Context const&)
+	{
+		::station::StationSystemsRuntime runtime(transferRig(30.0), 1.0f);
+		require(runtime.advanceTo(5), "flap baseline failed");
+		killPrimary(runtime);
+		require(runtime.advanceTo(6), "flap failover failed");
+		// Marginal: the primary's local capacity recovers on alternate seconds.
+		for (int second = 7; second <= 120; ++second)
+		{
+			require(runtime.updateNode<::station::SolarArraySettings>("solar-main",
+				[second](auto& source) { source.capacityKW = second % 2 ? 8 : 0; }),
+				"marginal primary refused");
+			require(runtime.advanceTo(second), "flap drive failed");
+		}
+		auto const lab = transfer(runtime.snapshot(), "lab");
+		require(lab.onBackup, "a marginal primary flapped the load back onto the primary");
+		require(lab.primaryCapableSeconds < 30.0, "dwell survived a shortfall on the primary");
+		near(bus(runtime.snapshot(), "backup").suppliedKW, 8.0, "load stranded by a flapping primary");
+	}
+
+	// The backup cannot fully serve either: normal per-bus priority runs on
+	// the backup and the shortfall stays explicit rather than being hidden or
+	// chased back onto the primary.
+	void backupAlsoShort(smoke::Context const&)
+	{
+		::station::StationSystemsRuntime runtime(transferRig(30.0, 20.0, 5.0), 1.0f);
+		require(runtime.advanceTo(5), "short-backup baseline failed");
+		near(transfer(runtime.snapshot(), "lab").primaryCapableSeconds, 0.0, "baseline not on primary");
+		killPrimary(runtime);
+		require(runtime.advanceTo(6), "short-backup failover failed");
+		auto const snap = runtime.snapshot();
+		require(transfer(snap, "lab").onBackup, "failover onto a short backup refused");
+		near(bus(snap, "backup").suppliedKW, 5.0, "backup did not give all it had");
+		near(bus(snap, "backup").unmetKW, 3.0, "short backup hid the shortfall");
+		near(bus(snap, "main").suppliedKW, 0.0, "shortfall leaked back onto the failed primary");
+		// And it stays that way: the shortfall is a standing result, not a
+		// transient that walks the load somewhere else.
+		require(runtime.advanceTo(20), "short-backup hold failed");
+		near(bus(runtime.snapshot(), "backup").unmetKW, 3.0, "explicit unmet demand disappeared");
+		require(transfer(runtime.snapshot(), "lab").onBackup, "load wandered off a short backup");
+	}
+
+	// A transfer onto a backup that cannot serve at all leaves the load
+	// unmet on that backup. A third bus with a surplus right next to it must
+	// stay untouched: the switch has two positions, not three.
+	void noThirdPath(smoke::Context const&)
+	{
+		auto s = transferRig(30.0, 20.0, 0.0);
+		// A generous unrelated bus, sitting right there.
+		s.powerBuses.push_back({"spare", "Spare", 100, 0});
+		::station::SolarArraySettings spare;
+		spare.id = "solar-spare";
+		spare.capacityKW = 100;
+
+		spare.busIds = {"spare"};
+		s.solarArrays.push_back(spare);
+		::station::StationSystemsRuntime runtime(s, 1.0f);
+		require(runtime.advanceTo(5), "third-path baseline failed");
+		killPrimary(runtime);
+		require(runtime.advanceTo(6), "third-path failover failed");
+		auto const snap = runtime.snapshot();
+		require(transfer(snap, "lab").onBackup, "load did not transfer onto the dead backup");
+		near(bus(snap, "backup").suppliedKW, 0.0, "a dead backup supplied something");
+		near(bus(snap, "backup").unmetKW, 8.0, "the dead backup's shortfall is not explicit");
+		near(bus(snap, "spare").suppliedKW, 0.0, "the load found an implicit third path");
+		near(bus(snap, "spare").surplusKW, 100.0, "unrelated bus surplus was drawn down");
+		near(bus(snap, "main").suppliedKW, 0.0, "the failed primary picked the load back up");
+		// The dwell still gates the return, so a dead backup does not shake
+		// the load back onto a primary that has since recovered.
+		restorePrimary(runtime);
+		require(runtime.advanceTo(35), "third-path hold failed");
+		require(transfer(runtime.snapshot(), "lab").onBackup,
+			"a dead backup rushed the load back before its dwell");
+	}
+
+	// Every transfer decision is a pure function of settings, prior state
+	// and the tick's published values: the same script replays identically.
+	void replay(smoke::Context const&)
+	{
+		auto const script = [](::station::StationSystemsRuntime& runtime)
+		{
+			require(runtime.advanceTo(5), "replay baseline failed");
+			killPrimary(runtime);
+			require(runtime.advanceTo(10), "replay failover failed");
+			restorePrimary(runtime);
+			require(runtime.advanceTo(40), "replay dwell failed");
+			require(runtime.advanceTo(80), "replay hold failed");
+		};
+		::station::StationSystemsRuntime a(transferRig(), 1.0f), b(transferRig(), 1.0f);
+		script(a);
+		script(b);
+		require(a.snapshot().power == b.snapshot().power, "transfer state diverged across replays");
+		require(a.events() == b.events(), "transfer announcements diverged across replays");
+		require(!a.snapshot().power.supplyTransfers.empty(), "replay published no transfer state");
+		require(!a.snapshot().power.supplyTransfers[0].onBackup,
+			"replay did not complete its dwell-gated return");
+	}
+
+	// The dwell is per load, not station-wide: two loads on the same primary
+	// switch together but return on their own clocks.
+	void perLoadDwell(smoke::Context const&)
+	{
+		auto s = transferRig(30.0);
+		::station::EquipmentLoadSettings quick;
+		quick.id = "quick";
+		quick.electricalDemandKW = 2;
+		quick.operatingProfile.constantLevel = 1;
+		quick.thermalClass = "moderate";
+		quick.maxCurtailment = 1;
+		quick.supplyMode = StationSupplyMode::Transfer;
+		quick.supplyBusIds = {"main", "backup"};
+		quick.transferReturnDwellSeconds = 5.0;
+		s.equipmentLoads.push_back(quick);
+		::station::StationSystemsRuntime runtime(s, 1.0f);
+		require(runtime.advanceTo(5), "per-load dwell baseline failed");
+		killPrimary(runtime);
+		require(runtime.advanceTo(6), "per-load dwell failover failed");
+		require(transfer(runtime.snapshot(), "lab").onBackup
+			&& transfer(runtime.snapshot(), "quick").onBackup, "one load failed over alone");
+		restorePrimary(runtime);
+		// The short-dwell load is home at t=11; the 30 s load is not.
+		require(runtime.advanceTo(12), "per-load dwell drive failed");
+		require(!transfer(runtime.snapshot(), "quick").onBackup,
+			"the short-dwell load did not return on its own dwell");
+		require(transfer(runtime.snapshot(), "lab").onBackup,
+			"the long-dwell return was driven by another load's clock");
+		require(runtime.advanceTo(37), "per-load dwell hold failed");
+		require(!transfer(runtime.snapshot(), "lab").onBackup,
+			"the long-dwell load never returned");
+	}
+}
+
+void registerStationTransferSupplyChecks(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({"transferLossyPrimary", lossyPrimary});
+	checks.push_back({"transferLossyCycles", lossyCycles});
+	checks.push_back({"transferContention", contention});
+	checks.push_back({"transferMultipleContention", multipleContention});
+	checks.push_back({"transferContentionDwell", contentionDwell});
+	checks.push_back({"transferHoldsPrimary", holdsPrimary});
+	checks.push_back({"transferFailover", failover});
+	checks.push_back({"transferAlertAutoClears", alertAutoClears});
+	checks.push_back({"transferAlertOccurrences", alertOccurrences});
+	checks.push_back({"transferDwellReturn", dwellReturn});
+	checks.push_back({"transferZeroDwell", zeroDwell});
+	checks.push_back({"transferNoFlapping", noFlapping});
+	checks.push_back({"transferBackupAlsoShort", backupAlsoShort});
+	checks.push_back({"transferNoThirdPath", noThirdPath});
+	checks.push_back({"transferReplay", replay});
+	checks.push_back({"transferPerLoadDwell", perLoadDwell});
+}

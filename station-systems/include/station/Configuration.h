@@ -1,0 +1,2729 @@
+#pragma once
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <vector>
+
+namespace station
+{
+	// Declared unit vocabulary for authored Resource stores (#389). Units are
+	// authored labels with a fixed spelling; unknown units are rejected before
+	// a run rather than being treated as dimensionless numbers.
+	inline constexpr std::array<char const*, 10> StationStoreUnits{
+		"g", "kg", "mL", "L", "m3", "mol", "kJ", "MJ", "Wh", "kWh"};
+	inline constexpr size_t MaxStationResourceStores{32};
+	inline constexpr size_t MaxStationStoreIdLength{64};
+
+	// Canonical authored material IDs are lowercase ASCII words separated by
+	// single hyphens, at most 64 characters. Empty means unclassified. IDs
+	// describe substances, never store names, units, hazards or composition.
+	inline constexpr size_t MaxStationMaterialIdLength{64};
+	bool isValidStationMaterialId(std::string const& id);
+
+	// Declared constituent vocabulary for compound Resource materials
+	// (#391). The seven mass constituents partition a compound store's wet
+	// mass exactly: water is the moisture term and the other six together
+	// partition the dry mass, with dryOrganics as the dry-mass balance.
+	inline constexpr std::array<char const*, 7> StationMassConstituents{
+		"water", "nutrientNitrogen", "atmosphericNitrogen", "phosphorus",
+		"potassium", "otherMinerals", "dryOrganics"};
+	inline constexpr char const* StationEnergyConstituent{"energy"};
+
+	// Power distribution roles (#879). Fields on existing aggregates are
+	// appended so positional initialization remains source compatible.
+	enum class StationSupplyMode : std::uint8_t { Single, Transfer, Shared };
+	struct PowerBusSettings
+	{
+		std::string id{"main"};
+		std::string name{"Main Bus"};
+		double ratedCapacityKW{0.0}; // zero = deliberately unrated
+		double tripPersistenceSeconds{0.0};
+		bool operator==(PowerBusSettings const&) const = default;
+	};
+
+	// Declared constituent composition of a compound Resource material such
+	// as food, living biomass or waste (#391). Moisture is a fraction of wet
+	// mass; every other fraction is a fraction of DRY mass. This is the
+	// documented dry-mass basis for living biomass: Living biomass is dry
+	// mass (CONTEXT.md), so its moisture is tracked as the separate water
+	// constituent rather than diluting the declared dry fractions. The dry
+	// fractions must sum to at most 1.0; the remainder is dryOrganics.
+	// Nutrient nitrogen is chemically bound and is never freely
+	// interchangeable with atmospheric nitrogen: material may only move
+	// between the two forms through an explicitly declared, constituent-
+	// balanced conversion process, never through a plain transfer.
+	struct ResourceCompositionSettings
+	{
+		double moisture{0.0};          // fraction of wet mass, [0, 1)
+		double nutrientNitrogen{0.0};  // fraction of dry mass
+		double atmosphericNitrogen{0.0}; // fraction of dry mass
+		double phosphorus{0.0};        // fraction of dry mass
+		double potassium{0.0};         // fraction of dry mass
+		double otherMinerals{0.0};     // grouped trace minerals, dry mass
+		double energyKJPerKgDry{0.0};  // chemical energy term where represented
+		bool operator==(ResourceCompositionSettings const&) const = default;
+	};
+
+	// A capacity-limited inventory of a declared material. Starting inventory
+	// is authored; current inventory is runtime state and never lives here.
+	// Qualified contents are usable; unqualified contents are held awaiting a
+	// treatment that later slices provide. The protected reserve
+	// is the portion of usable contents withheld from discretionary transfers
+	// (#390); it never restricts the authored starting inventory itself.
+	struct ResourceStoreSettings
+	{
+		std::string id;
+		std::string unit;
+		double capacity{0.0};
+		double startingQualified{0.0};
+		double startingUnqualified{0.0};
+		double protectedReserve{0.0};
+		// A declared constituent composition makes this a compound Resource
+		// store (#391); absent stores hold a plain single-quantity material.
+		std::optional<ResourceCompositionSettings> composition{};
+		// Observation metadata only: does not grant compatibility or alter
+		// allocation. Legacy omission remains empty in authored settings;
+		// observations may resolve it through unambiguous validated relationships.
+		std::string materialId{};
+		bool operator==(ResourceStoreSettings const&) const = default;
+	};
+
+	// A rate-limited authored transfer of qualified material between two
+	// same-unit Resource stores. Competing transfers are allocated in priority
+	// order (higher first), ties resolved by declaration order (#390).
+	enum class ResourceTransferMode : std::uint8_t { Continuous, Scheduled };
+	struct ResourceTransferSettings
+	{
+		std::string id;
+		std::string sourceId;
+		std::string destinationId;
+		std::string unit;
+		double ratePerSecond{0.0};
+		int priority{0};
+		ResourceTransferMode mode{ResourceTransferMode::Continuous};
+		double quantity{1.0};
+		double firstOccurrenceSeconds{0.0};
+		double recurrenceSeconds{0.0}; // 0 = one-off, else >= one fixed tick
+		bool operator==(ResourceTransferSettings const&) const = default;
+	};
+
+	inline constexpr size_t MaxStationResourceTransfers{32};
+
+	// One authored flow of a conversion process. Rates are full-throughput
+	// wet-mass amounts per simulated second, in the referenced store's unit.
+	struct ResourceConversionInputSettings
+	{
+		std::string storeId;
+		double ratePerSecond{0.0};
+		bool operator==(ResourceConversionInputSettings const&) const = default;
+	};
+	struct ResourceConversionOutputSettings
+	{
+		std::string storeId;
+		double yieldPerSecond{0.0};
+		bool operator==(ResourceConversionOutputSettings const&) const = default;
+	};
+	// An authored conversion of compound material: consumed input stores
+	// are transformed into produced output stores at declared full-throughput
+	// rates. Validation rejects any configuration whose declared yields
+	// would create a tracked constituent or the energy term out of nothing;
+	// losses (output below input) are legal and reported as explicit losses.
+	struct ResourceConversionSettings
+	{
+		std::string id;
+		std::vector<ResourceConversionInputSettings> inputs{};
+		std::vector<ResourceConversionOutputSettings> outputs{};
+		int priority{0};
+		bool operator==(ResourceConversionSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationResourceConversions{16};
+	inline constexpr size_t MaxStationConversionFlows{5};
+	// A scheduled external addition of a declared quantity to one Resource
+	// store (#392). A delivery is a scenario event, not a station process:
+	// it brings material in from outside the station boundary at declared
+	// simulation times, and only that store's own unit. What the destination
+	// cannot accept is rejected at the boundary and accounted explicitly —
+	// deliveries never overflow a store and never make material disappear.
+	// A recurrence of zero is a one-off delivery; a positive recurrence
+	// repeats the same quantity every recurrenceSeconds. Arriving material
+	// may be declared usable (qualified) or held awaiting a treatment that
+	// qualifies it; both occupy store capacity.
+	struct ResourceDeliverySettings
+	{
+		std::string id;
+		std::string storeId;
+		std::string unit;                 // must match the destination store's unit
+		double quantity{0.0};           // store units per occurrence, > 0
+		double firstOccurrenceSeconds{0.0}; // first arrival, >= 0
+		double recurrenceSeconds{0.0};  // 0 = one-off, else >= one fixed tick
+		bool arrivesQualified{true};    // false: arrives held unqualified
+		int priority{0};                // higher allocates first among coincidents
+		bool operator==(ResourceDeliverySettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationResourceDeliveries{16};
+	// A scheduled external removal of a declared quantity from one waste
+	// store (#403). Ejection is a scenario event, not a station process:
+	// it carries material out across the station boundary at declared
+	// simulation times, in the store's own unit, and only what is
+	// eligible under the authored partition selector. Held stock is
+	// ejectable only when explicitly declared, and a store that
+	// holds nothing eligible simply ejects nothing: a shortfall is a
+	// valid outcome, never a failure. What is ejected is booked as an
+	// external loss on the station's per-unit and per-constituent
+	// ledgers, so the boundary closes over it and material never
+	// disappears silently. A recurrence of zero is a one-off ejection;
+	// a positive recurrence repeats the same quantity every
+	// recurrenceSeconds, reusing the same schedule rule and the same
+	// deterministic scenario ordering as resupply deliveries. At equal
+	// occurrence time and priority, arrivals run before ejections.
+	enum class WasteEjectionEligibility : std::uint8_t { QualifiedOnly, HeldOnly, QualifiedAndHeld };
+
+	struct WasteEjectionSettings
+	{
+		std::string id;
+		std::string storeId;              // waste store to eject from
+		std::string unit;                 // must match the target store's unit
+		double quantity{0.0};           // store units per occurrence, > 0
+		double firstOccurrenceSeconds{0.0}; // first ejection, >= 0
+		double recurrenceSeconds{0.0};  // 0 = one-off, else >= one fixed tick
+		int priority{0};                // higher runs first among coincidents
+		WasteEjectionEligibility eligibility{WasteEjectionEligibility::QualifiedOnly};
+		bool operator==(WasteEjectionSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationWasteEjections{16};
+	// The stable identity an installation registers with the shared
+	// availability contract (#413). Every capacity-bearing station
+	// installation that can be taken out of service or capacity-reduced
+	// exposes its id and a human-readable kind here; outage schedules
+	// target installations by this identity and validation accepts an
+	// outage only against a registered id, so an outage never silently
+	// aims at something that cannot honour it. The contract is shared:
+	// later generators and processors join it by registering their own
+	// identity rather than by any special-cased outage wiring.
+	struct StationInstallationIdentity
+	{
+		std::string id;
+		std::string kind; // e.g. "generator", "coolant loop", "chiller"
+		bool operator==(StationInstallationIdentity const&) const = default;
+	};
+	// A scheduled outage or capacity reduction of one registered
+	// installation (#413). An outage declares the fraction of the target
+	// installation's rated capacity that stays available during its
+	// window: 0 is a full outage (the installation produces, circulates
+	// and draws nothing through its rated capacity), 0.5 is a half-capacity
+	// reduction. Outside every window the installation holds its full
+	// declared availability. The factor is a hard ceiling on the
+	// installation's deliverable rated capacity, applied at the tick's
+	// capacity read: no output, circulation or heat continues through a
+	// capacity the outage has taken away, and a reduction bites the moment
+	// the window opens rather than ramping out of it. A recurrence of zero
+	// is a one-off outage; a positive recurrence repeats the same window
+	// every recurrenceSeconds and must be at least as long as the window,
+	// so a schedule's own windows never overlap. Overlapping outages on one
+	// installation take the deepest reduction (the minimum fraction), so
+	// the effective availability never depends on the order the schedules
+	// were declared. Restoration returns only the declared availability:
+	// it never replenishes fuel, consumables, buffers or biomass, so a
+	// machine that ran dry or a store that drained stays drained. The
+	// schedule reuses the shared scenario time base and the deterministic
+	// occurrence ordering established for resupply deliveries (#392):
+	// simulation time, then service priority (higher first), then
+	// declaration order.
+	struct InstallationOutageSettings
+	{
+		std::string id;
+		std::string installationId;   // stable identity of the target installation
+		double capacityFraction{0.0}; // rated capacity available during the outage, [0, 1)
+		double firstOccurrenceSeconds{0.0}; // the outage begins, >= 0
+		double durationSeconds{0.0};  // each outage window, > 0
+		double recurrenceSeconds{0.0};// 0 = one-off, else >= duration and >= one fixed tick
+		int priority{0};              // higher announced first among coincidents
+		bool operator==(InstallationOutageSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationInstallationOutages{16};
+	// One inventory requirement of a scheduled maintenance job (#414).
+	// Every requirement names an existing Resource store and a quantity in
+	// that store's own unit. A reusable tool (consumed false) is reserved
+	// from the store's qualified inventory for the duration of the work
+	// and returned unchanged when the job completes or is interrupted -
+	// it is never consumed unless it is configured as consumed. A
+	// consumed requirement (spare part or consumable) is held against the
+	// reservation while the work runs and leaves the source store at
+	// completion, booked into the job's declared waste store as the
+	// removed parts/used material. Absent prerequisites never allow the
+	// job to complete for free: the work simply does not run until the
+	// material is there to be spent.
+	struct MaintenanceRequirementSettings
+	{
+		std::string storeId;          // tool/part/consumable source store
+		double quantity{0.0};       // store units per occurrence, > 0
+		bool consumed{false};       // false: reusable tool, reserved and returned
+		bool operator==(MaintenanceRequirementSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationMaintenanceRequirements{8};
+	// A scheduled timed maintenance job on one registered installation
+	// (#414). The schedule reuses the shared scenario time base and the
+	// deterministic occurrence ordering established for resupply
+	// deliveries (#392): the window opens at firstOccurrenceSeconds and
+	// repeats every recurrenceSeconds (0 = one-off; a positive
+	// recurrence must be at least the duration so windows never
+	// overlap). The window gates the start: the job attempts to begin
+	// once its window is open, and beginning requires reserving every
+	// declared requirement from the source stores' qualified inventory
+	// plus headroom in the waste store for the whole consumed quantity.
+	// While the work is Active the target installation is isolated -
+	// its availability is held at zero, deeper than any outage ceiling -
+	// so it produces, circulates and draws nothing through its rated
+	// capacity. Completion requires the full duration to have run with
+	// the reservation held: consumed requirements are then deducted from
+	// their sources and booked into the waste store as qualified
+	// (disposal-ready) material, and reusable tools are returned.
+	// Reservation is exclusive across jobs: processed in the declared
+	// deterministic order (priority descending, declaration order), a
+	// unit of material reserved by one job is never available to
+	// another, so overlapping work cannot double-spend parts or tools.
+	// If a reservation can no longer be held - another station process
+	// drew the reserved material away, or the waste headroom vanished -
+	// the job is interrupted: the reservation is released, the
+	// progress is discarded, and the job must run the full duration
+	// again from a fresh reservation. A job whose window closes before
+	// it ever started has missed that occurrence; it never completes
+	// without spending. Restoration after completion only lifts the
+	// isolation: no store is replenished, the consumed parts stay
+	// spent and the tools are simply the same tools returned.
+	struct MaintenanceJobSettings
+	{
+		std::string id;
+		std::string installationId;   // stable identity of the target installation
+		double firstOccurrenceSeconds{0.0}; // the first window opens, >= 0
+		double durationSeconds{0.0};  // work time per occurrence, > 0
+		double recurrenceSeconds{0.0};// 0 = one-off, else >= duration and >= one fixed tick
+		int priority{0};              // higher reserves first among coincidents
+		std::vector<MaintenanceRequirementSettings> requirements{};
+		std::string wasteStoreId;     // where removed parts/used material lands
+		bool operator==(MaintenanceJobSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationMaintenanceJobs{16};
+	// Schedule boundary tolerance (#392). Authored times meet the fixed-tick
+	// grid in binary floating point and 1/60 is not exactly representable,
+	// so an occurrence scheduled exactly on a tick boundary can land a few
+	// ulps either side of it. This tolerance is far smaller than one fixed
+	// tick and far larger than the accumulated rounding, so an occurrence
+	// that is due is never missed and never counted twice.
+	inline constexpr double StationScheduleTolerance{1e-9};
+	// Authored schedules retain this minimum resolution even when Station
+	// steps are coarser (events within a step are handled independently).
+	inline constexpr float StationScheduleQuantumSeconds{1.0f / 60.0f};
+	// Occurrences of an authored schedule that have come due at or before
+	// the given simulation time (#392). The count is monotonic in elapsed
+	// time, so a caller that fires `due - alreadyFired` occurrences each
+	// tick executes every occurrence exactly once however many ticks an
+	// accelerated update batches together. A zero recurrence is a one-off:
+	// at most one occurrence, at firstOccurrenceSeconds.
+	uint64_t stationScheduleOccurrencesDue(double firstOccurrenceSeconds,
+		double recurrenceSeconds, double elapsedSeconds);
+	// Declared deterministic ordering for scheduled scenario events
+	// (#392): occurrences run in simulation-time order first, then by
+	// service priority (higher first), then by declaration order. Two
+	// deliveries due at the same simulation second are therefore ordered by
+	// priority and declaration, never by an iteration accident. Later
+	// scenario slices — outages, maintenance and scheduled ejection — reuse
+	// this same rule, so one ordering governs every authored station event.
+	struct StationScenarioEventKey
+	{
+		double occurrenceSeconds{0.0};
+		int priority{0};
+		size_t declarationIndex{0};
+		bool operator<(StationScenarioEventKey const& other) const
+		{
+			if (occurrenceSeconds != other.occurrenceSeconds)
+				return occurrenceSeconds < other.occurrenceSeconds;
+			if (priority != other.priority) return priority > other.priority;
+			return declarationIndex < other.declarationIndex;
+		}
+	};
+	// Explicit numerical tolerance for boundary balance residuals: a per-unit
+	// residual may not exceed tolerance * max(1, |total starting|). Residuals
+	// beyond this are conservation violations, never silent clamping.
+	inline constexpr double StationBalanceTolerance{1e-9};
+	// The band inside which a Condition is treated as already reached: a
+	// restore command whose target sits within it of the current Condition
+	// would heal nothing, so it is refused rather than accepted to no-op
+	// (#840).
+	inline constexpr double StationConditionEpsilon{1e-12};
+
+	// #424: the published bounds on retained runtime history. The event
+	// history keeps at most the newest this-many entries and every trend
+	// series keeps at most this-many samples no matter how long or how
+	// fast the World runs; these are the same limits the runtime enforces,
+	// published so the stability audit and the presentation can state
+	// the bound instead of restating a magic number.
+	inline constexpr size_t StationEventHistoryLimit{256};
+	inline constexpr size_t StationTrendSampleLimit{256};
+	// #603: the ceiling on a trend series' downsample level. Coarsening
+	// is cadence-aware (a level-L series records one sample every 2^L
+	// base observations), so under the validated settings (observation
+	// 0.1-60 s, retention 1-86400 s) the level stops growing long
+	// before this cap. Past the cap the retained window slides
+	// oldest-first instead of doubling again, so the published stride,
+	// every 2^level shift of the level and every derived number stay
+	// finite no matter how long the run is.
+	inline constexpr std::uint32_t StationTrendDownsampleLevelCap{48};
+
+	// Outcome of the most recent tick's request for one authored transfer.
+	enum class StationTransferStatus : std::uint8_t
+	{
+		Idle,      // no tick has completed with this transfer configured
+		Full,     // the whole request was supplied
+		Partial,  // some but not all of the request was supplied
+		Rejected, // nothing could be supplied
+	};
+
+	// Declared thermal service classes (#393), distinguished by their
+	// permitted interface temperatures and compatible heat-transfer
+	// requirements (CONTEXT.md). Spare capacity in one class is never
+	// automatically usable by another. Chilled cooling capacity is
+	// provided per class by authored chillers (#397); a class without a
+	// compatible chiller has no cooling service, and spare capacity in
+	// another class never substitutes for it.
+	inline constexpr std::array<char const*, 4> StationThermalServiceClasses{
+		"low", "moderate", "warm", "generation"};
+
+	// One constant stretch of a repeating profile: the level holds from
+	// startSeconds until the next segment (or the end of the period).
+	struct ProfileSegmentSettings
+	{
+		double startSeconds{0.0};
+		double level{0.0};
+		bool operator==(ProfileSegmentSettings const&) const = default;
+	};
+	// A deterministic repeating piecewise-constant profile over simulated
+	// time, used for solar illumination and equipment operating profiles.
+	// A zero period means a constant level; a positive period repeats the
+	// declared segments, the first of which must start at 0. Levels are
+	// fractions in [0, 1] of the field the profile scales (full sun, full
+	// demand). Evaluation at a period boundary takes the later segment, so
+	// the profile is right-continuous and never ambiguous.
+	struct ProfileSettings
+	{
+		double constantLevel{1.0}; // used when periodSeconds == 0
+		double periodSeconds{0.0}; // 0 = constant level, no segments
+		std::vector<ProfileSegmentSettings> segments{};
+		bool operator==(ProfileSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationProfileSegments{8};
+
+	// Catalogue bands are provisional engineering assumptions; provenance is
+	// recorded in docs/station-lighting.md. Life and spectrum are descriptive.
+	struct FixtureTypeBand
+	{
+		std::string_view id;
+		double minEfficiency, maxEfficiency, minLmPerW, maxLmPerW;
+	};
+	inline constexpr std::array FixtureTypeBands{
+		FixtureTypeBand{"incandescent", 0.01, 0.05, 8, 20},
+		FixtureTypeBand{"cfl", 0.10, 0.25, 40, 80},
+		FixtureTypeBand{"led-bulb", 0.20, 0.50, 60, 160},
+		FixtureTypeBand{"fluorescent-tube", 0.12, 0.30, 50, 110},
+		FixtureTypeBand{"led-high-bay", 0.30, 0.65, 100, 220},
+		FixtureTypeBand{"metal-halide", 0.15, 0.35, 60, 120},
+		FixtureTypeBand{"hps", 0.20, 0.45, 80, 150},
+		// Compatibility assumption, not a claim about a physical lamp.
+		FixtureTypeBand{"legacy-lamp", 1.0, 1.0, 100, 100}};
+	struct FixtureTypeSettings
+	{
+		std::string id{"led-bulb"};
+		double ratedKW{0.01};
+		double usableLightEfficiency{0.35};
+		double luminousEfficacyLmPerW{100.0};
+		double nominalLifeHours{25000.0};
+		std::string spectrumTag{"white"};
+		bool industrial{false};
+		bool operator==(FixtureTypeSettings const&) const = default;
+	};
+	inline const FixtureTypeSettings LegacyLampFixtureType{
+		"legacy-lamp", 0.0, 1.0, 100, 25000, "legacy", true};
+	inline const std::array StationFixtureTypes{
+		FixtureTypeSettings{"incandescent", 0.060, 0.03, 13, 1000, "warm", false},
+		FixtureTypeSettings{"cfl", 0.015, 0.18, 60, 8000, "white", false},
+		FixtureTypeSettings{"led-bulb", 0.010, 0.35, 100, 25000, "white", false},
+		FixtureTypeSettings{"fluorescent-tube", 0.036, 0.22, 85, 15000, "white", true},
+		FixtureTypeSettings{"led-high-bay", 0.150, 0.50, 150, 50000, "white", true},
+		FixtureTypeSettings{"metal-halide", 0.250, 0.25, 90, 12000, "broad", true},
+		FixtureTypeSettings{"hps", 0.400, 0.35, 120, 24000, "amber", true},
+		LegacyLampFixtureType};
+	// An explicit reference to an existing population feeder. Lighting and
+	// protected circulation share its cable budget, losses and supply switch.
+	struct PopulationPowerFeed
+	{
+		std::string populationId;
+		bool algae{false};
+		bool operator==(PopulationPowerFeed const&) const = default;
+	};
+	inline constexpr size_t MaxStationLightingFixtures{128};
+	// Generic Installation references; v1 supports Lighting fixtures only.
+	struct StandbyPairingSettings
+	{
+		std::string standbyInstallationId;
+		std::string primaryInstallationId;
+		double returnDwellSeconds{30.0};
+		bool operator==(StandbyPairingSettings const&) const = default;
+	};
+	enum class StationStandbyState { Idle, Active, Returning };
+	struct StationStandbyPairingSnapshot
+	{
+		std::string standbyInstallationId, primaryInstallationId;
+		StationStandbyState state{StationStandbyState::Idle};
+		double activatedAtSimSeconds{-1.0}, returnedAtSimSeconds{-1.0};
+		std::optional<double> primaryCapableSince{};
+		bool operator==(StationStandbyPairingSnapshot const&) const = default;
+	};
+	// #843: the permanent Wear layer. Wear accumulators count actual
+	// operation - equivalent full cycles on real charge/discharge,
+	// operating hours while the machine really works, throughput of real
+	// flowed mass - plus calendar time, and the authored fade rates convert
+	// them into a permanent wearFraction of rated capacity lost within a
+	// run. Unlike Condition, Wear is never healed: Repair clears Faults and
+	// restores Condition but never reverses Wear; a repaired machine keeps
+	// its faded rating. Only replacement - a topology change, a reset -
+	// starts a fresh, unworn machine. Which accumulators a machine wires
+	// depends on what the machine physically is: a battery fades on cycles
+	// and calendar time, a coolant loop on operating hours and circulated
+	// mass. Rates are fractions of rated capacity per accumulator unit;
+	// unwired rates must be zero so no author can pay for fade the machine
+	// cannot accumulate. Presence of the model is frozen topology; the
+	// rates inside it are live-tunable parameters that never rewrite the
+	// fade already accumulated - each interval's fade is priced at the
+	// rates current when the operation happened.
+	struct InstallationWearSettings
+	{
+		double fadePerCycle{0.0};           // fraction of rated capacity per equivalent full cycle
+		double fadePerOperatingHour{0.0};   // fraction per hour of actual operation
+		double fadePerThroughputKg{0.0};    // fraction per kg actually flowed
+		double fadePerCalendarHour{0.0};    // fraction per simulated hour, operating or not
+		double maxWearFraction{1.0};        // permanent clamp on total fade, (0, 1]
+		double fadeHalfLifeHours{0.0};      // 0 disables exponential calendar fade
+		double initialAgeHours{0.0};        // beginning-of-life age; frozen at configuration
+		bool operator==(InstallationWearSettings const&) const = default;
+	};
+
+	// #845: the solar array's string-loss opt-in. While the Fault is
+	// active a declared fraction of the array's installed capacity is
+	// simply gone - the strings it names no longer contribute - so the
+	// array delivers what the surviving capacity sees: output scales by
+	// (1 - lossFraction). The opt-in presence is frozen topology and the
+	// fraction inside the block is a live-tunable parameter whose value
+	// is frozen into the Fault at injection, so a later retune cannot
+	// reach a Fault already running.
+	struct SolarStringLossSettings
+	{
+		double lossFraction{0.0}; // fraction of installed capacity lost, (0, 1]
+		bool operator==(SolarStringLossSettings const&) const = default;
+	};
+	// #845: the solar array's tracking-failure opt-in. The drive is
+	// stuck, so while the Fault is active the array holds a fixed low
+	// availability: the declared value is the availability the stuck
+	// array keeps, not a loss. Output is capacity x availability x
+	// illumination - the sun still rises and sets over a mispointed
+	// panel. The opt-in presence is frozen topology; the fixed
+	// availability is live-tunable until an injection freezes it.
+	struct SolarTrackingFailureSettings
+	{
+		double availability{0.0}; // fixed availability while failed, [0, 1)
+		bool operator==(SolarTrackingFailureSettings const&) const = default;
+	};
+	// A configured solar array: declared installed capacity in kW, using
+	// the Station solar cycle. Sunshine is not firm continuous
+	// capacity; zero installed capacity disables the array entirely.
+	// The #845 fault modes, when opted in, scale the array's delivered
+	// availability; the two compose by minimum when both are active.
+	struct SolarArraySettings
+	{
+		std::string id;
+		double capacityKW{0.0}; // installed capacity, >= 0; 0 disables
+		std::optional<SolarStringLossSettings> stringLoss{};
+		std::optional<SolarTrackingFailureSettings> trackingFailure{};
+		// #848: the array's `cell-degradation` Wear opt-in: illuminated cells
+		// lose installed capacity permanently, so the array delivers only
+		// what the surviving cells still see. Presence is frozen topology;
+		// the rates inside stay live-tunable and never reprice the fade
+		// already banked.
+		std::optional<InstallationWearSettings> cellDegradation{};
+		std::vector<std::string> busIds{"main"};
+		bool operator==(SolarArraySettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationSolarArrays{4};
+
+	// Where a load's heat goes. Exported means the heat leaves the station
+	// through an explicitly declared export boundary — an accounted
+	// external exchange, not a hidden infinite sink. CoolingService means
+	// the heat requires a cooling service of the load's declared thermal
+	// class; until such a service exists the load is not feasible and is
+	// admitted never, so missing cooling is never silently supplied.
+	enum class StationCoolingDisposition : std::uint8_t
+	{
+		Exported,
+		CoolingService,
+	};
+
+	// One declared material exchange of an External equipment load group
+	// with a station Resource store, at the load's full-operation rate.
+	// Every declared exchange is an operation dependency (#554), not an
+	// optional side effect: a consuming exchange is feed the load must
+	// have (drawn from qualified material above the store's protected
+	// reserve) and a producing exchange must land inside the store's
+	// remaining capacity. The load's admitted operating fraction is
+	// capped by the fraction of its full-operation exchanges the
+	// declared inputs and destination limits can actually sustain, so
+	// starvation or backpressure constrains power, heat and outputs
+	// together instead of silently running the equipment on material
+	// that does not exist. An exchange that should not constrain
+	// operation is not expressible implicitly: it must not be declared
+	// as a load exchange at all.
+	struct EquipmentMaterialExchangeSettings
+	{
+		std::string storeId;
+		double ratePerSecond{0.0}; // store units per simulated second at full operation
+		bool consumes{true};       // true: draw from the store; false: deliver into it
+		bool operator==(EquipmentMaterialExchangeSettings const&) const = default;
+	};
+
+	// A named External equipment load group (CONTEXT.md): station
+	// equipment outside the Station systems, with declared electrical
+	// demand and operating profile, heat output, required thermal service
+	// class, cooling disposition, material exchanges, a protected
+	// critical floor, a service priority and an allowed curtailment
+	// fraction. Equipment whose demands are already calculated within the
+	// Station systems is excluded by definition — it is never counted
+	// here again. The critical floor is protected ahead of all
+	// discretionary demand; allowed curtailment is the largest fraction
+	// of the request the load may be cut by, so the minimum operable
+	// supply is demand * (1 - maxCurtailment). The two are read together
+	// (#549): the floor protects a slice of this load's own service and
+	// is not independently operable, so the protected claim is the
+	// larger of the floor and that minimum, granted only when the pools
+	// can reach the minimum. A load that cannot reach its minimum is
+	// refused whole and spends no generation, no stored energy and no
+	// material, with its entire floor reported unmet — the floor is never
+	// a route around the minimum operable level.
+	struct EquipmentLoadSettings
+	{
+		std::string id;
+		double electricalDemandKW{0.0}; // full-operation demand, >= 0
+		ProfileSettings operatingProfile; // duty level multiplies the demand
+		double heatOutputKW{0.0};       // heat rejected at full operation, >= 0
+		std::string thermalClass;       // required cooling service class
+		StationCoolingDisposition coolingDisposition{StationCoolingDisposition::Exported};
+		double criticalFloorKW{0.0};    // protected minimum supply, <= demand
+		int priority{0};                // higher allocates first
+		double maxCurtailment{1.0};     // allowed curtailment fraction, [0, 1]
+		// #417 recovery: the declared restoration rules for a purely
+		// discretionary load (criticalFloorKW <= 0). A load that was
+		// running and could not be supplied enters Shed and stays there -
+		// drawing nothing - until the declared recovery gate opens, so a
+		// capacity that flickers across the shed threshold cannot toggle
+		// the equipment on and off each tick. recoveryDwellSeconds is the
+		// minimum time the load must have been shed before a restart is
+		// attempted. recoveryHysteresisFraction is the headroom above the
+		// load's own demand the spare pool must show before the load may
+		// restart: the restart threshold is demand * (1 + hysteresis),
+		// strictly above the shed threshold, and that gap is what breaks
+		// the oscillation. restartSurgePowerKW and restartSurgeSeconds
+		// declare the startup surge the load draws on top of its normal
+		// demand while Restoring; zero surge is a clean restart. All four
+		// default to zero, which reproduces the pre-#417 behaviour of
+		// re-attempting every tick with no surge. These rules are read
+		// only for purely discretionary loads: a load with a protected
+		// floor is restored by the protected pass and is never delayed by
+		// the recovery machine.
+		double recoveryDwellSeconds{0.0};     // minimum shed time before restart, >= 0
+		double recoveryHysteresisFraction{0.0}; // spare headroom above demand, [0, 1]
+		double restartSurgePowerKW{0.0};      // startup surge on top of demand, >= 0
+		double restartSurgeSeconds{0.0};      // surge duration while Restoring, >= 0
+		std::vector<EquipmentMaterialExchangeSettings> materialExchanges{};
+		// The thermal reservoir that receives this load's emitted heat
+		// (#395). Empty keeps the pre-#395 behaviour: the heat leaves the
+		// station directly through the declared export boundary. When set,
+		// the emitted heat is routed into the reservoir exactly once - it
+		// is not also booked as direct export - and the reservoir's
+		// radiators become the export path. The reservoir must declare the
+		// same thermal service class: spare capacity in one class is never
+		// usable by another. Only exported-disposition loads may declare a
+		// sink; a cooling-service load needs a cooling service, not a
+		// passive heat sink, and stays refused until such a service exists.
+		std::string heatSinkId;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(EquipmentLoadSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationEquipmentLoads{16};
+	inline constexpr size_t MaxStationLoadMaterialExchanges{2};
+
+	// A configured rechargeable battery bank (#394). Nameplate energy is the
+	// installed total; usable energy is the slice above the reserve floor the
+	// battery policy allows to cycle. The reserve is the derived remainder
+	// (nameplate - usable): it is never dischargeable, is never counted as
+	// available energy, and is published in the snapshot so the reserve
+	// policy is explicit rather than implicit. Stored energy is runtime state
+	// initialised from the authored starting value; only the authored limits
+	// travel in documents. Charge and discharge efficiencies are applied at
+	// the bus boundary: charging stores bus kWh * chargeEfficiency and
+	// discharging delivers stored kWh drawn * dischargeEfficiency, so the
+	// difference is an accounted loss — never free energy in either
+	// direction. Zero usable energy disables the battery entirely.
+	// Stefan-Boltzmann constant in kW/(m^2 K^4): the declared radiation
+	// law behind radiator rejection (#395). Radiator rejection is
+	// emissivity x view factor x area x sigma x (T^4 - T_sink^4); the
+	// emitting temperature and the environmental back-radiation are
+	// explicit, and the radiator/view assumption is the authored
+	// emissivity x view factor product. No distribution modelling is
+	// promised beyond these declared factors.
+	// SI sigma is W/(m^2 K^4); divide by 1000 once for kW (#783).
+	inline constexpr double StationStefanBoltzmannKWPerM2K4{5.670374419e-8 / 1000.0};
+	inline constexpr double StationCelsiusOffset{273.15};
+	// A thermal reservoir (CONTEXT.md): a body or aggregate of material
+	// whose stored thermal energy and effective thermal capacity determine
+	// its temperature over time. The declared min/max temperatures are the
+	// limits of the services it supports: crossing them is an observable
+	// condition reported in the snapshot and event log, never a silent
+	// clamp of the integrated state. Thermal energy is tracked relative to
+	// 0 degrees C: E = capacity x T, so the ledger closes over absorbed,
+	// routed and rejected heat within the declared tolerance.
+	struct ThermalReservoirSettings
+	{
+		std::string id;
+		std::string thermalClass;          // service class of heat it collects
+		double heatCapacityKJPerK{0.0};  // effective thermal capacity, > 0
+		double startingTemperatureC{20.0};
+		double minTemperatureC{0.0};     // declared lower service limit
+		double maxTemperatureC{40.0};    // declared upper service limit
+		double absorbedHeatKW{0.0};      // constant environmental absorbed heat, >= 0
+		bool operator==(ThermalReservoirSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationThermalReservoirs{8};
+	// One optional station-wide radiative body; typed link endpoint hull/hull.
+	struct HullSettings
+	{
+		double heatCapacityKJPerK{1000.0};
+		double absorptivity{0.8};
+		double projectedAreaM2{10.0};
+		double fullSunIrradianceKWPerM2{1.361};
+		double emissivity{0.8};
+		double emittingAreaM2{40.0};
+		double sinkTemperatureC{-270.0};
+		double startingTemperatureC{20.0};
+		double minTemperatureC{-200.0};
+		double maxTemperatureC{200.0};
+		bool operator==(HullSettings const&) const = default;
+	};
+	// #844: the chiller's refrigerant leak opt-in. The machine carries a
+	// finite refrigerant charge; an injected `refrigerant-leak` bleeds that
+	// charge into the named Atmosphere compartment at the authored rate
+	// through the ordinary spilled-coolant ledger path, so every kilogram
+	// and kilojoule closes under the per-tick conservation audit. The
+	// remaining charge fraction caps the cooling capacity the machine can
+	// deliver - an empty charge is no cold service. The leak runs only
+	// while the Fault is active; repair seals the leak but never
+	// recharges the machine, so the capacity stays capped at the charge
+	// that remains until replacement. The leaked refrigerant is booked as
+	// a retained liquid spill at the cold loop's tick-start temperature
+	// (the evaporator's thermal interface); this models the spill, not its
+	// vapour chemistry. Opt-in presence, the destination compartment and
+	// the charge size are frozen topology; the leak rate and specific heat
+	// are live-tunable parameters, and an accepted injection freezes its
+	// effective parameters for the Fault it started.
+	struct RefrigerantLeakSettings
+	{
+		std::string compartmentId;
+		double chargeKg{0.0};           // finite refrigerant charge, > 0
+		double leakRateKgPerS{0.0};     // bleed rate while the Fault is active, > 0
+		double specificHeatKJPerKgK{0.0}; // carried heat per kg per K, > 0
+		bool operator==(RefrigerantLeakSettings const&) const = default;
+	};
+	// #844: the radiator's panel puncture opt-in. The panel carries a
+	// finite coolant charge; an injected `panel-puncture` bleeds it into
+	// the named Atmosphere compartment at the authored rate through the
+	// ordinary spilled-coolant ledger path, booked at the host
+	// reservoir's tick-start temperature. The remaining charge fraction is
+	// the fraction of panel area still holding coolant, and rejection is
+	// capped by that remaining area: a drained panel radiates nothing.
+	// Repair seals the puncture but never refills the panel, so the
+	// rejection stays capped at the charge that remains until
+	// replacement. Opt-in presence, the destination compartment and the
+	// charge size are frozen topology; the leak rate and specific heat are
+	// live-tunable parameters, and an accepted injection freezes its
+	// effective parameters for the Fault it started.
+	struct PanelPunctureSettings
+	{
+		std::string compartmentId;
+		double coolantKg{0.0};          // panel coolant charge that bleeds out, > 0
+		double leakRateKgPerS{0.0};     // bleed rate while the Fault is active, > 0
+		double specificHeatKJPerKgK{0.0}; // carried heat per kg per K, > 0
+		bool operator==(PanelPunctureSettings const&) const = default;
+	};
+	// An authored radiator that rejects a reservoir's heat to space by
+	// radiation. Rejection follows the Stefan-Boltzmann law with the
+	// declared emissivity and view factor against an authored effective
+	// sink temperature, so environment-dependent rejection (back-radiation
+	// included) is explicit rather than an infinite cold sink.
+	// One repair plan for one fault mode on this Installation (#842).
+	// A repairFault command instantiates the plan as a #414 maintenance
+	// job at runtime: the plan supplies what the authored starter cannot
+	// know - how long the work takes and how many authored spare parts
+	// it consumes from the Installation's repair-parts store. The parts
+	// are consumed requirements: reserved exclusively while the work
+	// runs and booked into the declared waste store as qualified,
+	// disposal-ready material at completion, under the same unit and
+	// composition contract as scheduled maintenance.
+	struct FaultRepairSettings
+	{
+		std::string modeId;           // the fault mode this plan repairs
+		double durationSeconds{0.0};  // full-duration work per repair, > 0
+		double partsQuantity{0.0};    // parts-store units consumed per repair, > 0
+		std::string wasteStoreId;     // where consumed parts land as qualified waste
+		bool operator==(FaultRepairSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationFaultRepairs{8};
+	// Per-Installation repair-parts wiring (#842): the store holding
+	// this Installation's spare parts and the per-mode repair plans
+	// that draw from it. An Installation is repairable only for the
+	// modes with a plan here; absent wiring, repairFault refuses. The
+	// store identities and the plan set are frozen topology; each
+	// plan's duration and parts quantity are live-tunable parameters
+	// that never reach a job already started - an accepted repair
+	// froze its effective parameters at command time.
+	struct RepairPartsSettings
+	{
+		std::string partsStoreId;
+		std::vector<FaultRepairSettings> repairs{};
+		bool operator==(RepairPartsSettings const&) const = default;
+	};
+	struct LightingFixtureSettings
+	{
+		std::string id;
+		FixtureTypeSettings fixtureType;
+		std::optional<PopulationPowerFeed> sharedPowerFeed{};
+		std::string atmosphereId;
+		// Optional light destination; at most one of these may be wired (v1).
+		std::string cropPopulationId;
+		std::string algaeCultureId;
+		ProfileSettings operatingProfile;
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		// Explicit, frozen opt-in; failure isolates service, never activates standby.
+		bool fixtureFailure{false};
+		std::optional<RepairPartsSettings> repairParts{};
+		bool operator==(LightingFixtureSettings const&) const = default;
+	};
+	struct RadiatorSettings
+	{
+		std::string id;
+		std::string reservoirId;
+		double areaM2{0.0};       // radiator area, > 0
+		double emissivity{0.9};   // (0, 1]
+		double viewFactor{1.0};   // (0, 1] radiator/view assumption
+		double sinkTemperatureC{-270.0}; // effective radiative sink temperature
+		// #844: the radiator's opt-in panel puncture fault mode and its
+		// repair-parts wiring (#842 contract). Opt-in presence is frozen
+		// topology.
+		std::optional<PanelPunctureSettings> panelPuncture{};
+		std::optional<RepairPartsSettings> repairParts{};
+		bool operator==(RadiatorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationRadiators{8};
+
+	// A coolant loop (#396): a finite, loop-specific closed coolant
+	// circuit pumped through one thermal reservoir. The loop carries no
+	// class (#757): coolant is a thermal service fluid that is never
+	// potable water or nutrient solution, loops never pool coolant
+	// because each owns its own finite inventory by construction, and
+	// the only crossing with station thermal state is heat through the
+	// circulation-gated heat-only exchanger - through which no coolant
+	// ever crossed. The loop holds its own
+	// coolant inventory (kg) — finite and loop-specific — and exchanges heat only with its coupled reservoir
+	// through a circulation-gated exchanger: no coolant crosses into the
+	// reservoir, a Resource store, or any other loop. The pump circulates
+	// the coolant it actually holds; the freeze-protection heater is a
+	// bang-bang thermostat that demands up to its capacity whenever the
+	// loop's coolant temperature is below the authored setpoint. Zero
+	// starting coolant disables the loop entirely: a dry loop pumps no
+	// flow, draws no pump power and heats nothing — circulation is never
+	// invented from an empty inventory.
+	// Opt-in one-shot puncture booking. Coolant remains liquid in the
+	// destination compartment; it is not invented breathing gas or vapour.
+	struct CoolantLeakSettings
+	{
+		std::string compartmentId;
+		double releasedKg{0.0};
+		bool operator==(CoolantLeakSettings const&) const = default;
+	};
+	struct FaultCause
+	{
+		// The first three kinds are client-supplied. DegradationCrossing
+		// names an autonomous Condition crossing; ThermalGate names an
+		// automatic protective Trip; FeedContamination names an onset from
+		// actual feed composition. Clients cannot inject these causes.
+		enum class Kind { AgentAction, ScenarioEvent, Editor, DegradationCrossing, ThermalGate, FeedContamination };
+		Kind kind{Kind::ScenarioEvent};
+		std::string detail;
+		bool operator==(FaultCause const&) const = default;
+	};
+	// The opt-in Condition model (#840), the microbial pattern of #408
+	// generalized from a living culture to a machine. An Installation
+	// that declares this block carries one aggregate Condition in [0, 1]
+	// - never per-part health - which is eroded by the declared stressor
+	// set only while each stressor actually acts, and is restored only
+	// by funded recovery. Absent, the Installation has no Condition and
+	// behaves exactly as it did before this feature: existing fixtures
+	// replay byte-identical.
+	//
+	// Every rate is a provisional engineering assumption in condition
+	// points per hour, tunable live; the thresholds are the authored
+	// points at which a stressor starts (or stops) acting. Stressors
+	// are named in the snapshot so a degraded machine always says what
+	// is degrading it. Recovery is never instant: it proceeds at most
+	// restorePerHour toward the commanded target, and each restored
+	// point spends stockUnitsPerConditionPoint from the named service
+	// stock store above that store's protected reserve - so a restore
+	// can stall with its target unmet when the stock runs out, and the
+	// reserve is never eaten to finish the job.
+	struct InstallationConditionSettings
+	{
+		double initialCondition{1.0};            // Condition at run start, [0, 1]
+		double overheatStressC{80.0};           // at or above this loop temperature the pump is heat-stressed
+		double overheatDegradePerHour{0.0};     // condition points lost per hour while heat-stressed
+		double cavitationFillFraction{0.25};    // at or below this fill, a running pump is cavitating
+		double cavitationDegradePerHour{0.0};   // condition points lost per hour while cavitating
+		double seizureThreshold{0.15};          // crossing below this spawns the catalogue 'pump-seizure' Fault
+		std::string restoreStoreId;             // service stock that funds Condition recovery
+		double restorePerHour{0.0};             // maximum condition points restored per hour
+		double stockUnitsPerConditionPoint{1.0};// stock units consumed per condition point restored
+		bool operator==(InstallationConditionSettings const&) const = default;
+	};
+	// #848: one machine's permanent Wear as of the most recent tick.
+	// `effectiveCapability` carries the units of the mode's declared
+	// rating - kW of capacity or output, kg/s of throughput, a share of
+	// the Carnot ceiling, or kWh per kg of process dose - and
+	// `derivedImpact` is the fraction of rated capability the fade has
+	// taken. A machine with no Wear opt-in reports an empty modeId and
+	// zero fade, which is exactly what it is. Repair never resets any of
+	// it: only replacement, a topology reset, starts a machine unworn.
+	struct StationMachineWearSnapshot
+	{
+		std::string modeId;
+		double wearFraction{0.0};
+		double operatingHours{0.0};
+		double throughputKg{0.0};
+		double calendarHours{0.0};
+		double effectiveCapability{0.0};
+		double derivedImpact{0.0};
+		bool operator==(StationMachineWearSnapshot const&) const = default;
+	};
+	struct StationFaultSnapshot
+	{
+		std::string installationId, modeId;
+		uint64_t onsetTick{0};
+		FaultCause::Kind causeKind{FaultCause::Kind::ScenarioEvent};
+		std::string causeDetail;
+		double derivedImpact{0.0}; // lost fraction of rated circulation
+		bool operator==(StationFaultSnapshot const&) const = default;
+	};
+	struct CoolantLoopSettings
+	{
+		std::string id;
+		std::string reservoirId;     // heat-only coupled thermal reservoir
+		double coolantCapacityKg{0.0};        // loop inventory capacity, > 0
+		double startingCoolantKg{0.0};        // initial charge, [0, capacity]; 0 disables
+		double specificHeatKJPerKgK{0.0};    // coolant cp, > 0
+		double startingTemperatureC{20.0};    // initial loop temperature
+		double freezeProtectionSetpointC{5.0}; // heater thermostat setpoint
+		double pumpPowerKW{0.0};             // pump draw at full circulation, >= 0
+		double ratedFlowKgPerS{0.0};         // rated circulation flow, >= 0
+		double exchangerConductanceKWPerK{0.0}; // full-circulation conductance, >= 0
+		double heaterCapacityKW{0.0};        // freeze-heater capacity, >= 0
+		// #416: declares this loop's circulation and freeze-protection
+		// demand a protected Critical station service: it is admitted from
+		// the actual generation-and-battery pool ahead of every
+		// discretionary external load, so shedding experiments or lighting
+		// never cuts the circulation the service depends on. Protection
+		// is authored here and only here (#754): nothing is inferred from
+		// any class, because a loop carries none (#757).
+		bool criticalService{false};
+		std::optional<CoolantLeakSettings> coolantLeak{};
+		// #840: the loop's opt-in Condition model. Its presence is
+		// topology (the model is a run-shape decision, not a live knob)
+		// and so is which store funds recovery; the rates inside it are
+		// live-tunable parameters.
+		std::optional<InstallationConditionSettings> condition{};
+		// #842: the loop's repair-parts wiring. Presence, the parts store
+		// identity and the per-mode plan identities are topology; plan
+		// durations and parts quantities are live-tunable.
+		std::optional<RepairPartsSettings> repairParts{};
+		// #843: the loop's opt-in Wear model. A loop wears on the hours
+		// its pump actually circulates and the coolant mass it actually
+		// moves, plus calendar time; it is not cycle-counted, so
+		// fadePerCycle must be zero. The permanent wearFraction it drives
+		// scales the loop's effective rated flow; repair never reverses it.
+		std::optional<InstallationWearSettings> wear{};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(CoolantLoopSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationCoolantLoops{8};
+
+	// A chiller (#397): a heat pump that supplies a cold service of its
+	// declared thermal service class. Its cold-side interface is a coolant
+	// loop (#396): the chiller extracts heat from the loop's circulating
+	// coolant, so the loop's actual circulation fraction caps the duty
+	// the evaporator can deliver — no circulation, no extracted heat.
+	// Its hot-side interface is a thermal reservoir that accepts the
+	// condenser heat. The configured COP assumption converts extracted
+	// heat into electrical work at the rated interface: work = extracted
+	// / cop, and the chiller's electrical demand is that work plus its
+	// running auxiliaries. Condenser heat equals extracted heat plus the
+	// work and auxiliaries actually supplied, booked at one consistent
+	// boundary: the loop loses exactly what it gives up, the sink gains
+	// exactly what the condenser rejects, and the electrical pool pays
+	// for the work — never a duplicate booking.
+	// Temperature interfaces: the chiller extracts only while the cold
+	// loop is above its chilled setpoint (the cold service is satisfied
+	// below it), and can reject only into a sink below its maximum
+	// condensing temperature — a sink at or above that interface makes
+	// the chiller infeasible rather than silently overloading it. Zero
+	// rated capacity disables the chiller entirely.
+	struct ChillerSettings
+	{
+		std::string id;
+		std::string thermalClass;           // cold service class supplied
+		std::string coldLoopId;             // coolant loop at the evaporator
+		std::string condenserReservoirId;   // reservoir accepting condenser heat
+		double ratedCoolingCapacityKW{0.0}; // extracted heat at rated, >= 0; 0 disables
+		double cop{1.0};                  // cooling per unit work at rated, > 0
+		double auxiliaryPowerKW{0.0};     // running auxiliaries, >= 0
+		double chilledSetpointC{5.0};     // no extraction at or below this cold-side temperature
+		double maxCondensingTemperatureC{45.0}; // no rejection into a sink at or above this
+		// #416: declares this chiller's electrical work a protected
+		// Critical station service (shutdown-cooling and containment
+		// thermal control): a credit for its deliverable draw is taken
+		// from the actual pool ahead of every discretionary external load,
+		// so the machine keeps running when the experiments or generation
+		// it serves stop. The credit is sized from the machine's actual
+		// tick-start state - gated off at the chilled setpoint, refused
+		// while the condenser sink is over, capped by the heat the cold
+		// loop actually holds above the setpoint - never by the nameplate.
+		bool criticalService{false};
+		// #844: the chiller's opt-in fault modes. `compressor-failure`
+		// (availability zero) and `refrigerant-leak` (finite charge store,
+		// capacity scales with the charge that remains) are injectable only
+		// when opted in here; the opt-ins are frozen topology and the
+		// parameters inside the leak block are tunable.
+		bool compressorFailure{false};
+		std::optional<RefrigerantLeakSettings> refrigerantLeak{};
+		// #844: the chiller's repair-parts wiring, the same contract as
+		// the coolant loop's (#842): which modes are repairable and which
+		// stores they draw from is frozen topology; plan durations and
+		// parts quantities are live-tunable and never reach a repair that
+		// already started.
+		std::optional<RepairPartsSettings> repairParts{};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(ChillerSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationChillers{8};
+
+	// Declared primary thermal input; electrical conversion belongs to a Heat engine.
+	struct HeatSourceSettings
+	{
+		std::string id;
+		std::string targetReservoirId;
+		std::string thermalClass{"generation"};
+		double ratedOutputKW{0.0};
+		std::optional<InstallationWearSettings> wear{};
+		bool throttleable{false}; // Frozen machine identity; legacy sources cannot throttle.
+		std::optional<double> commandedOutputKW{}; // Absent = rated; cap, never a boost.
+		bool operator==(HeatSourceSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationHeatSources{16};
+
+	// A Heat engine (#804): the mirror of the chiller and the station's only
+	// thermal-to-electrical crossing. It takes a heat flow from a declared hot
+	// reservoir, rejects the remainder into a declared rejection reservoir,
+	// and delivers the difference to the bus as actual generation, bounded
+	// by a declared fraction of the Carnot efficiency computed from the two
+	// reservoirs' tick-start ABSOLUTE temperatures. The bound lives at the
+	// conversion site because no composition can carry it: there is no other
+	// thermal->bus edge to gate (spec #803). Zero rated thermal input
+	// disables the engine entirely; every value must be finite.
+	// Temperatures here are gates in Celsius, but the conversion law itself
+	// divides absolute temperatures: the Carnot ratio is a quotient, not a
+	// difference, so unlike the Thermal link's dT conduction (#794, which
+	// tolerates Celsius because only the difference enters), the engine's
+	// efficiency is computed against kelvin at the conversion site.
+	struct HeatEngineSettings
+	{
+		std::string id;
+		std::string hotReservoirId;         // heat source node (heat-only interface)
+		std::string rejectionReservoirId;   // cold sink node (heat-only interface)
+		std::string thermalClass;           // service class of the rejection heat
+		double ratedThermalInputKW{0.0};    // heat intake at rated, >= 0; 0 disables
+		// The intake dispatch command, in [0, rated]. The author throttles
+		// intake below rated to leave heat deliberately in the hot
+		// reservoir for a competing consumer (#805); the command is a cap,
+		// never a boost - intake above rated is never reachable. Absent on
+		// load it means full rated, so the field only travels when the
+		// engine is actually throttled. It is a ceiling on the request,
+		// not a grant: the acceptance-coupled throttle may still hold the
+		// intake below the command when the station cannot use the power.
+		double commandedInputKW{0.0};       // intake dispatch, [0, rated]; default = rated
+		double carnotFraction{0.4};         // actual / Carnot efficiency, (0, 1]
+		double auxiliaryPowerKW{0.0};       // running auxiliaries, >= 0
+		double minHotTemperatureC{20.0};    // below this the source is too cold to work with
+		double maxSinkTemperatureC{60.0};   // rejection refused into a sink at or above this
+		// #844: the engine's opt-in `mechanical-seizure` fault mode
+		// (availability zero) and its repair-parts wiring (#842 contract).
+		// The opt-in is frozen topology.
+		bool mechanicalSeizure{false};
+		std::optional<RepairPartsSettings> repairParts{};
+		// #848: the engine's `efficiency-drift` Wear opt-in: the declared Carnot
+		// fraction drifts down with duty, so the engine captures a
+		// shrinking share of its Carnot ceiling. Presence is frozen
+		// topology; the rates inside stay live-tunable and never reprice
+		// the fade already banked.
+		std::optional<InstallationWearSettings> efficiencyDrift{};
+		std::vector<std::string> busIds{"main"};
+		bool operator==(HeatEngineSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationHeatEngines{8};
+
+	// A fuelled electrical generator (#399). It converts stored fuel energy
+	// into bus electrical output at a declared conversion efficiency; the
+	// difference is generator waste heat, routed exactly once into the
+	// generator's declared heat-sink reservoir. Fuel is an energy-unit
+	// Resource store (kJ, MJ, Wh or kWh): the generator draws qualified fuel
+	// energy above the store's protected reserve, so fuel is finite, can be
+	// resupplied by authored deliveries, and its consumption closes through
+	// the store's own boundary ledger. Output is dispatchable within the
+	// installed rating: the commanded output is capped by the rated capacity
+	// and can only move at the declared ramp limit, so no tick can command
+	// an instantaneous full-power step the machine cannot physically make.
+	// Starting is a real operation with a cost: the generator cranks at the
+	// declared startup power for the declared startup duration and only
+	// reaches Running once it has actually received that startup energy from
+	// the shared generation-and-battery pool while its cooling interface is
+	// qualified. The cranking energy dissipates into the same sink. A
+	// generator with zero installed (rated) capacity is disabled and can
+	// never produce. After electrical output stops - commanded off, fuel
+	// depletion or a cooling trip - the configured shutdown heat keeps
+	// flowing into the sink for the configured decay period, and the cooling
+	// requirement stays exposed with it: a stopped generator is not
+	// instantly a cold generator. This models the authored heat and energy
+	// contract of a fuelled source; it claims no reactor physics and no
+	// nuclear qualification of any kind.
+	// Prime mover profiles constrain authoring only. Conversion and phase
+	// behaviour continue to use the installation's authored contract.
+	enum class StationGeneratorPrimeMover : std::uint8_t { Reciprocating, GasTurbine, Stirling };
+	inline constexpr std::array<char const*, 3> StationGeneratorPrimeMoverNames{
+		"reciprocating", "gas-turbine", "stirling"};
+	inline constexpr std::array<char const*, 3> StationGeneratorPrimeMoverLabels{
+		"Piston engine", "Gas turbine", "Stirling"};
+	struct GeneratorPrimeMoverProfile
+	{
+		double minEfficiency; // inclusive; the generic (0, 1] bound also applies
+		double maxEfficiency;
+		char const* efficiencyBand;
+		std::optional<double> maxRampKWPerSecond{}; // absent = legacy unbounded
+		bool supportsInjectorFouling;
+	};
+	inline constexpr std::array<GeneratorPrimeMoverProfile, 3> GeneratorPrimeMoverProfiles{{
+		{0.0, 1.0, "(0, 1]", std::nullopt, true},
+		{0.15, 0.38, "[0.15, 0.38]", 200.0, true},
+		{0.20, 0.42, "[0.20, 0.42]", 30.0, false}}};
+	inline constexpr char GeneratorInjectorFoulingUnavailableReason[] =
+		"fouled-injector wear mode does not exist for this Stirling machine: it has no injector; combustion is external and the working fluid is sealed";
+	struct GeneratorSettings
+	{
+		std::string id;
+		StationGeneratorPrimeMover primeMover{StationGeneratorPrimeMover::Reciprocating};
+		// Opt-in methane basis: CH4 + 4 O2 (mass) -> 2.75 CO2 + 2.25 H2O.
+		// 50 MJ/kg lower heating value; independent of prime mover.
+		bool methaneCombustion{false};
+		std::string combustionAirId, combustionExhaustId;
+		std::string fuelStoreId;      // energy-unit Resource store: the fuel inventory
+		std::string thermalClass;     // service class of the generator's waste heat
+		std::string heatSinkId;       // reservoir accepting waste, startup and decay heat
+		double ratedOutputKW{0.0};  // installed electrical capacity, >= 0; 0 disables
+		double efficiency{0.35};    // electrical out per fuel energy in, (0, 1]
+		double maxRampKWPerSecond{0.0}; // output slew limit, > 0
+		double commandedOutputKW{0.0};  // dispatch setpoint, [0, rated]
+		double startupPowerKW{0.0};     // cranking draw while starting, >= 0
+		double startupSeconds{0.0};     // cranking duration, >= 0; energy = power x time
+		double shutdownHeatKW{0.0};     // decay heat after output stops, >= 0
+		double shutdownSeconds{0.0};    // decay heat duration, >= 0
+		double maxSinkTemperatureC{90.0}; // cooling qualified while sink is below this
+		// #845: the generator's `failed-start` opt-in. While the Fault is
+		// active every start attempt cranks - drawing its cranking energy
+		// from the shared pool and dissipating it into the same sink a
+		// healthy start would - and then fails back to Stopped without
+		// ever reaching Running. The attempt is zeroed; the energy it cost
+		// is accounted heat, never a refund. The opt-in is frozen
+		// topology and the mode carries no parameters beyond it: the
+		// failed crank is the machine's own authored crank.
+		bool failedStart{false};
+		// #848: the generator's `fouled-injector` Wear opt-in: injectors foul
+		// with duty, so each kWh of output costs more fuel. Rated
+		// efficiency falls as the accumulators grow. Presence is frozen
+		// topology; the rates inside stay live-tunable and never reprice
+		// the fade already banked.
+		std::optional<InstallationWearSettings> fouledInjector{};
+		std::vector<std::string> busIds{"main"};
+		std::vector<std::string> supplyBusIds{"main"}; // startup cranking
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(GeneratorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationGenerators{8};
+
+	// #845: the battery's thermal-runaway opt-in. One-shot: on onset the
+	// cell books its declared heat and toxic-species mass into the named
+	// Atmosphere compartment through the hazard-booking ledger - the
+	// heat enters the compartment's own thermal solve and the
+	// contaminant is retained and audited - and the bank leaves service:
+	// no charge, no discharge, until repaired. The booked amounts are
+	// external hazard inputs, not drawn from the bank's stored electrical
+	// energy and not invented from nothing: they travel the same audited
+	// path as every other hazard booking. Crew health reaction is out of
+	// scope (deferred crew-health initiative): the contaminant closes
+	// through the atmosphere ledger, it models no one breathing it.
+	struct BatteryThermalRunawaySettings
+	{
+		std::string compartmentId;
+		double heatKJ{0.0};   // one-shot heat booked into the compartment, > 0
+		double toxicKg{0.0};  // one-shot toxic species mass booked, > 0
+		bool operator==(BatteryThermalRunawaySettings const&) const = default;
+	};
+	struct BatterySettings
+	{
+		std::string id;
+		double nameplateKWh{0.0};         // installed nameplate energy, >= 0
+		double usableKWh{0.0};            // cyclable energy above the reserve, [0, nameplate]; 0 disables
+		double startingStoredKWh{0.0};    // initial stored energy, [0, nameplate]
+		double maxChargeKW{0.0};         // charge power limit, >= 0
+		double maxDischargeKW{0.0};      // discharge power limit, >= 0
+		double chargeEfficiency{1.0};    // stored kWh per bus kWh, (0, 1]
+		double dischargeEfficiency{1.0}; // delivered kWh per stored kWh drawn, (0, 1]
+		// #843 pilot: the battery's opt-in capacity-fade. The bank fades
+		// on equivalent full cycles - counted on real charge and real
+		// discharge, a full charge plus a full discharge of the authored
+		// cyclable energy being one cycle - and on calendar time whether
+		// it works or not. It flows no mass, so fadePerThroughputKg must
+		// be zero. The permanent wearFraction scales the whole rating:
+		// effective nameplate, usable and reserve are the authored values
+		// times (1 - wearFraction). Repair never reverses the fade; a
+		// repaired battery keeps its faded capacity.
+		std::optional<InstallationWearSettings> capacityFade{};
+		// #845: the bank's thermal-runaway opt-in. The opt-in presence
+		// and the destination compartment are frozen topology; the booked
+		// heat and toxic mass are live-tunable until an accepted
+		// injection freezes them for the Fault it started.
+		std::optional<BatteryThermalRunawaySettings> thermalRunaway{};
+		std::vector<std::string> busIds{"main"};
+		bool operator==(BatterySettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationBatteries{8};
+
+	// Declared dry gas species of a compartment atmosphere (#400). Water
+	// vapour is carried as the separate humidity term rather than as a
+	// fourth dry species, because its phase is constrained by saturation.
+	inline constexpr std::array<char const*, 3> StationAtmosphereGases{
+		"oxygen", "nitrogen", "carbonDioxide"};
+	// Molar masses in kg/mol for the tracked gases; these are constants of
+	// the declared species, not authored process coefficients.
+	inline constexpr double StationMolarMassOxygenKgPerMol{0.0319988};
+	inline constexpr double StationMolarMassNitrogenKgPerMol{0.0280134};
+	inline constexpr double StationMolarMassCarbonDioxideKgPerMol{0.0440095};
+	// Keep 2 H2 + O2 -> 2 H2O consistent in both electrolysis and
+	// fuel-cell stoichiometry; coarser rounding creates a cycle drift.
+	inline constexpr double StationMolarMassWaterKgPerMol{0.01801528};
+	// Molar mass of diatomic hydrogen gas in kg/mol (#406): a constant of
+	// the declared species, used for the fuel cell's stoichiometric
+	// oxygen demand against the hydrogen it consumes.
+	inline constexpr double StationMolarMassHydrogenKgPerMol{0.00201588};
+	// Universal gas constant in J/(mol K): the documented ideal-gas
+	// assumption behind every compartment pressure. The model treats the
+	// compartment gas as an ideal mixture at uniform temperature; no
+	// real-gas corrections are promised beyond this.
+	inline constexpr double StationUniversalGasConstantJPerMolK{8.314462618};
+	// Latent heat of vaporization of water in kJ/kg: condensation inside a
+	// compartment releases this heat into the compartment's thermal state,
+	// and evaporation would absorb it. Documented constant of the working
+	// fluid, not an authored process coefficient.
+	inline constexpr double StationLatentHeatVaporizationKJPerKg{2257.0};
+	// Crop photosynthetic stoichiometry (#409): dry crop organic matter is
+	// modelled as carbohydrate with the empirical formula CH2O. Its molar
+	// mass is defined as the closure of the exchange itself - one CO2 plus
+	// one H2O minus one O2 - so the per-kilogram-organic ratios below close
+	// the mass ledger exactly by construction rather than approximately:
+	// CO2 drawn + water drawn = organic fixed + O2 released, and the mirror
+	// respiration identity organic + O2 = CO2 + water hold on the same
+	// declared molar masses.
+	inline constexpr double StationMolarMassCarbohydrateKgPerMol{
+		StationMolarMassCarbonDioxideKgPerMol + StationMolarMassWaterKgPerMol
+		- StationMolarMassOxygenKgPerMol};
+	// kg of CO2 drawn from the compartment per kg of dry organic fixed.
+	inline constexpr double StationPhotosynthesisCO2PerOrganicKg{
+		StationMolarMassCarbonDioxideKgPerMol / StationMolarMassCarbohydrateKgPerMol};
+	// kg of O2 released into the compartment per kg of dry organic fixed.
+	inline constexpr double StationPhotosynthesisO2PerOrganicKg{
+		StationMolarMassOxygenKgPerMol / StationMolarMassCarbohydrateKgPerMol};
+	// kg of assimilation water drawn per kg of dry organic fixed.
+	inline constexpr double StationPhotosynthesisWaterPerOrganicKg{
+		StationMolarMassWaterKgPerMol / StationMolarMassCarbohydrateKgPerMol};
+	// Ideal-gas partial pressure in kPa of a dry mass of a gas species in
+	// a volume at a temperature: p = (m / M) x R x T / V.
+	double stationAtmospherePartialPressureKPa(double massKg,
+		double molarMassKgPerMol, double volumeM3, double temperatureC);
+	// Saturation water vapour pressure in kPa over liquid water at a
+	// temperature (Magnus form): p_sat = 0.61094 x exp(17.625 t / (t +
+	// 243.04)). This is the documented vapour-capacity assumption; the
+	// compartment air holds no more vapour than this at its temperature.
+	// Documented supported domain (#565): strictly above -243.04 C, the
+	// temperature where the expression is singular and its exponent
+	// overflows below it. At or below the singular temperature the
+	// function returns a finite valid continuation of zero vapour
+	// capacity - air that cold holds no vapour, matching the in-domain
+	// limit - so an overflow is never published as a shortage.
+	double stationSaturationVapourPressureKPa(double temperatureC);
+	// The vapour mass in kg that saturates a volume at a temperature: the
+	// inverse of the ideal-gas partial pressure at saturation.
+	double stationSaturatedVapourMassKg(double saturationKPa,
+		double volumeM3, double temperatureC);
+	// The bulk specific heat an Atmosphere compartment's gas carries when it
+	// crosses a pathway (#802), defaulting to dry air at room temperature.
+	// One authored number per compartment, never a per-species table: the
+	// mixture is modelled as one bulk, consistent with the pathway's "no
+	// hidden per-species or per-area decomposition" rule. The real
+	// per-species values differ (O2 1.005, N2 1.04, CO2 0.846, H2O 1.86
+	// kJ/kg/K) and a composition-weighted mix is deliberately not
+	// attempted - two identical setups always behave identically.
+	inline constexpr double StationDefaultAdvectedSpecificHeatKJPerKgK{1.005};
+	// A compartment atmosphere (#400): a finite, compartment-owned gas
+	// inventory in a fixed volume, thermally integrated on an authored
+	// effective heat capacity (the air plus its bonded structure, so a
+	// change in gas mass never silently changes the thermal model), and
+	// optionally coupled heat-only to one thermal reservoir through an
+	// authored exchanger conductance. Occupancy is an authored load
+	// assignment, never derived from World entities: the compartment's
+	// occupants and their per-person metabolic rates are configured here.
+	// Documented model assumptions: ideal-gas mixture at uniform
+	// temperature; occupancy O2 draw is capped by the oxygen actually
+	// present and CO2 production plus metabolic heat scale with the
+	// fraction of the oxygen demand actually consumed; water vapour is
+	// capped by saturation at the compartment temperature, the excess
+	// condenses immediately and its latent heat is released into the
+	// compartment (the condensate leaves the gas phase and is reported,
+	// never destroyed); leakage is a constant authored total-mass rate,
+	// capped by the inventory and composition-proportional; every gram
+	// that leaves the compartment is booked as leaked, recovered or lost -
+	// there is no unexplained disposal and no automatic cross-compartment
+	// mixing. Declared pressure and gas-quality limits are reported as
+	// crossings, never enforced by clamping the integrated state; a
+	// pressure setpoint alone never proves containment.
+	// External combustion source; all rates scale together at oxygen exhaustion.
+	struct AtmosphereFireSettings
+	{
+		double oxygenKgPerS{0.0};
+		double carbonMonoxideKgPerS{0.0};
+		double carbonDioxideKgPerS{0.0};
+		double heatKW{0.0};
+		double oxygenThresholdKg{0.0};
+		bool operator==(AtmosphereFireSettings const&) const = default;
+	};
+	struct AirlockInterlockFailureSettings
+	{
+		std::string pathwayId; // existing pathway from the cycle's compartment to $exterior
+		double breachAreaM2{0.0}; // minimum fully-open area while failed
+		bool operator==(AirlockInterlockFailureSettings const&) const = default;
+	};
+	struct AtmosphereSettings
+	{
+		std::string id;
+		double volumeM3{0.0};        // compartment volume, > 0
+		double startingOxygenKg{0.0};
+		double startingNitrogenKg{0.0};
+		double startingCarbonDioxideKg{0.0};
+		double startingWaterVapourKg{0.0};
+		double startingTemperatureC{20.0};
+		double thermalCapacityKJPerK{0.0}; // effective air + structure capacity, > 0
+		// The bulk specific heat this compartment's gas carries when it
+		// crosses an Atmosphere pathway (#802): the enthalpy that rides
+		// with the mass the pathway already moved. Must be finite and
+		// strictly positive. This is not the compartment's thermal
+		// capacity and never derived from it - capacity stays the authored
+		// "effective air + structure" number, which is exactly what keeps
+		// the advected closed forms exact. The value is the specific heat
+		// of the gas leaving this compartment: gas arriving from a hotter
+		// neighbour warms this compartment, and gas vented to Exterior
+		// vacuum cools its source as it escapes (the spray-can effect).
+		double advectedSpecificHeatKJPerKgK{StationDefaultAdvectedSpecificHeatKJPerKgK};
+		// Heat-only coupling to one thermal reservoir (#400): the
+		// compartment's air never touches the reservoir, only heat flows,
+		// through the authored conductance. An empty reservoir id leaves
+		// the compartment adiabatic. The exchange is one booking accounted
+		// once on each side: the reservoir gains the exact negation of the
+		// compartment's exchange as its own ledger term.
+		std::string reservoirId;
+		double exchangerConductanceKWPerK{0.0}; // >= 0
+		// Authored occupancy/load assignment: occupants are a configured
+		// count, never derived from World Agents in this feature.
+		int occupants{0};
+		double oxygenUsePerOccupantKgPerS{0.0};
+		double co2ProductionPerOccupantKgPerS{0.0};
+		double sensibleHeatPerOccupantKW{0.0};
+		double moistureAdditionPerOccupantKgPerS{0.0};
+		double leakRateKgPerS{0.0};  // constant total-mass leak, >= 0
+		// Declared service limits, reported as crossings, never clamped.
+		// Pressure limits must be configured 0 < min < max. A zero gas
+		// quality limit means the limit is not configured; a positive
+		// minimum oxygen partial pressure exposes a life-support need and
+		// a positive maximum CO2 partial pressure exposes an air-quality
+		// limit.
+		double minPressureKPa{0.0};
+		double maxPressureKPa{0.0};
+		double minOxygenPartialPressureKPa{0.0}; // 0 = not configured
+		double maxCarbonDioxidePartialPressureKPa{0.0}; // 0 = not configured
+		std::optional<AtmosphereFireSettings> fire{};
+		bool operator==(AtmosphereSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationAtmospheres{8};
+
+	// Reserved pathway endpoint: fixed zero partial pressures, no inventory,
+	// volume or temperature. An Atmosphere compartment may not use this id.
+	inline constexpr char StationExteriorAtmosphereId[]{"$exterior"};
+	// One undirected opening; A/B only define the sign of published flux.
+	// Exactly one endpoint may be StationExteriorAtmosphereId.
+	struct AtmospherePathwaySettings
+	{
+		std::string id;
+		std::string aAtmosphereId;
+		std::string bAtmosphereId;
+		double areaM2{1.0};
+		// How open the opening is. A plain parameter rather than accumulated
+		// state: nothing in the simulation writes it, so it can be changed
+		// live through updateNode with no mirror to keep in step, and what a
+		// run starts with is simply what the document says.
+		double openFraction{1.0};
+		bool operator==(AtmospherePathwaySettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationPathways{64};
+	// A Thermal link (#794): an explicitly authored, undirected conduction
+	// relationship between two Thermal nodes (Atmosphere or Reservoir),
+	// carrying a declared conductance in kW/K. Unlike the enthalpy carried
+	// by moving gas on an Atmosphere pathway, a link conducts heat and no
+	// mass. The two aggregates are independent (ADR-0028 / ADR-0032)
+	// - a solid wall with no opening is a link with no pathway. Heat moves
+	// down the nodes' own temperature difference toward their
+	// energy-weighted average; nothing is conducted unless a link is
+	// authored, so the no-implicit-exchange rule keeps holding with a
+	// second named crossing alongside the pathway. A/B exist only to define
+	// the sign of published flux, exactly as they do for pathways.
+	// Celsius is valid for this law: conduction depends only on the
+	// temperature *difference*, which is identical in Celsius and Kelvin.
+	// This is the opposite of the radiative path, which requires absolute
+	// temperature - do not apply the wrong rule to the wrong law.
+	// Typed endpoint identity is (kind, id). MachineBody identifies an
+	// Electrolyzer with an authored Thermal body.
+	enum class ThermalNodeKind { Atmosphere, Reservoir, MachineBody, Hull };
+	struct ThermalLinkSettings
+	{
+		std::string id;
+		std::string aAtmosphereId;
+		std::string bAtmosphereId;
+		double conductanceKWPerK{0.0}; // must be finite and strictly positive
+		// The historical id field names are retained for document compatibility;
+		// they identify nodes of the corresponding kind, not necessarily air.
+		ThermalNodeKind aKind{ThermalNodeKind::Atmosphere};
+		ThermalNodeKind bKind{ThermalNodeKind::Atmosphere};
+		bool operator==(ThermalLinkSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationThermalLinks{64};
+	// Species order for pathway arrays: oxygen, nitrogen, carbon dioxide,
+	// water vapour (including vapour, unlike StationAtmosphereGases).
+	inline constexpr std::array<char const*, 4> StationPathwayGases{
+		"oxygen", "nitrogen", "carbonDioxide", "waterVapour"};
+	// Display labels for the same four gases, index-aligned with
+	// StationPathwayGases. The ids are kebab-case so they can appear in
+	// metric ids and chart variants without camelCase leaking into the wire.
+	inline constexpr std::array<char const*, 4> StationPathwayGasIds{
+		"oxygen", "nitrogen", "carbon-dioxide", "water-vapour"};
+	inline constexpr std::array<char const*, 4> StationPathwayGasLabels{
+		"Oxygen", "Nitrogen", "Carbon dioxide", "Water vapour"};
+	// Effective turbulent coefficients, not molecular diffusivities. At
+	// 293 K, 1 m2 between two 100 m3 volumes relaxes 95% in ~256 s.
+	inline constexpr std::array<double, 4> StationPathwayDiffusionCoefficients{
+		0.002, 0.002, 0.002, 0.002};
+	// A scheduled airlock cycle over one compartment (#400): a scenario
+	// event that removes a declared gas mass from the compartment at
+	// declared simulation times, reusing the same deterministic schedule
+	// rule as resupply deliveries (occurrence time, then priority
+	// descending, then declaration order). The cycle can only remove the
+	// gas the compartment actually holds: the removal is capped by the
+	// current total mass and split composition-proportionally. The
+	// recovered fraction of what was removed is booked as recovered into
+	// the recovery receiver (accounted, retained, and not usable inside
+	// this slice); the remainder is booked as lost through the outer
+	// hatch. Recovered versus lost is therefore explicit per occurrence
+	// and cumulatively - the vent is never an unexplained disposal.
+	struct AirlockCycleSettings
+	{
+		std::string id;
+		std::string atmosphereId;
+		double gasMassKg{0.0};        // mass cycled per occurrence, > 0
+		double firstOccurrenceSeconds{0.0}; // >= 0
+		double recurrenceSeconds{0.0}; // 0 = one-off, else >= one fixed tick
+		double recoveredFraction{0.0}; // [0, 1] of the removed mass recovered
+		int priority{0};               // higher allocates first among coincidents
+		bool interruptedCycle{false}; // failed cycles lose their whole dose, with no recovery
+		std::optional<AirlockInterlockFailureSettings> interlockFailure{};
+		bool operator==(AirlockCycleSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationAirlockCycles{16};
+	// A crew contract (#401): an authored population with an activity
+	// profile whose metabolism draws food and water from compound Resource
+	// stores and oxygen from one compartment atmosphere, and returns carbon
+	// dioxide, moisture and metabolic heat to that compartment and urine
+	// and organic waste to their own finite compound stores. Crew are a
+	// configured population, never derived from World Agents: nothing in
+	// this feature reads Agent counts, movement, health, death or
+	// behaviour, and nothing here changes them. The activity profile is a
+	// [0, 1] level scaling every metabolic rate together, so a resting
+	// crew consumes and excretes less without any separate physiology.
+	// All rates are per crew member per simulated second at full
+	// activity; food, water, urine and organic-waste rates are in the
+	// referenced store's unit, gases are kg/s and heat is kW.
+	// Metabolism runs at one uniform metabolic scale per tick: the
+	// smallest of the fractions of each input the declared sources can
+	// actually supply and each output the destination stores can
+	// actually accept. Under partial supply every pathway - consumption
+	// and return alike - throttles to that scale together, so absent
+	// material never generates nominal waste: a crew with no food
+	// produces no urine, no organic waste and no metabolic heat, and a
+	// crew with no oxygen draws nothing and breathes out nothing. The
+	// requested-versus-actual remainder is reported per pathway; unmet
+	// demand is an explicit result, never a silent clamp.
+	// The authored coefficients must close: total emitted mass (CO2 +
+	// moisture + urine + organic waste) may not exceed total consumed
+	// mass (food + water + oxygen), every tracked constituent of the
+	// urine and organic-waste streams must be funded by the consumed
+	// food and water, and the declared metabolic heat may not exceed the
+	// declared food energy minus the energy still bound in the waste
+	// streams. The consumed mass the waste streams do not carry away is
+	// reported as explicit retained body mass - accounted, never
+	// discarded - and this slice models no further body composition.
+	// kg dissolved species per kg stream. Empty fields mean no acceptance gate.
+	struct WaterQualitySettings
+	{
+		std::map<std::string, double> maxConcentrations{};
+		std::optional<double> maxTotalDissolved{};
+		bool operator==(WaterQualitySettings const&) const = default;
+	};
+	struct StationWaterQualitySnapshot
+	{
+		bool enabled{false};
+		std::map<std::string, double> concentrations{};
+		double totalDissolved{0.0};
+		double scale{1.0}; // quality-permitted fraction of the full-demand load budget
+		std::string limiter;
+		double bindingConcentration{0.0}, bindingTolerance{0.0};
+		double demandKgPerS{0.0}, permittedKgPerS{0.0};
+		bool operator==(StationWaterQualitySnapshot const&) const = default;
+	};
+	struct CrewSettings
+	{
+		std::string id;
+		std::string atmosphereId;     // compartment receiving the gas and heat exchange
+		int crewCount{0};             // authored population, >= 0; 0 disables the crew
+		ProfileSettings activityProfile; // [0, 1] activity level scaling all rates
+		std::string foodStoreId;      // compound mass-unit input store
+		WaterQualitySettings waterQuality;
+		std::string waterStoreId;     // compound mass-unit input store
+		// Optional liquid return. Load values are kg per crew-day, included
+		// in (not added on top of) the declared total greywater mass.
+		std::string greywaterStoreId;
+		double greywaterKgPerCrewDay{0.0};
+		std::map<std::string, double> greywaterLoadKgPerCrewDay{};
+		std::string urineStoreId;     // compound mass-unit output store
+		std::string organicWasteStoreId; // compound mass-unit output store
+		double foodPerCrewPerS{0.0};       // food store units per crew per second
+		double waterPerCrewPerS{0.0};      // water store units per crew per second
+		double oxygenPerCrewKgPerS{0.0};   // oxygen drawn from the compartment
+		double co2PerCrewKgPerS{0.0};      // carbon dioxide returned to it
+		double moisturePerCrewKgPerS{0.0}; // water vapour returned to it
+		double urinePerCrewPerS{0.0};      // urine store units per crew per second
+		double organicWastePerCrewPerS{0.0}; // waste store units per crew per second
+		double metabolicHeatPerCrewKW{0.0};  // sensible heat into the compartment
+		bool operator==(CrewSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationCrews{8};
+	inline std::map<std::string, double> stationCrewGreywater(CrewSettings const& crew, double crewDays)
+	{
+		std::map<std::string, double> actual{};
+		double load = 0.0;
+		for (auto const& [name, mass] : crew.greywaterLoadKgPerCrewDay)
+		{ actual[name] = mass * crewDays; load += mass; }
+		actual["water"] = (crew.greywaterKgPerCrewDay - load) * crewDays;
+		return actual;
+	}
+
+	// A water collector (#402): condenses water vapour out of one
+	// compartment atmosphere onto a cold surface served by a coolant loop,
+	// delivering the condensate to a raw water store. The latent heat the
+	// vapour gives up rides into the coolant loop exactly once: the
+	// compartment never also books it, so the same condensation is never
+	// counted as a heat source twice. Collection needs coolant circulation
+	// and a cold surface colder than the compartment air, and stops at the
+	// configured relative-humidity target.
+	struct WaterCollectorSettings
+	{
+		std::string id;
+		std::string atmosphereId;            // compartment whose vapour is condensed
+		std::string coolingLoopId;           // loop serving the cold surface
+		std::string thermalClass;            // cold service class of the interface
+		std::string destStoreId;             // raw water store receiving condensate
+		double maxRateKgPerS{0.0};         // collection ceiling, 0 disables
+		double targetRelativeHumidity{0.5}; // condense down to this RH, [0, 1]
+		bool operator==(WaterCollectorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationWaterCollectors{8};
+
+	// A water treatment (#402): processes raw water into treated water
+	// plus a retained concentrate, consuming declared electricity and
+	// treatment consumables. Full rated power qualifies the treated output;
+	// curtailed power holds it unqualified for reprocessing or disposal.
+	// The recovery ratio splits processed mass between treated water and
+	// concentrate, and the concentrate stays accounted as retained material
+	// pending a disposal capability. Every water-process store is a plain
+	// mass store: this slice does not model compound water streams.
+	// The treated output qualifies on the treatment energy evidence
+	// alone: the full rated dose qualifies the output, a curtailed dose
+	// holds it unqualified for reprocessing or disposal. There is no
+	// separate release-clearance test - the treated material is what
+	// the process and its evidence say it is.
+	inline constexpr std::array<char const*, 6> StationWaterDryConstituents{
+		"dryOrganics", "nutrientNitrogen", "atmosphericNitrogen", "phosphorus", "potassium", "otherMinerals"};
+	// Feed-contact poisoning: dry contaminant mass fraction above the threshold
+	// raises a Fault and permanently fades capacity per exposed hour.
+	struct CatalystPoisoningSettings
+	{
+		double triggerConcentration{0.0};
+		double wearPerHour{0.01};
+		bool operator==(CatalystPoisoningSettings const&) const = default;
+	};
+	struct WaterTreatmentSettings
+	{
+		std::string id;
+		std::string sourceStoreId;           // raw water drawn from here
+		std::string treatedStoreId;          // treated water destination
+		std::string concentrateStoreId;      // retained concentrate, pending disposal
+		std::string consumableStoreId;       // treatment consumables
+		double throughputKgPerS{0.0};      // processing ceiling, 0 disables
+		double recoveryRatio{0.85};        // recovered water / drawn water, in (0, 1]
+		std::map<std::string, double> removalFractions{}; // dry species to concentrate; omitted keys = 1
+		double specificEnergyKWhPerKg{0.5}; // electricity per kg processed
+		double consumablePerKg{0.01};      // consumable units per kg processed
+		int priority{0};
+		bool breakthrough{false};
+		// #848: the plant's `membrane-fouling` Wear opt-in: fouled membranes
+		// pass less water, so rated throughput falls with the mass
+		// processed. Presence is frozen topology; the rates inside stay
+		// live-tunable and never reprice the fade already banked.
+		std::optional<InstallationWearSettings> membraneFouling{};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(WaterTreatmentSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationWaterTreatments{8};
+	// Treated constituents per kg of the current source blend; energy follows organics.
+	std::map<std::string, double> waterTreatmentEffluent(
+		ResourceCompositionSettings const& blend, WaterTreatmentSettings const& treatment);
+
+	// Stoichiometric oxygen mass per kilogram of split water: M_O2 / (2 x
+	// M_H2O). Hydrogen is the declared mass-balance remainder (one minus
+	// this ratio) so the electrolysis split closes exactly under the
+	// declared molar masses rather than rounding a second ratio against
+	// them.
+	inline constexpr double StationElectrolysisOxygenMassPerWaterKg{
+		StationMolarMassOxygenKgPerMol / (2.0 * StationMolarMassWaterKgPerMol)};
+	// Lower heating value of hydrogen in kJ/kg: the declared chemical
+	// energy retained per kilogram of produced H2. Documented constant of
+	// the product fuel, not an authored process coefficient: the electrical
+	// dose must at least cover the chemical energy the products carry away,
+	// and the difference is process heat.
+	inline constexpr double StationElectrolysisChemicalEnergyHydrogenKJPerKg{119960.0};
+	// Chemical energy retained per kilogram of split water, in kJ: the
+	// hydrogen share of the products at the declared stoichiometry.
+	inline constexpr double StationElectrolysisChemicalEnergyKJPerKgWater{
+		(1.0 - StationElectrolysisOxygenMassPerWaterKg)
+		* StationElectrolysisChemicalEnergyHydrogenKJPerKg};
+	// An electrolysis cell (#404): splits qualified water into oxygen and
+	// hydrogen at a declared electrical dose per kilogram split. The split
+	// is stoichiometric - oxygen at the declared mass ratio, hydrogen as
+	// the mass-balance remainder - so one kilogram of water leaves the
+	// cell as exactly one kilogram of products. The electrical dose must
+	// cover the chemical energy the products retain; the difference is
+	// process heat, routed exactly once into the declared class-matched
+	// heat-sink reservoir. Cooling is qualified only while the sink sits
+	// below the maximum sink temperature; at or above it the cell is
+	// refused whole and splits nothing. The cell only splits water the
+	// actually supplied energy can make: curtailed power reduces
+	// production rather than gifting energy-rich products for free, and
+	// the shortfall stays visible as unmet production. Oxygen is
+	// delivered to a qualified gas store or directly to one compartment
+	// atmosphere (exactly one destination is configured); a full product
+	// store caps production rather than venting or deleting the excess.
+	// Feed water is drawn only above its store's protected reserve, so a
+	// life-support water reserve is never electrolysed away.
+	// Optional lumped casing shared by eligible machine contracts. No service class.
+	struct ThermalBodySettings
+	{
+		double heatCapacityKJPerK{1.0};
+		double startingTemperatureC{20.0};
+		double sinkConductanceKWPerK{1.0};
+		bool operator==(ThermalBodySettings const&) const = default;
+	};
+	struct ElectrolyzerSettings
+	{
+		std::string id;
+		std::string waterStoreId;    // qualified water above the protected reserve
+		std::string oxygenStoreId;   // O2 destination store; empty when delivering to a compartment
+		std::string hydrogenStoreId; // H2 destination store
+		std::string atmosphereId;    // O2 delivered here instead of the store; empty when storing
+		std::string thermalClass;    // service class of the cell's heat sink
+		std::string heatSinkId;      // reservoir receiving the process heat
+		double rateKgPerS{0.0};    // rated water split, 0 disables
+		double specificEnergyKWhPerKgWater{4.5}; // electrical dose per kg split
+		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
+		int priority{0};
+		std::optional<CatalystPoisoningSettings> catalystPoisoning{};
+		// #848: the cell's `membrane-degradation` Wear opt-in: a degraded
+		// membrane costs more electricity per kilogram split, so the
+		// specific-energy dose rises with the mass split. Presence is
+		// frozen topology; the rates inside stay live-tunable and never
+		// reprice the fade already banked.
+		std::optional<InstallationWearSettings> membraneDegradation{};
+		std::optional<ThermalBodySettings> thermalBody{};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(ElectrolyzerSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationElectrolyzers{8};
+	// A CO2 removal machine (#404): scrubs carbon dioxide out of one
+	// compartment atmosphere into a finite capture store. The captured gas
+	// is inventory, not vanished carbon: it leaves the compartment through
+	// a booked removal pathway and occupies the capture store until a
+	// later disposal or reuse capability moves it. Capture capacity is
+	// finite on every axis - the rated rate, the CO2 actually present, the
+	// capture store's remaining headroom and the drawable regeneration
+	// consumable - and the unmet atmospheric service is the explicit
+	// remainder of the rated request against them. Each captured kilogram
+	// costs its declared electrical energy and, when a consumable is
+	// configured, its declared share of the consumable, drawn from the
+	// shared power pool and the consumable store's qualified inventory
+	// above its protected reserve. A tick that demands power and receives
+	// none is refused whole: no CO2 is scrubbed and no consumable is
+	// drawn. The machine can only scrub what the compartment holds, so it
+	// never drives the CO2 inventory negative.
+	struct Co2CaptureSettings
+	{
+		std::string id;
+		std::string atmosphereId;        // compartment whose CO2 is removed
+		std::string captureStoreId;      // captured CO2 lands here as inventory
+		std::string consumableStoreId;   // regeneration consumable; empty when the process uses none
+		double maxRateKgPerS{0.0};    // finite capture capacity, 0 disables
+		double specificEnergyKWhPerKg{0.5}; // electricity per kg captured
+		double consumablePerKg{0.0};   // consumable units per kg captured
+		int priority{0};
+		// #848: the loop's `absorbent-degradation` Wear opt-in: spent absorbent
+		// takes up less per pass, so rated capture rate falls with the
+		// mass captured. Presence is frozen topology; the rates inside
+		// stay live-tunable and never reprice the fade already banked.
+		std::optional<InstallationWearSettings> absorbentDegradation{};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(Co2CaptureSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationCo2Captures{8};
+	// Stoichiometric oxygen mass consumed per kilogram of hydrogen burnt:
+	// M_O2 / (2 x M_H2). Product water is booked as the sum of the
+	// reactants actually consumed, so the fuel-cell mass ledger closes
+	// exactly under the declared molar masses rather than rounding a
+	// second ratio against them (#406).
+	inline constexpr double StationFuelCellOxygenMassPerHydrogenKg{
+		StationMolarMassOxygenKgPerMol / (2.0 * StationMolarMassHydrogenKgPerMol)};
+	// A fuel-cell backup unit (#406): generates electrical power from two
+	// dedicated, finite reactant stores - hydrogen and oxygen - while the
+	// life-support inventories stay untouched. The cell is a dispatchable
+	// source like a fuelled generator: its output joins the shared
+	// generation-and-battery pool, bounded by the installed electrical
+	// rating, the dispatch setpoint, the reactants actually drawable
+	// above each store's protected reserve, and the product water store's
+	// remaining headroom - a backed-up water destination caps production
+	// rather than vanishing product mass. Electrical output is the declared
+	// efficiency times the chemical energy of the hydrogen consumed (the
+	// documented lower heating value reused from the electrolysis
+	// contract); the difference is waste heat, routed exactly once into
+	// the declared class-matched sink. Cooling is qualified only while the
+	// sink sits below the maximum sink temperature: at or above it the
+	// interface cannot accept the waste heat and the cell is refused
+	// whole. The oxygen store is refilled only through controlled surplus
+	// transfers that themselves preserve the supplying service's
+	// protected reserve: the cell never draws protected breathing oxygen
+	// implicitly, because it can only ever see its own dedicated store.
+	// Product water lands in the declared destination - the raw-water
+	// store a water treatment (#402) qualifies - so the backup's water
+	// goes through treatment rather than into drinking water directly.
+	// Chemistry constrains authoring only; runtime conversion uses authored efficiency.
+	enum class FuelCellChemistry : std::uint8_t { PEM, Alkaline, SolidOxide };
+	inline constexpr std::array<char const*, 3> FuelCellChemistryNames{
+		"PEM", "alkaline", "solid oxide"};
+	struct FuelCellChemistryProfile
+	{
+		double minEfficiency; // inclusive; the generic (0, 1] bound also applies
+		double maxEfficiency;
+		char const* efficiencyBand;
+		bool supportsCatalystPoisoning;
+	};
+	inline constexpr std::array<FuelCellChemistryProfile, 3> FuelCellChemistryProfiles{{
+		{0.0, 1.0, "(0, 1]", true},
+		{0.35, 0.75, "[0.35, 0.75]", true},
+		{0.35, 0.70, "[0.35, 0.70]", false}}};
+	inline constexpr char FuelCellPoisoningUnavailableReason[] =
+		"catalyst-poisoning fault mode does not exist for this solid oxide stack";
+	struct FuelCellSettings
+	{
+		std::string id;
+		std::string hydrogenStoreId;  // dedicated H2 reactant store
+		std::string oxygenStoreId;    // dedicated O2 reactant store, never the life-support reserve
+		std::string waterStoreId;     // product water destination (raw store for treatment)
+		std::string thermalClass;     // service class of the cell's heat sink
+		std::string heatSinkId;       // reservoir receiving the waste heat
+		double ratedOutputKW{0.0};   // installed electrical rating, >= 0; 0 disables
+		double efficiency{0.6};      // electrical out per chemical energy in, (0, 1]
+		double commandedOutputKW{0.0}; // dispatch setpoint, [0, rated]
+		double maxSinkTemperatureC{80.0}; // cooling qualified while the sink is below this
+		std::optional<CatalystPoisoningSettings> catalystPoisoning{};
+		// #848: the stack's `stack-degradation` Wear opt-in: the stack loses
+		// rated output permanently as it is drawn, beside any catalyst
+		// poisoning its feed brings. Presence is frozen topology; the
+		// rates inside stay live-tunable and never reprice the fade
+		// already banked.
+		std::optional<InstallationWearSettings> stackDegradation{};
+		std::vector<std::string> busIds{"main"};
+		FuelCellChemistry chemistry{FuelCellChemistry::PEM};
+		bool operator==(FuelCellSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationFuelCells{8};
+	// Molar mass of solid carbon in kg/mol (#405): a constant of the
+	// declared species. Methane's declared molar mass is exactly the
+	// carbon plus two hydrogen molecules, so the methane-processing
+	// mass balance closes under the declared molar masses.
+	inline constexpr double StationMolarMassCarbonKgPerMol{0.0120107};
+	inline constexpr double StationMolarMassMethaneKgPerMol{
+		StationMolarMassCarbonKgPerMol + 2.0 * StationMolarMassHydrogenKgPerMol};
+	// Lower heating value of methane in kJ/kg: the declared chemical
+	// energy retained per kilogram of CH4. Documented constant of the
+	// declared fuel, not an authored process coefficient: it is what
+	// makes the Sabatier reaction's exothermic heat release derivable
+	// from the declared heating values rather than invented per reactor.
+	inline constexpr double StationMethaneLowerHeatingValueKJPerKg{50004.0};
+	// Stoichiometric masses of the Sabatier reaction CO2 + 4 H2 ->
+	// CH4 + 2 H2O declared against the declared molar masses, per
+	// kilogram of CO2 converted (#405): hydrogen is consumed at the
+	// declared molar ratio, methane is produced at the declared molar
+	// ratio, and water is the declared mass-balance remainder, so the
+	// stage closes exactly under the declared masses rather than by
+	// rounding a second ratio against them.
+	inline constexpr double StationSabatierHydrogenMassPerCarbonDioxideKg{
+		4.0 * StationMolarMassHydrogenKgPerMol / StationMolarMassCarbonDioxideKgPerMol};
+	inline constexpr double StationSabatierMethaneMassPerCarbonDioxideKg{
+		StationMolarMassMethaneKgPerMol / StationMolarMassCarbonDioxideKgPerMol};
+	inline constexpr double StationSabatierWaterMassPerCarbonDioxideKg{
+		1.0 + StationSabatierHydrogenMassPerCarbonDioxideKg
+		- StationSabatierMethaneMassPerCarbonDioxideKg};
+	// Exothermic heat released per kilogram of CO2 converted by the
+	// Sabatier reaction, in kJ (#405): the chemical energy the
+	// hydrogen reactant carried that the methane product does not
+	// retain, derived from the declared heating values and the declared
+	// stoichiometry - a documented constant of the declared reaction,
+	// not an authored coefficient. The reactor routes this heat into
+	// its class-matched sink alongside the electrical dose it drew, so
+	// the energy ledger closes over reactants + electricity = products
+	// + heat, and the exothermy is visible instead of vanishing.
+	inline constexpr double StationSabatierReactionHeatKJPerKgCarbonDioxide{
+		StationSabatierHydrogenMassPerCarbonDioxideKg
+		* StationElectrolysisChemicalEnergyHydrogenKJPerKg
+		- StationSabatierMethaneMassPerCarbonDioxideKg
+		* StationMethaneLowerHeatingValueKJPerKg};
+	// Stoichiometric masses of methane processing CH4 -> C + 2 H2
+	// declared against the declared molar masses, per kilogram of CH4
+	// processed (#405): hydrogen is returned at the declared molar
+	// ratio and solid carbon is the declared mass-balance remainder.
+	inline constexpr double StationMethaneProcessingHydrogenMassPerMethaneKg{
+		2.0 * StationMolarMassHydrogenKgPerMol / StationMolarMassMethaneKgPerMol};
+	inline constexpr double StationMethaneProcessingCarbonMassPerMethaneKg{
+		1.0 - StationMethaneProcessingHydrogenMassPerMethaneKg};
+	// Endothermic reaction heat absorbed per kilogram of methane
+	// processed, in kJ (#405): the thermal demand of pyrolysis, the
+	// standard reaction enthalpy of +74.8 kJ/mol CH4 divided by the
+	// declared molar mass. Documented constant of the declared
+	// reaction: the authored electrical dose must at least cover the
+	// reaction's heat demand - a dose below it would drive a reaction
+	// that needs more heat than the machine supplies - and the
+	// difference between the dose and the demand is process heat
+	// routed to the sink.
+	inline constexpr double StationMethaneProcessingReactionHeatKJPerKgMethane{
+		74.8 / StationMolarMassMethaneKgPerMol};
+	// The opt-in latching Trip (#841) shared by the Sabatier reactor and
+	// the methane processor. `triggerTemperatureC` is the sink temperature
+	// at or above which the machine protects itself; `heatSpikeKJ` is the
+	// one-shot hazard energy the latch books into that sink through the
+	// ordinary ledger. It is external hazard energy, not invented electrical
+	// supply, normal reaction heat, or a downstream damage edge: what the
+	// spike does to anything coupled to the sink is those components' own
+	// gates' business (ADR-0030). The spike is booked once per latch, so a
+	// reset against an unresolved trigger pays a fresh spike when it
+	// relatches.
+	struct OvertempRunawaySettings
+	{
+		double triggerTemperatureC{80.0};
+		double heatSpikeKJ{1.0};
+		bool operator==(OvertempRunawaySettings const&) const = default;
+	};
+	// A Sabatier reactor (#405): converts captured carbon dioxide and
+	// hydrogen into methane and water, CO2 + 4 H2 -> CH4 + 2 H2O. The
+	// conversion is stoichiometric under the declared molar masses -
+	// hydrogen consumed, methane produced and water as the mass-balance
+	// remainder - so every kilogram that enters leaves as product and
+	// nothing vanishes. The reaction is exothermic: the heat the
+	// reactants do not retain in the products rides into the declared
+	// class-matched heat sink together with the electrical dose the
+	// reactor drew, booked exactly once. The reactor only converts the
+	// CO2 the actually supplied energy can pay for at the declared
+	// dose: curtailed power reduces conversion rather than gifting
+	// products for free, and a tick that demands power and receives
+	// none is refused whole. Both feeds are drawn only from qualified
+	// material above each store's protected reserve, and a full product
+	// store caps conversion rather than venting the excess: the water
+	// destination is the raw-water store a water treatment (#402)
+	// qualifies, and the methane destination is the processing stage's
+	// feed store. The heat sink must share the reactor's thermal service
+	// class: that is a service-class match, not a hazard partition (#758).
+	struct SabatierReactorSettings
+	{
+		std::string id;
+		std::string co2StoreId;     // captured CO2 feed inventory (#404)
+		std::string hydrogenStoreId;  // H2 feed above the protected reserve
+		std::string methaneStoreId;   // CH4 product destination
+		std::string waterStoreId;     // H2O product destination: raw water for treatment
+		std::string thermalClass;     // service class of the reactor's heat sink
+		std::string heatSinkId;       // reservoir receiving reaction and process heat
+		double rateKgPerS{0.0};     // rated CO2 conversion, 0 disables
+		double specificEnergyKWhPerKgCO2{1.0}; // electrical dose per kg CO2 converted
+		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
+		int priority{0};
+		std::optional<OvertempRunawaySettings> overtempRunaway{};
+		// #848: the machine's `catalyst-deactivation` Wear opt-in: the catalyst
+		// loses activity with throughput, so rated conversion rate falls
+		// with the mass converted. Presence is frozen topology; the rates
+		// inside stay live-tunable and never reprice the fade already
+		// banked.
+		std::optional<InstallationWearSettings> catalystDeactivation{};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(SabatierReactorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationSabatierReactors{8};
+	// A methane processor (#405): splits methane into solid carbon and
+	// hydrogen, CH4 -> C + 2 H2. The split is stoichiometric under the
+	// declared molar masses - hydrogen returned at the declared ratio,
+	// solid carbon as the mass-balance remainder - so one kilogram of
+	// methane leaves as exactly one kilogram of products. The recovered
+	// hydrogen returns to the declared hydrogen store: it is recycled
+	// feed, not free supply, because the Sabatier stage consumes twice
+	// the hydrogen per methane it makes as this stage returns, so the
+	// combined process retains a net hydrogen demand and the loop can
+	// never run on its own return. The reaction is endothermic: the
+	// authored electrical dose must at least cover the declared
+	// reaction heat demand, and the difference between the dose and the
+	// demand is process heat routed exactly once into the declared
+	// class-matched sink. The processor only processes the methane the
+	// actually supplied energy can drive at the declared dose; a full
+	// hydrogen or carbon destination caps processing rather than
+	// venting; the carbon destination is the configured useful store or
+	// the terminal-waste store surplus goes to (#403). Feed and return
+	// flows are qualified material above each store's protected reserve.
+	struct MethaneProcessorSettings
+	{
+		std::string id;
+		std::string methaneStoreId;   // CH4 feed
+		std::string hydrogenStoreId;  // recovered H2 destination (recycled feed)
+		std::string carbonStoreId;    // solid carbon: useful store or terminal waste
+		std::string thermalClass;     // service class of the processor's heat sink
+		std::string heatSinkId;       // reservoir receiving the process heat
+		double rateKgPerS{0.0};     // rated CH4 processing, 0 disables
+		double specificEnergyKWhPerKgCH4{2.0}; // electrical dose per kg CH4, must cover the reaction demand
+		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
+		int priority{0};
+		std::optional<OvertempRunawaySettings> overtempRunaway{};
+		// #848: the machine's `catalyst-deactivation` Wear opt-in: the catalyst
+		// loses activity with throughput, so rated conversion rate falls
+		// with the mass converted. Presence is frozen topology; the rates
+		// inside stay live-tunable and never reprice the fade already
+		// banked.
+		std::optional<InstallationWearSettings> catalystDeactivation{};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(MethaneProcessorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationMethaneProcessors{8};
+	// A microbial processor (#407): an aerobic digester that recovers
+	// nutrients and water from organic waste. The feedstock is a compound
+	// organic-waste store whose declared composition fixes how much bound
+	// nutrient nitrogen, phosphorus, potassium and grouped minerals each
+	// kilogram of feed carries; the recovery yields are declared per
+	// constituent as fractions of that bound content, so N, P and K stay
+	// separately recoverable and the trace minerals stay grouped. Only
+	// the feed's bound nutrients are recoverable: atmospheric nitrogen
+	// in the feedstock is not a nutrient source, and no configured
+	// process here substitutes it - the atmospheric N2 term passes
+	// through to the residue untouched.
+	// The process consumes oxygen, process water, electricity and a
+	// consumable culture medium per kilogram of feed, and produces
+	// recovered nutrients, recovered water, carbon dioxide and an
+	// unrecoverable residue. The residue rate is not authored separately:
+	// it is the mass-balance remainder of the declared inputs and outputs
+	// per kilogram of feed, so the declared yields can never create or
+	// destroy mass - a configuration whose outputs exceed its inputs is
+	// refused. The digestion is exothermic: the declared reaction heat is
+	// capped by the feedstock's own declared chemical energy, so the
+	// released heat is paid for by the feed rather than appearing for
+	// free, and it routes exactly once into the class-matched heat sink
+	// together with the electrical dose the processor drew.
+	// Temperature eligibility is a static window on the coupled thermal
+	// interface: the culture runs only while the sink reservoir sits at
+	// or above the declared minimum operating temperature and below the
+	// maximum sink temperature; outside the window the stage is refused
+	// whole.
+	// Aggregate culture condition and recovery (#408): the processor
+	// carries one aggregate condition in [0, 1] - never individual
+	// organisms - degraded by the configured adverse-rule set: feed
+	// starvation, culture-medium exhaustion, cold stress below the
+	// operating window and heat stress at or above the maximum sink
+	// temperature, each with its own per-hour degradation rate. The
+	// degradation, recovery and stock-consumption coefficients are
+	// provisional biological assumptions: tunable model parameters,
+	// not validated biology. Condition throttles the uniform per-tick
+	// processing scale, so a degraded culture digests proportionally
+	// less; it never creates or deletes feedstock, microbial material
+	// or stored nutrients by itself - every material change stays an
+	// accounted store exchange. Recovery is bounded: it proceeds only
+	// while the culture is fed, supplied with medium and inside its
+	// temperature window, at most recoveryPerHour toward full, and
+	// when a replacement biological stock store is declared each
+	// recovered condition point consumes the configured stock units
+	// from that store above its protected reserve. Recovery is never
+	// instant and no individual organism is simulated.
+	// Feed, oxygen and process water draw only qualified inventory above
+	// each store's protected reserve. Products land qualified in finite
+	// stores: the nutrient store, the recovered-water store a water
+	// treatment (#402) can qualify further, the CO2 store as carbon
+	// inventory, and the residue store, which may be the terminal-waste
+	// store ejection (#403) removes. A saturated destination
+	// backpressures the whole stage: the processor runs at one uniform
+	// scale per tick, so a full destination throttles consumption and
+	// production together and no pathway ever runs ahead of the others.
+	enum class StationRateBasis { FixedPerFeedMass, CompositionDerived };
+	inline char const* stationRateBasisName(StationRateBasis basis)
+	{
+		switch (basis)
+		{
+		case StationRateBasis::FixedPerFeedMass: return "FixedPerFeedMass";
+		case StationRateBasis::CompositionDerived: return "CompositionDerived";
+		}
+		return "Unknown";
+	}
+	struct MicrobialProcessorSettings
+	{
+		std::string id;
+		std::string feedStoreId;            // compound organic-waste feed
+		std::string oxygenStoreId;          // O2 drawn per kg of feed
+		WaterQualitySettings waterQuality;
+		std::string waterStoreId;           // process water drawn per kg of feed
+		std::string consumableStoreId;      // microbial culture medium per kg of feed
+		std::string nutrientStoreId;        // recovered N/P/K/mineral product
+		std::string recoveredWaterStoreId;  // recovered water product
+		std::string co2StoreId;             // CO2 product inventory
+		std::string residueStoreId;         // unrecoverable residue
+		std::string thermalClass;           // service class of the processor's heat sink
+		std::string heatSinkId;             // reservoir receiving the reaction and process heat
+		double rateKgPerS{0.0};           // rated feed processing, 0 disables
+		StationRateBasis rateBasis{StationRateBasis::FixedPerFeedMass};
+		double organicOxidationFraction{0.9};
+		double o2PerKgOrganicOxidized{1.4};
+		double nitrificationFraction{0.0};
+		double o2PerKgNitrifiedN{4.57};
+		double co2PerKgOrganicOxidized{1.8};
+		double processWaterTargetMoisture{0.0};
+		double heatReleaseFraction{0.7};
+		double consumablePerKgOrganicOxidized{0.05};
+		double specificEnergyKWhPerKgFeed{2.0}; // electrical dose per kg of feed
+		double oxygenPerKgFeedKg{0.8};    // kg O2 consumed per kg of feed
+		double processWaterPerKgFeedKg{0.5}; // process water kg drawn per kg of feed
+		double consumablePerKgFeed{0.01}; // consumable units per kg of feed
+		double co2PerKgFeedKg{0.3};       // CO2 kg produced per kg of feed
+		double nitrogenRecovery{0.8};     // fraction of the feed's bound N recovered
+		double phosphorusRecovery{0.8};   // fraction of the feed's P recovered
+		double potassiumRecovery{0.8};    // fraction of the feed's K recovered
+		double mineralsRecovery{0.7};     // fraction of the feed's grouped minerals recovered
+		std::map<std::string, double> recoveredWaterCarryoverFractions{};
+		double waterRecovery{0.7};        // fraction of the feed's moisture recovered
+		double reactionHeatKJPerKgFeed{1500.0}; // exothermic heat, capped by the feed's chemical energy
+		double minOperatingTemperatureC{15.0}; // culture runs at or above this interface temperature
+		double maxSinkTemperatureC{45.0};      // heat rejection qualified while the sink is below this
+		// #408 condition/recovery coefficients. All provisional
+		// biological assumptions (condition points per hour), not
+		// validated biology.
+		double initialCondition{1.0};            // aggregate culture condition at start, [0, 1]
+		double starvationDegradePerHour{0.05};   // condition points lost per hour with no drawable feed
+		double consumableExhaustionDegradePerHour{0.05}; // points lost per hour with no drawable medium
+		double coldStressDegradePerHour{0.02};   // points lost per hour below the operating window
+		double heatStressDegradePerHour{0.10};   // points lost per hour at or above the max sink temperature
+		double recoveryPerHour{0.02};            // maximum points restored per hour under benign conditions
+		std::string stockStoreId;                // optional replacement biological stock consumed by recovery
+		double stockUnitsPerConditionPoint{1.0}; // stock units consumed per condition point restored
+		int priority{0};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(MicrobialProcessorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationMicrobialProcessors{8};
+
+	// Shared coefficient model for validation, editor preview and actual-blend
+	// runtime sizing. Values are per kg feed; medium is kg in derived mode,
+	// legacy store units otherwise. Call only with validated parameters.
+	struct StationMicrobialRates
+	{
+		double oxygen, water, consumable, co2, heat, nitrifiedNitrogen;
+	};
+	inline StationMicrobialRates stationMicrobialRates(MicrobialProcessorSettings const& p,
+		ResourceCompositionSettings const& c)
+	{
+		if (p.rateBasis == StationRateBasis::FixedPerFeedMass)
+			return {p.oxygenPerKgFeedKg, p.processWaterPerKgFeedKg,
+				p.consumablePerKgFeed, p.co2PerKgFeedKg, p.reactionHeatKJPerKgFeed, 0.0};
+		auto organics = (1.0 - c.moisture) * (1.0 - c.nutrientNitrogen
+			- c.atmosphericNitrogen - c.phosphorus - c.potassium - c.otherMinerals);
+		if (organics < 0.0) organics = 0.0;
+		auto const oxidized = organics * p.organicOxidationFraction;
+		auto const nitrified = (1.0 - c.moisture) * c.nutrientNitrogen
+			* p.nitrogenRecovery * p.nitrificationFraction;
+		auto const dilution = p.processWaterTargetMoisture > c.moisture
+			? (p.processWaterTargetMoisture - c.moisture) / (1.0 - p.processWaterTargetMoisture) : 0.0;
+		return {oxidized * p.o2PerKgOrganicOxidized + nitrified * p.o2PerKgNitrifiedN,
+			dilution, oxidized * p.consumablePerKgOrganicOxidized,
+			oxidized * p.co2PerKgOrganicOxidized,
+			oxidized * c.energyKJPerKgDry * p.heatReleaseFraction, nitrified};
+	}
+
+	// Actual unrecovered dry constituent mass per kg of feed routed to water.
+	// Omitted fractions leave the legacy arithmetic and product split intact.
+	inline std::map<std::string, double> stationMicrobialCarryover(
+		MicrobialProcessorSettings const& p, ResourceCompositionSettings const& c)
+	{
+		auto const dry = 1.0 - c.moisture;
+		auto const organic = std::max(0.0, dry * (1.0 - c.nutrientNitrogen
+			- c.atmosphericNitrogen - c.phosphorus - c.potassium - c.otherMinerals));
+		auto const rates = stationMicrobialRates(p, c);
+		std::map<std::string, double> remaining{
+			{"dryOrganics", std::max(0.0, organic - (p.rateBasis == StationRateBasis::CompositionDerived
+				? organic * p.organicOxidationFraction : std::min(organic, rates.co2)))},
+			{"nutrientNitrogen", dry * c.nutrientNitrogen * (1.0 - p.nitrogenRecovery)},
+			{"atmosphericNitrogen", dry * c.atmosphericNitrogen},
+			{"phosphorus", dry * c.phosphorus * (1.0 - p.phosphorusRecovery)},
+			{"potassium", dry * c.potassium * (1.0 - p.potassiumRecovery)},
+			{"otherMinerals", dry * c.otherMinerals * (1.0 - p.mineralsRecovery)}};
+		std::map<std::string, double> result{};
+		for (auto const& [name, fraction] : p.recoveredWaterCarryoverFractions)
+			if (fraction > 0.0) result[name] = remaining.at(name) * fraction;
+		return result;
+	}
+
+	// The living biological constituent inventory (#571): the actual dry-mass
+	// amounts of each tracked constituent a Biological population carries,
+	// routes and loses. Organic matter is the respirable share; the bound
+	// nutrient fractions are non-respirable and are preserved until harvest
+	// or death routes them out. Tracked as real inventories rather than
+	// re-derived from a fixed composition fraction of a shrinking biomass,
+	// so respiration can never reclassify a nutrient as fuel.
+	struct StationBiologicalConstituents
+	{
+		double organicKg{0.0};
+		double nutrientNitrogenKg{0.0};
+		double phosphorusKg{0.0};
+		double potassiumKg{0.0};
+		double mineralsKg{0.0};
+		StationBiologicalConstituents& operator+=(StationBiologicalConstituents const& other)
+		{
+			organicKg += other.organicKg;
+			nutrientNitrogenKg += other.nutrientNitrogenKg;
+			phosphorusKg += other.phosphorusKg;
+			potassiumKg += other.potassiumKg;
+			mineralsKg += other.mineralsKg;
+			return *this;
+		}
+		bool operator==(StationBiologicalConstituents const&) const = default;
+	};
+	// A crop population (#409): an aggregate living stand of crops inside
+	// one Atmosphere compartment, growing from a declared dry Living biomass
+	// under the resources actually delivered to it. Three quantities are kept
+	// separate, per the domain: the population's dry Living biomass (runtime
+	// state, never a store), the installation's Growing capacity (declared
+	// illuminated growing area x maximum supported dry biomass density),
+	// and the station's stored food - which this slice never touches: crops
+	// grow and respire, and Harvest is deferred to a later ticket. The
+	// declared composition fixes the dry-mass basis of the living biomass:
+	// the organic fraction (the dry-mass balance) is what photosynthesis
+	// builds and respiration burns, while the bound nutrient nitrogen,
+	// phosphorus, potassium and grouped mineral fractions are drawn from
+	// their own separate stores, so one abundant nutrient can never
+	// substitute for an exhausted one. Atmospheric nitrogen is refused in
+	// the declared composition: crops take up bound nutrient nitrogen, not
+	// air, and no configured process here converts one form into the other.
+	// Growth is limited by every real input together, at one uniform growth
+	// scale per tick: the light energy actually delivered (installed lamp
+	// power x the illumination profile x the fraction the power pool
+	// actually supplied - darkness or a blackout photosynthesizes nothing
+	// for free), the CO2 actually present in the compartment, the irrigation
+	// water drawable above the store's protected reserve, each tracked
+	// nutrient drawable above its own reserve, and the remaining Growing
+	// capacity headroom. The essential canopy circulation demand - the
+	// pumps that actually deliver gas, water and nutrients across the
+	// canopy - is drawn from the same power pool ahead of the discretionary
+	// lamp demand, so shedding lighting never starves the circulation that
+	// the biology depends on; unsupplied circulation stops growth whole.
+	// Growth is only qualified while the compartment temperature sits inside
+	// the declared growing window; outside it the canopy is dormant or heat-
+	// stopped and grows nothing, but still respires.
+	// Respiration runs day and night: the declared organic content of the
+	// living biomass is burned at the declared per-hour rate, drawing the
+	// oxygen the compartment actually holds and returning CO2, water vapour
+	// and heat to that compartment. Transpiration draws irrigation water in
+	// proportion to growth and returns it as vapour. Every exchange is a
+	// real transfer: the CO2, water, nutrient and oxygen flows move through
+	// the compartment and store inventories, the light energy not fixed as
+	// chemical biomass energy and the respiration heat land once in the
+	// compartment's thermal solve, and the mass and energy ledgers close
+	// over fixed + respired = delivered.
+	// All biological coefficients - growth yield per kWh of light,
+	// respiration per hour, transpiration per kilogram of growth, the
+	// supported biomass density and the growing window - are provisional
+	// biological assumptions: tunable model parameters, not validated
+	// agronomy. Validation rejects declarations that would fix more
+	// chemical energy than the light can deliver, declare an empty growing
+	// window, or start above the declared capacity.
+	struct CropPopulationSettings
+	{
+		// Nonempty opts into selective irrigation: take pure water and the
+		// declared fraction of dissolved N/P/K accompanying that water,
+		// capped by growth's nutrient demand. Remaining salts stay in the
+		// loop; separate fertilizer ports supply the deficit. Empty is legacy.
+		std::map<std::string, double> irrigationUptakeFractions{};
+		std::string id;
+		std::string atmosphereId;             // compartment the canopy exchanges gas and heat with
+		WaterQualitySettings waterQuality;
+		std::string waterStoreId;             // irrigation water above the protected reserve
+		std::string nitrogenStoreId;          // bound nutrient nitrogen available for uptake
+		std::string phosphorusStoreId;        // phosphorus available for uptake
+		std::string potassiumStoreId;         // potassium available for uptake
+		std::string mineralsStoreId;          // grouped trace minerals available for uptake
+		ResourceCompositionSettings composition; // declared dry-mass basis of the living biomass
+		double growingAreaM2{0.0};          // illuminated growing area; 0 disables the population
+		double maxBiomassDensityKgPerM2{2.0}; // supported dry biomass per unit area (provisional)
+		double initialBiomassKg{0.0};       // starting dry living biomass, [0, area x density]
+		double circulationPowerKW{0.0};     // essential canopy circulation demand, drawn first
+		double growthYieldKgPerKWh{0.01};   // dry biomass fixed per kWh of delivered light (provisional)
+		double respirationPerHour{0.012};   // dry organic burned per dry biomass per hour (provisional)
+		double transpirationKgPerKgGrowth{0.0}; // water transpired per kg of growth (provisional)
+		double minGrowingTemperatureC{10.0}; // growth at or above this compartment temperature
+		double maxGrowingTemperatureC{35.0}; // growth below this compartment temperature
+		// Harvest contract (#410): when the living dry biomass reaches the
+		// declared trigger the population is harvested - real living
+		// material is removed and its declared dry-mass constituents are
+		// preserved into the food and waste stores rather than vanishing.
+		// The edible fraction of the harvested dry mass is booked into the
+		// food store; the inedible remainder, plus any edible surplus the
+		// food store cannot hold, is routed through the waste store. A
+		// destination that is full constrains the harvest: the remainder
+		// stays living rather than being discarded for free. Harvest is
+		// disabled while the trigger is zero; enabling it requires both
+		// destination stores. Both destinations must be mass-denominated,
+		// distinct from each other, and if they declare a composition it
+		// must match the crop's declared composition: harvested material
+		// enters a store exactly as declared, and a store declaring a
+		// different material is a compound boundary that only an explicit
+		// conversion may cross. Under adverse conditions the living
+		// organic content is respired away; once it is exhausted the
+		// population dies, and the remaining non-respirable residue is
+		// routed to the waste store or booked as explicit uncontained
+		// loss - never silently deleted, and never recoverable as living
+		// biomass for free.
+		std::string foodStoreId;      // edible yield destination (mass unit)
+		std::string wasteStoreId;     // inedible yield and dead-residue destination (mass unit)
+		double edibleFraction{0.5};   // [0, 1] of harvested dry mass that is edible food
+		double harvestTriggerKg{0.0}; // harvest when living biomass reaches this; 0 disables harvest
+		double harvestFraction{1.0};  // (0, 1] fraction of living biomass removed per harvest
+		int priority{0};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(CropPopulationSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationCropPopulations{8};
+
+	// An algae culture (#411): a separate Biological population running in
+	// its own installation, with its own living biomass, culture volume,
+	// capacity, coefficients and condition - never shared with, derived
+	// from, or substituted by the crop populations. It reuses the same
+	// biological lifecycle and accounting behaviour as crops: dry Living
+	// biomass on a declared dry-mass basis (no moisture, no atmospheric
+	// nitrogen), growth funded only by the light energy actually
+	// delivered after the essential culture circulation draw, the CO2
+	// actually present in the compartment, culture water and each tracked
+	// N/P/K/mineral store drawn above its own protected reserve, and the
+	// remaining capacity headroom at one uniform growth scale per tick
+	// with the binding limiter named. The Growing capacity here is the
+	// installation's active culture volume times the supported dry-mass
+	// density per unit volume - distinct from the crop's illuminated area
+	// basis and from any crop capacity. Growth qualifies only inside the
+	// declared temperature window; respiration runs day and night against
+	// the living organic content, drawing real O2 and returning CO2,
+	// water vapour and heat to the compartment; culture water lost with
+	// the growth (evaporation from the open culture) is drawn from the
+	// makeup store and returned as vapour. The harvest contract partitions
+	// the harvested dry mass into three declared destinations - food,
+	// recovery and waste - conservatively: each share enters its own store
+	// as far as its headroom reaches, the surplus the food store cannot
+	// hold rides the recovery path, whatever recovery cannot hold rides
+	// the waste path, and what no destination can place stays living
+	// rather than being discarded for free. All three destinations must be
+	// mass-denominated, distinct from each other, and composition-
+	// compatible with the culture's declared dry mass. Under adverse
+	// conditions the living organic content is respired away; once it is
+	// exhausted the culture dies, and the remaining non-respirable residue
+	// is routed to the waste store or booked as explicit uncontained
+	// loss - never silently deleted, and never recoverable as living
+	// biomass for free. All biological coefficients are provisional
+	// assumptions: tunable model parameters, not validated phycology.
+	struct AlgaeCultureSettings
+	{
+		std::string id;
+		std::string atmosphereId;             // compartment the culture exchanges gas and heat with
+		WaterQualitySettings waterQuality;
+		std::string waterStoreId;             // culture makeup water above the protected reserve
+		std::string nitrogenStoreId;          // bound nutrient nitrogen available for uptake
+		std::string phosphorusStoreId;        // phosphorus available for uptake
+		std::string potassiumStoreId;         // potassium available for uptake
+		std::string mineralsStoreId;          // grouped trace minerals available for uptake
+		ResourceCompositionSettings composition; // declared dry-mass basis of the living biomass
+		double cultureVolumeL{0.0};         // active culture volume; 0 disables the culture
+		double maxBiomassDensityKgPerL{0.002}; // supported dry biomass per litre of culture (provisional)
+		double initialBiomassKg{0.0};       // starting dry living biomass, [0, volume x density]
+		double circulationPowerKW{0.0};     // essential culture circulation demand, drawn first
+		double growthYieldKgPerKWh{0.01};   // dry biomass fixed per kWh of delivered light (provisional)
+		double respirationPerHour{0.012};   // dry organic burned per dry biomass per hour (provisional)
+		double evaporationKgPerKgGrowth{0.0}; // culture water evaporated per kg of growth (provisional)
+		double minGrowingTemperatureC{10.0}; // growth at or above this compartment temperature
+		double maxGrowingTemperatureC{35.0}; // growth below this compartment temperature
+		// Harvest contract (#411): when the living dry biomass reaches the
+		// declared trigger the culture is harvested - real living material
+		// is removed and its declared dry-mass constituents are preserved
+		// into the three declared destinations. The food fraction lands in
+		// the food store, the recovery fraction in the recovery store, and
+		// the unrecoverable remainder in the waste store; a surplus the
+		// food store cannot hold rides the recovery path, and whatever the
+		// recovery path cannot hold rides the waste path. Full
+		// destinations constrain the harvest: the remainder stays living.
+		// Harvest is disabled while the trigger is zero; enabling it
+		// requires all three destination stores. The food and recovery
+		// fractions together may not exceed 1 - the waste share is the
+		// balance of the harvest.
+		std::string foodStoreId;      // edible yield destination (mass unit)
+		std::string recoveryStoreId;  // recoverable yield destination (mass unit)
+		std::string wasteStoreId;     // unrecoverable yield and dead-residue destination (mass unit)
+		double foodFraction{0.4};     // [0, 1] of harvested dry mass that is edible food
+		double recoveryFraction{0.3}; // [0, 1] of harvested dry mass routed to recovery
+		double harvestTriggerKg{0.0}; // harvest when living biomass reaches this; 0 disables harvest
+		double harvestFraction{1.0};  // (0, 1] fraction of living biomass removed per harvest
+		int priority{0};
+		std::vector<std::string> supplyBusIds{"main"};
+		StationSupplyMode supplyMode{StationSupplyMode::Single};
+		double transferReturnDwellSeconds{30.0};
+		bool operator==(AlgaeCultureSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationAlgaeCultures{8};
+
+	// A finite thermal buffer (#398): a bounded store of thermal energy
+	// that absorbs the cooling deficit its host reservoir cannot reject,
+	// rides through the outage, and returns the stored heat only when
+	// real rejection capacity becomes available. The buffer's state is
+	// stored energy, never temperature: capacity is the total energy
+	// storable across the declared usable temperature band, and the
+	// buffer's temperature is derived from the stored fraction across
+	// that band (a sensible-storage model; a narrow band with a large
+	// capacity approximates an isothermal phase-change material).
+	// Stored energy is distinct from the host reservoir's instantaneous
+	// temperature: filling the buffer never means the reservoir got
+	// hotter, and the reservoir's reading says nothing about the store.
+	// Access is configured, never free: a "circulation" buffer is a
+	// powered-only store reachable only while its declared coolant loop
+	// (coupled to the same host reservoir) is actually circulating, so
+	// a blackout cannot absorb through it for free; a "passive" buffer
+	// is reachable at any time through its declared transfer
+	// conductance, rate-limited by the temperature difference across
+	// the interface. Charging is capped by the host's instantaneous
+	// cooling deficit, so the buffer absorbs what the rejection path
+	// cannot take and never overcools the reservoir; discharge is
+	// capped by the rejection surplus, so recovery consumes real
+	// rejection capacity and cannot reset storage instantly. Both
+	// directions are thermally honest: heat only moves from the hotter
+	// side to the colder one, and the buffer's stored energy never
+	// leaves its finite bounds.
+	struct ThermalBufferSettings
+	{
+		std::string id;
+		std::string reservoirId;             // host reservoir whose deficit it absorbs
+		std::string accessMode;             // "circulation" (powered-only) or "passive"
+		std::string circulationLoopId;      // loop gating access in circulation mode
+		double capacityKJ{0.0};           // storable energy across the usable band, > 0
+		double startingEnergyKJ{0.0};     // initial stored energy, [0, capacity]
+		double minUsableTemperatureC{0.0}; // lower end of the usable band
+		double maxUsableTemperatureC{0.0}; // upper end of the usable band
+		double maxChargeKW{0.0};          // charge rate limit, >= 0
+		double maxDischargeKW{0.0};       // discharge rate limit, >= 0
+		double transferConductanceKWPerK{0.0}; // passive transfer limit, > 0 in passive mode
+		bool operator==(ThermalBufferSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationThermalBuffers{8};
+	inline constexpr std::array<char const*, 2> StationThermalBufferAccessModes{
+		"circulation", "passive"};
+
+	// The electrical dispatch controller mode (#415). Manual: every
+	// dispatchable source runs at its authored commanded output - the
+	// pre-#415 behaviour, unchanged. Automatic: the dispatcher commands the
+	// generators first and the fuel-cell backups second, each World tick,
+	// to cover the station-wide electrical demand the sun leaves behind,
+	// so batteries bridge transients instead of funding sustained
+	// deficits. Commands are capped by what each machine can physically
+	// deliver this tick - installed rating, outage availability, fuel and
+	// reactants actually drawable above the protected reserves, and
+	// qualified cooling - so dispatch never fabricates sustained supply:
+	// what cannot be covered stays explicit as dispatch shortfall beside
+	// the unmet critical demand the allocation already publishes. The
+	// dispatcher runs on the World tick and reads the previous committed
+	// tick's demand signal: no parallel configuration and no new clock.
+	enum class StationDispatchMode : std::uint8_t
+	{
+		Manual,
+		Automatic,
+	};
+	inline constexpr std::array<char const*, 2> StationDispatchModeNames{
+		"manual", "automatic"};
+
+	// Authored connection design attributes, never an additional simulation budget.
+	enum class StationPhysicalConnection { Automatic, Unspecified, PowerCable, DataCable,
+		LiquidPipe, GasPipe, AirDuct, CoolantCircuit, MaterialHandling, Thermal, NonPhysical };
+	inline constexpr std::array<char const*, 11> StationPhysicalConnectionNames{
+		"Automatic", "Unspecified", "Power cable", "Data cable", "Liquid pipe", "Gas pipe",
+		"Air duct", "Coolant circuit", "Material handling", "Thermal connection", "Non-physical"};
+	struct StationConnectionKey
+	{
+		std::string ownerType, ownerId, reference, relation, peerType, peerId;
+		bool operator==(StationConnectionKey const&) const = default;
+		bool operator<(StationConnectionKey const& other) const
+		{
+			return std::tie(ownerType, ownerId, reference, relation, peerType, peerId)
+				< std::tie(other.ownerType, other.ownerId, other.reference, other.relation, other.peerType, other.peerId);
+		}
+	};
+	struct StationConnectionProperties
+	{
+		StationPhysicalConnection physicalType{StationPhysicalConnection::Automatic};
+		double maximumThroughput{1e12}; // physical connection input cap, in its displayed rate unit
+		double efficiency{1.0}; // finite [0, 1] fraction delivered after the input cap; informational on non-physical relationships
+		bool operator==(StationConnectionProperties const&) const = default;
+	};
+
+	inline constexpr uint32_t CORE_MAX_SYSTEMS_STEP_WORLD_TICKS = 60;
+	enum class AlertDirection { Above, Below };
+	enum class AlertSeverity { Advisory, Warning, Critical };
+	enum class AlertClearReason { AutoClear, MonitorDisabled, MonitorChanged, BreakerReset };
+	// #867: where a Monitor's authored value came from, so a surface can tell
+	// a grounded limit from an estimate. `Custom` is a hand-authored value
+	// making no provenance claim; the four tagged kinds are the spec's
+	// [ISS] / [WHO] / [rated] / [prov] provenance tags.
+	enum class MonitorProvenance { Custom, Iss, Who, Rated, Provisional };
+	struct AlertRule
+	{
+		double threshold{0};
+		AlertDirection direction{AlertDirection::Below};
+		double triggerOnSeconds{0}, triggerOffSeconds{0};
+		bool operator==(AlertRule const&) const = default;
+	};
+	struct StationMonitorSettings
+	{
+		std::string id, subjectType, subjectId, metric;
+		AlertRule rule;
+		AlertSeverity severity{AlertSeverity::Warning};
+		bool enabled{false};
+		// Declared last so the positional initialization of every earlier
+		// field in existing callers and fixtures is unchanged.
+		MonitorProvenance provenance{MonitorProvenance::Custom};
+		bool operator==(StationMonitorSettings const&) const = default;
+	};
+	struct StationAlertSnapshot
+	{
+		std::string monitorId, subjectType, subjectId, metric;
+		double currentValue{0}, threshold{0};
+		AlertSeverity severity{AlertSeverity::Warning};
+		// #867: the watched value's provenance travels with the Alert, so the
+		// dashboard can show whether a limit is grounded or provisional.
+		MonitorProvenance provenance{MonitorProvenance::Custom};
+		double firedAtSeconds{0};
+		std::optional<double> clearedAtSeconds{};
+		std::optional<AlertClearReason> clearReason{};
+		// #882: extra context the raising subsystem carries with the Alert so a
+		// scenario author reads the transition off the event stream without
+		// cross-referencing another ledger. Empty for every Monitor-raised Alert,
+		// so the standard announcement is unchanged for them.
+		std::string detail{};
+		bool operator==(StationAlertSnapshot const&) const = default;
+	};
+	struct StationSystemsSettings
+	{
+		bool enabled{false};
+		float observationIntervalSeconds{1.0f}; // bounded event sampling, not a clock
+		std::vector<ResourceStoreSettings> stores{};
+		std::vector<ResourceTransferSettings> transfers{};
+		std::vector<ResourceConversionSettings> conversions{};
+		std::vector<SolarArraySettings> solarArrays{};
+		std::vector<EquipmentLoadSettings> equipmentLoads{};
+		std::vector<BatterySettings> batteries{};
+		std::vector<ResourceDeliverySettings> deliveries{};
+		std::vector<WasteEjectionSettings> wasteEjections{};
+		// Authored scheduled outages and capacity reductions (#413) against
+		// the shared installation availability contract. Each targets a
+		// registered installation by its stable identity.
+		std::vector<InstallationOutageSettings> outages{};
+		std::vector<ThermalReservoirSettings> thermalReservoirs{};
+		std::optional<HullSettings> hull{};
+		std::vector<RadiatorSettings> radiators{};
+		std::vector<CoolantLoopSettings> coolantLoops{};
+		std::vector<ChillerSettings> chillers{};
+		// Authored Heat engines (#804): the Carnot-bounded heat-to-power
+		// crossing, declared alongside the thermal plant it converts for.
+		std::vector<HeatEngineSettings> heatEngines{};
+		std::vector<LightingFixtureSettings> lightingFixtures{};
+		std::vector<StandbyPairingSettings> standbyPairings{};
+		std::vector<HeatSourceSettings> heatSources{};
+		std::vector<GeneratorSettings> generators{};
+		std::vector<AtmosphereSettings> atmospheres{};
+		std::vector<AtmospherePathwaySettings> atmospherePathways{};
+		std::vector<ThermalLinkSettings> thermalLinks{};
+		std::vector<AirlockCycleSettings> airlockCycles{};
+		std::vector<CrewSettings> crews{};
+		std::vector<WaterCollectorSettings> waterCollectors{};
+		std::vector<WaterTreatmentSettings> waterTreatments{};
+		std::vector<ElectrolyzerSettings> electrolyzers{};
+		std::vector<Co2CaptureSettings> co2Captures{};
+		std::vector<FuelCellSettings> fuelCells{};
+		std::vector<SabatierReactorSettings> sabatierReactors{};
+		std::vector<MethaneProcessorSettings> methaneProcessors{};
+		std::vector<MicrobialProcessorSettings> microbialProcessors{};
+		std::vector<ThermalBufferSettings> thermalBuffers{};
+		std::vector<CropPopulationSettings> cropPopulations{};
+		std::vector<AlgaeCultureSettings> algaeCultures{};
+		// The dispatch controller mode (#415); Manual keeps the authored
+		// per-source commanded outputs authoritative. Declared last so the
+		// existing positional aggregate-initialization of the leading
+		// settings fields in tests and callers is unchanged.
+		StationDispatchMode dispatchMode{StationDispatchMode::Manual};
+		// Authored scheduled maintenance jobs (#414) against the shared
+		// installation availability contract. Declared after the leading
+		// settings so positional initialization of earlier fields is
+		// unchanged.
+		std::vector<MaintenanceJobSettings> maintenanceJobs{};
+		// Authored trend retention (#418): the simulation-time window the
+		// bounded trend series keep. Samples older than this are dropped,
+		// so the retained window never exceeds these seconds regardless of
+		// how long or how fast the World runs. Declared last so positional
+		// initialization of every earlier field is unchanged.
+		float trendRetentionSeconds{3600.0f};
+		// Sparse overrides: every connection has independent default properties.
+		std::map<StationConnectionKey, StationConnectionProperties> connections{};
+		// Default Station cadence: 10 Hz against the World's 60 Hz clock.
+		uint32_t systemsStepWorldTicks{6};
+		std::vector<StationMonitorSettings> monitors{};
+		std::vector<PowerBusSettings> powerBuses = std::vector<PowerBusSettings>(1);
+		// One authoritative sun; omission means constant full sun.
+		std::optional<ProfileSettings> solarCycle{};
+		bool operator==(StationSystemsSettings const&) const = default;
+	};
+	// The installations registered with the shared availability contract
+	// for a given authored configuration (#413): the generators, coolant
+	// loops, chillers and - from #807 - the heat engines. Outage and
+	// maintenance validation resolve an installationId against this set;
+	// a job naming an installation that has not registered is refused
+	// with a diagnostic rather than accepted and ignored.
+	std::vector<StationInstallationIdentity> stationInstallationIdentities(
+		StationSystemsSettings const& settings);
+	// #849: the fault modes one Installation has opted into, so an editor
+	// offers only what the core would accept for that machine. Empty when the
+	// id names nothing or nothing is enabled. Wear modes never appear: Wear
+	// is accumulated by duty and is never injected.
+	std::vector<std::string> stationInjectableFaultModes(
+		StationSystemsSettings const& settings, std::string_view installationId);
+	// #849: the repair plans authored for one Installation (#842). Empty
+	// when the machine has no repair-parts wiring, which is exactly what
+	// makes repairFault refuse it.
+	std::vector<FaultRepairSettings> stationRepairPlans(
+		StationSystemsSettings const& settings, std::string_view installationId);
+	// Profile shape validation and deterministic evaluation: the level of
+	// the last segment started at or before the current phase of the
+	// repeating period, or the constant level when there is no period.
+	bool validateStationProfile(ProfileSettings const&, std::string const& where,
+		std::string& diagnostic);
+	double evaluateStationProfile(ProfileSettings const&, double elapsedSeconds);
+	// Draft-tolerant mode (#642): when a brokenReferences list is supplied,
+	// an entry whose reference cannot be resolved within the settings does
+	// not reject the whole configuration: the refusal is recorded in the
+	// list and that entry stops being validated, so a draft can open with
+	// the reference shown as broken. Every other rule stays strict, and
+	// with no list supplied (the World path) behaviour is unchanged.
+	// Shared full-validation / interactive-wiring rules. Interactive wiring
+	// ignores only empty references, never named incompatible endpoints.
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, AtmosphereSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, AirlockCycleSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, WaterCollectorSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, WaterTreatmentSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, ElectrolyzerSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, Co2CaptureSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+
+	// Shared biology rules: Flow tolerates empty, not dangling, references while wiring.
+	bool validateStationBiologyWiring(StationSystemsSettings const&, std::string& diagnostic,
+		bool allowUnwired = false, std::vector<std::string>* brokenReferences = nullptr);
+	// Shared reference rules for full configuration validation and Flow links.
+	// Incomplete authoring tolerates unwired endpoints, but never unknown peers
+	// or unit, composition, hazard and consumed-source boundary violations.
+	bool validateStationScheduleWiring(StationSystemsSettings const&, ResourceDeliverySettings const&,
+		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationScheduleWiring(StationSystemsSettings const&, WasteEjectionSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationScheduleWiring(StationSystemsSettings const&, InstallationOutageSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationScheduleWiring(StationSystemsSettings const&, MaintenanceJobSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
+
+	// Shared Monitor preflight for document authoring and direct runtime commands.
+	bool stationRequiresExtendedWearSchema(StationSystemsSettings const&);
+	bool validateStationMonitors(StationSystemsSettings const&, std::string& diagnostic);
+	// Fixture-local parameters and profile, shared by simulation and inspector.
+	// Identity uniqueness and compartment/bus references need the whole configuration.
+	bool validateStationStandbyPairings(StationSystemsSettings const&, std::string& diagnostic);
+	bool validateStationGeneratorParameters(GeneratorSettings const&, std::string& diagnostic);
+	bool validateStationFuelCellParameters(FuelCellSettings const&, std::string& diagnostic);
+	bool validateStationLightingFixtureParameters(LightingFixtureSettings const&, std::string& diagnostic);
+	bool validateStationLightingFixtureDestination(StationSystemsSettings const&, LightingFixtureSettings const&, std::string& diagnostic);
+	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic,
+		std::vector<std::string>* brokenReferences = nullptr);
+	// The endpoint half of the transfer entry check (#640): the rules a link
+	// between a store connector and a transfer connector can violate — the
+	// endpoints exist, differ, and agree on unit and declared composition.
+	// validateStationSystemsSettings runs it for every transfer;
+	// the link-evaluation seam runs it for the single entry a candidate link
+	// writes, so the rule exists once and a refusal always carries this
+	// rule's own wording. Identity and rate rules stay with the whole entry.
+	// ignoreUnconnected (link seam only) tolerates the endpoint the link did
+	// not write, so a half-built transfer stays buildable; the whole-
+	// configuration validator leaves it false and reports an incomplete
+	// transfer as the invalid configuration it is.
+	bool validateStationTransferSettings(ResourceTransferSettings const& transfer, std::string& diagnostic);
+	bool validateStationTransferWiring(StationSystemsSettings const& settings,
+		ResourceTransferSettings const& transfer, std::string& diagnostic,
+		bool ignoreUnconnected = false);
+	// Range for one authored numeric parameter, keyed by the widget's bare
+	// label (the field name without its '##entry' decoration).
+	//
+	// The default is non-negative. Rates, capacities, masses, volumes and
+	// powers are the overwhelming majority of authored numbers and a
+	// negative one is never meaningful, so the default is the fail-safe
+	// direction. The exceptions are listed explicitly rather than inferred
+	// from a name pattern: a guessed default silently refuses a value the
+	// author is entitled to set, which is worse than letting a merely
+	// over-large value through to the Apply-time validator. Anything not
+	// confidently in a narrower class therefore stays at the open
+	// non-negative default and is judged by the rules in this file, which
+	// remain the authority. The range here is what the editor refuses at
+	// the widget; it never widens what Apply accepts.
+	struct StationFieldRange
+	{
+		bool hasMinimum{true};
+		double minimum{0.0};
+		bool hasMaximum{false};
+		double maximum{0.0};
+	};
+	StationFieldRange stationFieldRange(std::string_view field);
+	// False with a human-readable reason when `value` is outside the field's
+	// range. Non-finite input is always refused: NaN and infinity pass every
+	// comparison they are not written for, and a NaN capacity silently
+	// poisons every downstream total that touches it.
+	bool stationFieldAccepts(std::string_view field, double value, std::string& reason);
+	inline constexpr std::array<char const*, 4> StationSystemNames{
+		"Power", "ECLSS", "Thermal control", "Monitoring/supervision"};
+	struct StationMonitorMetric { std::string_view name, unit; };
+	std::vector<StationMonitorMetric> const& stationMonitorMetricCatalogue(std::string_view subjectType);
+	bool stationMonitorSubjectExists(StationSystemsSettings const&, std::string_view type, std::string_view id);
+	std::string stationConnectionMonitorSubjectId(StationConnectionKey const&);
+	std::string_view stationMonitorProvenanceTag(MonitorProvenance provenance);
+	std::string_view stationAlertSeverityTag(AlertSeverity severity);
+	std::string_view stationAlertDirectionTag(AlertDirection direction);
+}

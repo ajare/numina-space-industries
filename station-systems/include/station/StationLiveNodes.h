@@ -1,0 +1,435 @@
+// Per-node live-edit bindings.
+//
+// LiveNode<Settings> is the compile-time map from a settings struct to the
+// collection that holds it and the initial-condition fields it owns. It lives
+// in a header because updateNode is a template: every translation unit that
+// instantiates it must see the specialisations.
+//
+// The Settings type selects the collection, so a targeted edit is type-checked
+// at the call site and never needs a field-name string. The node type label is
+// carried alongside for diagnostics that read in the words the flow canvas
+// uses, and updateNode refuses if the two disagree.
+#pragma once
+
+#include "station/StationSystems.h"
+
+#include <algorithm>
+#include <cmath>
+#include <string_view>
+#include <vector>
+
+namespace station
+{
+	template <class Settings>
+	struct LiveNode; // undefined: specialise below via PF_STATION_LIVE_NODE
+
+	// #844: the shared repair-parts frozen-topology rule (#842): the
+	// parts store identity and the per-mode plan identities - which
+	// faults are repairable and which stores they draw from - cannot move
+	// under a live run. Each plan's duration and parts quantity stay
+	// live-tunable parameters; a repair already started keeps the
+	// parameters it froze at command time.
+	inline bool repairWiringTopologyChanged(
+		std::optional<RepairPartsSettings> const& a,
+		std::optional<RepairPartsSettings> const& b)
+	{
+		if (a.has_value() != b.has_value()) return true;
+		if (!a) return false;
+		return a->partsStoreId != b->partsStoreId
+			|| a->repairs.size() != b->repairs.size()
+			|| !std::equal(a->repairs.begin(), a->repairs.end(), b->repairs.begin(),
+				[](FaultRepairSettings const& x, FaultRepairSettings const& y)
+				{
+					return x.modeId == y.modeId && x.wasteStoreId == y.wasteStoreId;
+				});
+	}
+
+	// Restore the fields a live edit may not move. Returns true when the caller
+	// actually touched one, so the refusal can be reported rather than dropped.
+	// The conservation audit derives its baseline from the authored starting
+	// values at snapshot time, so these must stay as the run began.
+	template <class T, class... Fields>
+	inline bool restoreStationInitialFields(T const& running, T& offered, Fields... fields)
+	{
+		bool touched = false;
+		auto one = [&](auto field) {
+			if ((offered.*field) != (running.*field))
+			{
+				offered.*field = running.*field;
+				touched = true;
+			}
+		};
+		(one(fields), ...);
+		return touched;
+	}
+
+	inline bool wearTopologyChanged(std::optional<InstallationWearSettings> const& a,
+		std::optional<InstallationWearSettings> const& b)
+	{
+		return a.has_value() != b.has_value()
+			|| (a && b && (a->initialAgeHours != b->initialAgeHours
+				|| (a->fadeHalfLifeHours > 0.0) != (b->fadeHalfLifeHours > 0.0)));
+	}
+
+	// A node type whose settings carry no initial-condition fields.
+#define PF_STATION_LIVE_NODE(SETTINGS, MEMBER, LABEL) \
+	template <> \
+	struct LiveNode<SETTINGS> \
+	{ \
+		static constexpr std::string_view nodeType = LABEL; \
+		static std::vector<SETTINGS>& of(StationSystemsSettings& settings) { return settings.MEMBER; } \
+		static const std::vector<SETTINGS>& of(StationSystemsSettings const& settings) { return settings.MEMBER; } \
+		static bool restoreInitial(SETTINGS const&, SETTINGS&) { return false; } \
+	};
+
+#define PF_STATION_LIVE_NODE_WITH(SETTINGS, MEMBER, LABEL, ...) \
+	template <> \
+	struct LiveNode<SETTINGS> \
+	{ \
+		static constexpr std::string_view nodeType = LABEL; \
+		static std::vector<SETTINGS>& of(StationSystemsSettings& settings) { return settings.MEMBER; } \
+		static const std::vector<SETTINGS>& of(StationSystemsSettings const& settings) { return settings.MEMBER; } \
+		static bool restoreInitial(SETTINGS const& running, SETTINGS& offered) \
+		{ return restoreStationInitialFields(running, offered, __VA_ARGS__); } \
+	};
+
+	PF_STATION_LIVE_NODE_WITH(ResourceStoreSettings, stores, "Store",
+		&ResourceStoreSettings::startingQualified,
+		&ResourceStoreSettings::startingUnqualified)
+	PF_STATION_LIVE_NODE(ResourceTransferSettings, transfers, "Transfer")
+	PF_STATION_LIVE_NODE(ResourceConversionSettings, conversions, "Conversion")
+	// #845: which fault modes a solar array can suffer is a run-shape
+	// decision frozen at construction; the loss fraction and the fixed
+	// availability inside each block stay live-tunable parameters whose
+	// value an accepted injection froze for the Fault it started.
+	template <> struct LiveNode<SolarArraySettings>
+	{
+		static constexpr std::string_view nodeType = "Solar";
+		static auto& of(auto& settings) { return settings.solarArrays; }
+		static bool restoreInitial(SolarArraySettings const&, SolarArraySettings&) { return false; }
+		static bool topologyChanged(SolarArraySettings const& a, SolarArraySettings const& b)
+		{
+			return wearTopologyChanged(a.cellDegradation, b.cellDegradation)
+				|| a.stringLoss.has_value() != b.stringLoss.has_value()
+				|| a.trackingFailure.has_value() != b.trackingFailure.has_value();
+		}
+	};
+	PF_STATION_LIVE_NODE(EquipmentLoadSettings, equipmentLoads, "Equipment")
+	template <> struct LiveNode<BatterySettings>
+	{
+		static constexpr std::string_view nodeType = "Battery";
+		static auto& of(auto& settings) { return settings.batteries; }
+		static bool restoreInitial(BatterySettings const& running, BatterySettings& offered)
+		{ return restoreStationInitialFields(running, offered, &BatterySettings::startingStoredKWh); }
+		static bool topologyChanged(BatterySettings const& a, BatterySettings const& b)
+		{
+			// #843: whether the bank has a capacity-fade model at all is a
+			// run-shape decision frozen at construction; the fade rates
+			// inside it stay live-tunable parameters that never reprice the
+			// fade already accumulated. #845: the thermal-runaway opt-in
+			// and its destination compartment join the frozen shape - the
+			// compartment a hazard lands in is decided with the run, not
+			// moved under it; the booked heat and toxic mass stay
+			// live-tunable until an injection freezes them.
+			return wearTopologyChanged(a.capacityFade, b.capacityFade)
+				|| a.thermalRunaway.has_value() != b.thermalRunaway.has_value()
+				|| (a.thermalRunaway && b.thermalRunaway
+					&& a.thermalRunaway->compartmentId != b.thermalRunaway->compartmentId);
+		}
+	};
+	PF_STATION_LIVE_NODE(ResourceDeliverySettings, deliveries, "Delivery")
+	PF_STATION_LIVE_NODE(WasteEjectionSettings, wasteEjections, "Waste ejection")
+	PF_STATION_LIVE_NODE(InstallationOutageSettings, outages, "Outage")
+	PF_STATION_LIVE_NODE_WITH(ThermalReservoirSettings, thermalReservoirs, "Reservoir",
+		&ThermalReservoirSettings::startingTemperatureC)
+	// #844: a radiator's puncture opt-in, its destination compartment and
+	// its panel charge size are frozen topology - the charge is the audit
+	// baseline for the puncture booking, like a loop's starting coolant.
+	// The bleed rate and specific heat inside the block stay live-tunable
+	// parameters, and the repair wiring follows the loop's rule: store
+	// identities and plan identities frozen, durations and quantities live.
+	template <> struct LiveNode<RadiatorSettings>
+	{
+		static constexpr std::string_view nodeType = "Radiator";
+		static auto& of(auto& settings) { return settings.radiators; }
+		static bool restoreInitial(RadiatorSettings const& running, RadiatorSettings& offered)
+		{
+			if (offered.panelPuncture && running.panelPuncture
+				&& offered.panelPuncture->coolantKg != running.panelPuncture->coolantKg)
+			{
+				offered.panelPuncture->coolantKg = running.panelPuncture->coolantKg;
+				return true;
+			}
+			return false;
+		}
+		static bool topologyChanged(RadiatorSettings const& a, RadiatorSettings const& b)
+		{
+			return a.panelPuncture.has_value() != b.panelPuncture.has_value()
+				|| (a.panelPuncture && b.panelPuncture
+					&& a.panelPuncture->compartmentId != b.panelPuncture->compartmentId)
+				|| repairWiringTopologyChanged(a.repairParts, b.repairParts);
+		}
+	};
+	// #844: the chiller's fault opt-ins are frozen topology, as for every
+	// other fault-carrying kind: which modes a machine can suffer, where a
+	// leak lands and what its charge is cannot move under a live run. The
+	// leak rate and specific heat inside the block stay live-tunable.
+	template <> struct LiveNode<ChillerSettings>
+	{
+		static constexpr std::string_view nodeType = "Chiller";
+		static auto& of(auto& settings) { return settings.chillers; }
+		static bool restoreInitial(ChillerSettings const& running, ChillerSettings& offered)
+		{
+			if (offered.refrigerantLeak && running.refrigerantLeak
+				&& offered.refrigerantLeak->chargeKg != running.refrigerantLeak->chargeKg)
+			{
+				offered.refrigerantLeak->chargeKg = running.refrigerantLeak->chargeKg;
+				return true;
+			}
+			return false;
+		}
+		static bool topologyChanged(ChillerSettings const& a, ChillerSettings const& b)
+		{
+			return a.compressorFailure != b.compressorFailure
+				|| a.refrigerantLeak.has_value() != b.refrigerantLeak.has_value()
+				|| (a.refrigerantLeak && b.refrigerantLeak
+					&& a.refrigerantLeak->compartmentId != b.refrigerantLeak->compartmentId)
+				|| repairWiringTopologyChanged(a.repairParts, b.repairParts);
+		}
+	};
+	template <> struct LiveNode<CoolantLoopSettings>
+	{
+		static constexpr std::string_view nodeType = "Coolant loop";
+		static auto& of(auto& settings) { return settings.coolantLoops; }
+		static bool restoreInitial(CoolantLoopSettings const& running, CoolantLoopSettings& offered)
+		{ return restoreStationInitialFields(running, offered, &CoolantLoopSettings::startingCoolantKg,
+			&CoolantLoopSettings::startingTemperatureC); }
+		static bool topologyChanged(CoolantLoopSettings const& a, CoolantLoopSettings const& b)
+		{
+			// Whether the loop has a Condition model at all, and which
+			// service stock funds its recovery, are run-shape decisions
+			// resolved at construction (#840); the rates inside the model
+			// stay live-tunable parameters.
+			return a.coolantLeak.has_value() != b.coolantLeak.has_value()
+				|| (a.coolantLeak && b.coolantLeak && a.coolantLeak->compartmentId != b.coolantLeak->compartmentId)
+				|| a.condition.has_value() != b.condition.has_value()
+				|| (a.condition && b.condition
+					&& a.condition->restoreStoreId != b.condition->restoreStoreId)
+				// #843: whether the loop has a Wear model at all is frozen
+				// topology; the fade rates inside it stay live-tunable
+				// parameters that never reprice the fade already accumulated.
+				|| wearTopologyChanged(a.wear, b.wear)
+				// #842: the repair-parts store identity and the per-mode
+				// plan identities are topology - which faults are repairable
+				// and which stores they draw from cannot move under a live
+				// run. Each plan's duration and parts quantity stay
+				// live-tunable parameters; a repair already started keeps the
+				// parameters it froze at command time.
+				|| a.repairParts.has_value() != b.repairParts.has_value()
+				|| (a.repairParts && b.repairParts
+					&& (a.repairParts->partsStoreId != b.repairParts->partsStoreId
+						|| a.repairParts->repairs.size() != b.repairParts->repairs.size()
+						|| !std::equal(a.repairParts->repairs.begin(), a.repairParts->repairs.end(),
+							b.repairParts->repairs.begin(),
+							[](FaultRepairSettings const& x, FaultRepairSettings const& y)
+							{
+								return x.modeId == y.modeId && x.wasteStoreId == y.wasteStoreId;
+							}))
+				);
+		}
+	};
+	template <> struct LiveNode<LightingFixtureSettings>
+	{
+		static constexpr std::string_view nodeType = "Lighting fixture";
+		static bool validateParameters(LightingFixtureSettings const& entry, std::string& diagnostic)
+		{ return validateStationLightingFixtureParameters(entry, diagnostic); }
+		static auto& of(auto& settings) { return settings.lightingFixtures; }
+		static bool restoreInitial(LightingFixtureSettings const&, LightingFixtureSettings&) { return false; }
+		static bool topologyChanged(LightingFixtureSettings const& a, LightingFixtureSettings const& b)
+		{
+			return a.id != b.id || a.fixtureFailure != b.fixtureFailure
+				|| repairWiringTopologyChanged(a.repairParts, b.repairParts)
+				|| a.sharedPowerFeed != b.sharedPowerFeed
+				|| a.atmosphereId != b.atmosphereId || a.fixtureType.id != b.fixtureType.id
+				|| a.cropPopulationId != b.cropPopulationId || a.algaeCultureId != b.algaeCultureId;
+		}
+	};
+	template <> struct LiveNode<HeatSourceSettings>
+	{
+		static constexpr std::string_view nodeType = "Heat source";
+		static auto& of(auto& settings) { return settings.heatSources; }
+		static bool restoreInitial(HeatSourceSettings const&, HeatSourceSettings&) { return false; }
+		static bool topologyChanged(HeatSourceSettings const& before, HeatSourceSettings const& after)
+		{
+			return before.id != after.id || before.targetReservoirId != after.targetReservoirId
+				|| before.throttleable != after.throttleable
+				|| wearTopologyChanged(before.wear, after.wear);
+		}
+	};
+	template <>
+	struct LiveNode<HeatEngineSettings>
+	{
+		static constexpr std::string_view nodeType = "Heat engine";
+		static auto& of(StationSystemsSettings& settings) { return settings.heatEngines; }
+		static auto const& of(StationSystemsSettings const& settings) { return settings.heatEngines; }
+		static bool restoreInitial(HeatEngineSettings const&, HeatEngineSettings&) { return false; }
+		static bool topologyChanged(HeatEngineSettings const& before, HeatEngineSettings const& after)
+		{
+			// #844: the seizure opt-in and the repair wiring join the
+			// frozen topology; every rate inside stays live-tunable.
+			return wearTopologyChanged(before.efficiencyDrift, after.efficiencyDrift)
+				|| before.id != after.id || before.hotReservoirId != after.hotReservoirId
+				|| before.rejectionReservoirId != after.rejectionReservoirId
+				|| before.mechanicalSeizure != after.mechanicalSeizure
+				|| repairWiringTopologyChanged(before.repairParts, after.repairParts);
+		}
+	};
+	// #845: the generator's failed-start opt-in is a run-shape decision
+	// frozen at construction; the mode carries no parameters, so there
+	// is nothing live inside it to tune.
+	template <> struct LiveNode<GeneratorSettings>
+	{
+		static constexpr std::string_view nodeType = "Generator";
+		static bool validateParameters(GeneratorSettings const& entry, std::string& diagnostic)
+		{ return validateStationGeneratorParameters(entry, diagnostic); }
+		static auto& of(auto& settings) { return settings.generators; }
+		static bool restoreInitial(GeneratorSettings const&, GeneratorSettings&) { return false; }
+		static bool topologyChanged(GeneratorSettings const& a, GeneratorSettings const& b)
+		{
+			return a.methaneCombustion != b.methaneCombustion
+				|| a.combustionAirId != b.combustionAirId || a.combustionExhaustId != b.combustionExhaustId
+				|| a.primeMover != b.primeMover
+				|| wearTopologyChanged(a.fouledInjector, b.fouledInjector) || a.failedStart != b.failedStart;
+		}
+	};
+	template <> struct LiveNode<AtmosphereSettings>
+	{
+		static constexpr std::string_view nodeType = "Atmosphere";
+		static auto& of(auto& settings) { return settings.atmospheres; }
+		static bool restoreInitial(AtmosphereSettings const& a, AtmosphereSettings& b)
+		{
+			return restoreStationInitialFields(a, b,
+				&AtmosphereSettings::startingCarbonDioxideKg,
+				&AtmosphereSettings::startingNitrogenKg,
+				&AtmosphereSettings::startingOxygenKg,
+				&AtmosphereSettings::startingTemperatureC,
+				&AtmosphereSettings::startingWaterVapourKg);
+		}
+		static bool topologyChanged(AtmosphereSettings const& a, AtmosphereSettings const& b)
+		{ return a.fire.has_value() != b.fire.has_value(); }
+	};
+	// Openness is a live parameter, not an initial condition: a pathway owns
+	// no field a live edit must be refused.
+	template <> struct LiveNode<AtmospherePathwaySettings>
+	{
+		static constexpr std::string_view nodeType = "Atmosphere pathway";
+		static auto& of(auto& settings) { return settings.atmospherePathways; }
+		static bool restoreInitial(AtmospherePathwaySettings const&, AtmospherePathwaySettings&) { return false; }
+		static bool topologyChanged(AtmospherePathwaySettings const& a, AtmospherePathwaySettings const& b)
+		{ return a.aAtmosphereId != b.aAtmosphereId || a.bAtmosphereId != b.bAtmosphereId; }
+	};
+	// A Thermal link has no initial-condition fields: conductance is a live
+	// thermal parameter while its identity and endpoints stay frozen topology.
+	template <> struct LiveNode<ThermalLinkSettings>
+	{
+		static constexpr std::string_view nodeType = "Thermal link";
+		static auto& of(auto& settings) { return settings.thermalLinks; }
+		static bool restoreInitial(ThermalLinkSettings const&, ThermalLinkSettings&) { return false; }
+		static bool topologyChanged(ThermalLinkSettings const& a, ThermalLinkSettings const& b)
+		{ return a.aAtmosphereId != b.aAtmosphereId || a.bAtmosphereId != b.bAtmosphereId
+			|| a.aKind != b.aKind || a.bKind != b.bKind; }
+	};
+	template <> struct LiveNode<AirlockCycleSettings>
+	{
+		static constexpr std::string_view nodeType = "Airlock cycle";
+		static auto& of(auto& settings) { return settings.airlockCycles; }
+		static bool restoreInitial(AirlockCycleSettings const&, AirlockCycleSettings&) { return false; }
+		static bool topologyChanged(AirlockCycleSettings const& a, AirlockCycleSettings const& b)
+		{
+			return a.interruptedCycle != b.interruptedCycle
+				|| a.interlockFailure.has_value() != b.interlockFailure.has_value()
+				|| (a.interlockFailure && b.interlockFailure
+					&& a.interlockFailure->pathwayId != b.interlockFailure->pathwayId);
+		}
+	};
+	PF_STATION_LIVE_NODE(CrewSettings, crews, "Crew")
+	PF_STATION_LIVE_NODE(WaterCollectorSettings, waterCollectors, "Water collector")
+	template <> struct LiveNode<WaterTreatmentSettings>
+	{
+		static constexpr std::string_view nodeType = "Water treatment";
+		static auto& of(auto& settings) { return settings.waterTreatments; }
+		static bool restoreInitial(WaterTreatmentSettings const&, WaterTreatmentSettings&) { return false; }
+		static bool topologyChanged(WaterTreatmentSettings const& a, WaterTreatmentSettings const& b)
+		{ return wearTopologyChanged(a.membraneFouling, b.membraneFouling) || a.breakthrough != b.breakthrough; }
+	};
+	template <> struct LiveNode<ElectrolyzerSettings>
+	{
+		static constexpr std::string_view nodeType = "Electrolyzer";
+		static auto& of(auto& settings) { return settings.electrolyzers; }
+		static bool validateParameters(ElectrolyzerSettings const& entry, std::string& diagnostic)
+		{
+			if (!entry.thermalBody) return true;
+			auto const& b = *entry.thermalBody;
+			bool const valid = std::isfinite(b.heatCapacityKJPerK) && b.heatCapacityKJPerK > 0
+				&& std::isfinite(b.sinkConductanceKWPerK) && b.sinkConductanceKWPerK > 0
+				&& std::isfinite(b.startingTemperatureC) && b.startingTemperatureC > -StationCelsiusOffset;
+			if (!valid) diagnostic = "Thermal body requires positive finite capacity/conductance and temperature above absolute zero";
+			return valid;
+		}
+		static bool restoreInitial(ElectrolyzerSettings const&, ElectrolyzerSettings&) { return false; }
+		static bool topologyChanged(ElectrolyzerSettings const& a, ElectrolyzerSettings const& b)
+		{ return a.thermalBody.has_value() != b.thermalBody.has_value()
+			|| wearTopologyChanged(a.membraneDegradation, b.membraneDegradation)
+			|| a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
+	};
+	template <> struct LiveNode<Co2CaptureSettings>
+	{
+		static constexpr std::string_view nodeType = "CO2 capture";
+		static auto& of(auto& settings) { return settings.co2Captures; }
+		static bool restoreInitial(Co2CaptureSettings const&, Co2CaptureSettings&) { return false; }
+		static bool topologyChanged(Co2CaptureSettings const& a, Co2CaptureSettings const& b)
+		{ return wearTopologyChanged(a.absorbentDegradation, b.absorbentDegradation); }
+	};
+	template <> struct LiveNode<FuelCellSettings>
+	{
+		static constexpr std::string_view nodeType = "Fuel cell";
+		static bool validateParameters(FuelCellSettings const& entry, std::string& diagnostic)
+		{ return validateStationFuelCellParameters(entry, diagnostic); }
+		static auto& of(auto& settings) { return settings.fuelCells; }
+		static bool restoreInitial(FuelCellSettings const&, FuelCellSettings&) { return false; }
+		static bool topologyChanged(FuelCellSettings const& a, FuelCellSettings const& b)
+		{ return a.chemistry != b.chemistry
+			|| wearTopologyChanged(a.stackDegradation, b.stackDegradation)
+			|| a.catalystPoisoning.has_value() != b.catalystPoisoning.has_value(); }
+	};
+	template <> struct LiveNode<SabatierReactorSettings>
+	{
+		static constexpr std::string_view nodeType = "Sabatier";
+		static auto& of(auto& settings) { return settings.sabatierReactors; }
+		static bool restoreInitial(SabatierReactorSettings const&, SabatierReactorSettings&) { return false; }
+		static bool topologyChanged(SabatierReactorSettings const& a, SabatierReactorSettings const& b)
+		{ return wearTopologyChanged(a.catalystDeactivation, b.catalystDeactivation)
+			|| a.overtempRunaway.has_value() != b.overtempRunaway.has_value(); }
+	};
+	template <> struct LiveNode<MethaneProcessorSettings>
+	{
+		static constexpr std::string_view nodeType = "Methane processor";
+		static auto& of(auto& settings) { return settings.methaneProcessors; }
+		static bool restoreInitial(MethaneProcessorSettings const&, MethaneProcessorSettings&) { return false; }
+		static bool topologyChanged(MethaneProcessorSettings const& a, MethaneProcessorSettings const& b)
+		{ return wearTopologyChanged(a.catalystDeactivation, b.catalystDeactivation)
+			|| a.overtempRunaway.has_value() != b.overtempRunaway.has_value(); }
+	};
+	PF_STATION_LIVE_NODE_WITH(MicrobialProcessorSettings, microbialProcessors, "Microbial processor",
+		&MicrobialProcessorSettings::initialCondition)
+	PF_STATION_LIVE_NODE_WITH(ThermalBufferSettings, thermalBuffers, "Thermal buffer",
+		&ThermalBufferSettings::startingEnergyKJ)
+	PF_STATION_LIVE_NODE_WITH(CropPopulationSettings, cropPopulations, "Crops",
+		&CropPopulationSettings::initialBiomassKg)
+	PF_STATION_LIVE_NODE_WITH(AlgaeCultureSettings, algaeCultures, "Algae",
+		&AlgaeCultureSettings::initialBiomassKg)
+	PF_STATION_LIVE_NODE(MaintenanceJobSettings, maintenanceJobs, "Maintenance")
+
+#undef PF_STATION_LIVE_NODE
+#undef PF_STATION_LIVE_NODE_WITH
+}
