@@ -61,6 +61,11 @@ else()
     target_compile_options(editor-imgui PRIVATE -w)
 endif()
 
+# Headless playback adapter keeps simulation dependencies out of the document model.
+add_library(editor-simulation STATIC src/SimulationPlayback.cpp)
+target_include_directories(editor-simulation PUBLIC src)
+target_link_libraries(editor-simulation PUBLIC nsi::systemsBridge)
+
 add_executable(editor
     src/main.cpp
     src/NativeFileDialogs.cpp
@@ -81,6 +86,7 @@ endif()
 find_package(OpenGL REQUIRED)
 target_link_libraries(editor PRIVATE
     editor::document
+    editor-simulation
     nfd
     editor::imgui
     SDL2::SDL2-static
@@ -101,6 +107,12 @@ add_custom_target(editor-font-assets
 add_dependencies(editor editor-font-assets)
 
 if(BUILD_TESTING)
+    add_executable(editor-simulation-test tests/SimulationPlaybackTest.cpp)
+    target_link_libraries(editor-simulation-test PRIVATE editor-simulation editor::document)
+    add_test(NAME editor-simulation-playback COMMAND editor-simulation-test)
+    set_tests_properties(editor-simulation-playback PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
     add_executable(editor-events-test tests/EditorEventsTest.cpp)
     target_compile_features(editor-events-test PRIVATE cxx_std_20)
     target_include_directories(editor-events-test PRIVATE src)

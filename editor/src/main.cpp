@@ -18,6 +18,7 @@
 #include "EditorEvents.h"
 #include "DeckGridWidget.h"
 #include "NativeFileDialogs.h"
+#include "SimulationPlayback.h"
 
 #include "station/editor/EditorSession.h"
 #include "station/editor/Installation.h"
@@ -181,6 +182,7 @@ int runEditor() {
     // The one headless editing session: the GUI holds no geometry of its
     // own, it only renders and drives what the session reports.
     station::editor::EditorSession session;
+    station::editor::SimulationPlayback simulation;
     SdlUnsavedChangesPrompt unsaved_prompt(window);
     std::string file_status;
     auto report = [&](const station::editor::FileResult& result) {
@@ -212,6 +214,12 @@ int runEditor() {
         if (result.outcome == station::editor::FileOutcome::Success) {
             file_status.clear();
             if (action == station::editor::DocumentAction::Exit) running = false;
+            else if (action == station::editor::DocumentAction::New ||
+                     action == station::editor::DocumentAction::Open) {
+                // Even an identical replacement document starts a fresh preview.
+                try { simulation.reset(session.installation()); }
+                catch (const std::exception& error) { file_status = error.what(); }
+            }
         } else {
             report(result);
         }
@@ -337,6 +345,27 @@ int runEditor() {
             session.redo();
         }
         ImGui::PopItemFlag();
+
+        try { simulation.synchronize(session.installation()); }
+        catch (const std::exception& error) { file_status = error.what(); }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(simulation.runtime() == nullptr);
+        if (ImGui::Button(simulation.playing() ? ICON_FA_PAUSE " Pause" : ICON_FA_PLAY " Play"))
+            simulation.togglePlaying();
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_UNDO " Reset"))
+            edit([&]{ simulation.reset(session.installation()); });
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(85);
+        int speed_index = simulation.speedIndex();
+        if (ImGui::Combo("Speed", &speed_index, "0.1x\0" "0.5x\0" "1x\0" "2x\0" "10x\0"))
+            simulation.setSpeedIndex(speed_index);
+        // Do not erase an earlier diagnostic on every successful frame.
+        try { simulation.update(io.DeltaTime); }
+        catch (const std::exception& error) { file_status = error.what(); }
+        ImGui::SameLine();
+        ImGui::Text("%.1f s", simulation.runtime() ? simulation.runtime()->snapshot().elapsedSeconds : 0.0);
 
         // Plain-letter shortcuts must not consume text-field input or chords.
         if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt && !io.KeySuper && !io.KeyShift &&
