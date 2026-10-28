@@ -29,6 +29,11 @@ public:
         int height = 1;
         std::size_t area = 0;
         int level = 0;
+        // Stable identity within the Level: assigned once and carried across
+        // rebuilds by the largest surviving fragment, so references from the
+        // systems bridge (atmosphere ids, pathways, monitors) survive Cell and
+        // Wall edits that reshuffle Sector indices. 0 means unassigned.
+        std::int64_t uid = 0;
         bool operator==(const Sector&) const = default;
     };
     struct Wall {

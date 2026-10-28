@@ -22,6 +22,12 @@ else()
 endif()
 
 if(BUILD_TESTING)
+    add_executable(editor-atmosphere-identity tests/AtmosphereIdentity.cpp)
+    target_link_libraries(editor-atmosphere-identity PRIVATE editor::document nsi::systemsBridge)
+    add_test(NAME editor-atmosphere-identity COMMAND editor-atmosphere-identity)
+    set_tests_properties(editor-atmosphere-identity PROPERTIES
+        LABELS "editor;systems;functional;validation-fast" TIMEOUT 30)
+
     add_executable(editor-installation-editing tests/InstallationEditing.cpp)
     target_link_libraries(editor-installation-editing PRIVATE editor::document)
     add_test(NAME editor-installation-editing COMMAND editor-installation-editing)

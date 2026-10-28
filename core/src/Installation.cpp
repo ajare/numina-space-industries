@@ -46,7 +46,7 @@ void mapNode(const YAML::Node& n, const std::string& where) {
 
 Installation::Level::Level(std::uint32_t w, std::uint32_t d, SectorType initial)
     : width_(w), depth_(d), cells_(gridSize(w,d)),
-      sectors_{{"", initial, 1, cells_.size(), 0}},
+      sectors_{{"", initial, 1, cells_.size(), 0, 1}},
       walls_(std::size_t(w)*(std::size_t(d)+1)+(std::size_t(w)+1)*d) {
     require(initial == SectorType::Interior || initial == SectorType::Void, "Invalid Cell type");
     if (initial == SectorType::Interior) {
@@ -147,6 +147,12 @@ void Installation::Level::rebuild(const std::vector<SectorType>& types) {
             largest[old]=static_cast<int>(g); largestSize[old]=count;
         }
     }
+    // Reserve every old identity before allocating any new fragment. The
+    // dominant fragment may be visited after a smaller, newly-created one.
+    // New ids must also exceed all contributors so a later merge recovers
+    // the pre-split identity via the lowest-dominated-uid rule.
+    std::int64_t highestUid=0;
+    for (const auto& old:oldSectors) highestUid=std::max(highestUid,old.uid);
     sectors_.clear();
     for (std::size_t g=0;g<components.size();++g) {
         const auto seed=components[g].front();
@@ -161,6 +167,22 @@ void Installation::Level::rebuild(const std::vector<SectorType>& types) {
             if (largest[donor]==int(g)) s.name=oldSectors[donor].name;
         }
         if (s.type==SectorType::Void) s.height=1;
+        // Identity: a fragment inherits the uid of a contributor it dominates,
+        // taking the lowest such uid so that merging two Sectors returns the
+        // survivor the identity the smaller of the pair had had before the split
+        // - erase and its undo land on the same identity. A fragment that
+        // dominates no contributor is new, and takes the next free uid.
+        std::int64_t inherited=0;
+        for (auto const& [old,count]:overlap[g]) if (largest[old]==int(g)) {
+            auto const candidate=oldSectors[old].uid;
+            if (candidate!=0 && (inherited==0 || candidate<inherited)) inherited=candidate;
+        }
+        s.uid=inherited;
+        if (s.uid==0) {
+            if (highestUid==std::numeric_limits<std::int64_t>::max())
+                throw std::overflow_error("Sector uid space exhausted");
+            s.uid=++highestUid;
+        }
         sectors_.push_back(std::move(s));
         for (auto i:components[g]) cells_[i].sector=static_cast<int>(g);
     }
