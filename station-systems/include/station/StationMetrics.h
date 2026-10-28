@@ -42,6 +42,8 @@ namespace station
 		std::optional<double> actual, requested;
 		StationMetricValidity validity{StationMetricValidity::Unavailable};
 	};
+	// sampleIntervalSeconds is zero for irregular Variable-mode recordings;
+	// their elapsedSeconds timestamps are authoritative.
 	struct StationMetricHistory
 	{
 		StationMetricDescriptor descriptor;

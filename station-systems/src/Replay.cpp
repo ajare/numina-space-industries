@@ -11,7 +11,7 @@ namespace station
 		output->writeUint32("schemaVersion", kStationSchemaVersion);
 		auto const snapshot = runtime.snapshot();
 		output->writeFloat("baseStepSeconds", static_cast<float>(
-			snapshot.systemsTimestepSeconds / snapshot.systemsStepWorldTicks));
+			snapshot.variableTimestep ? 0.1 : snapshot.systemsTimestepSeconds / snapshot.systemsStepWorldTicks));
 		writeStationSystemsSettingsMap(*output, runtime.effectiveSettings());
 		runtime.writeFaultReplay(*output);
 		output->endMap();

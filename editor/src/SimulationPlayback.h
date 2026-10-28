@@ -21,10 +21,11 @@ public:
     void update(double wallSeconds);
     const StationSystemsRuntime* runtime() const noexcept { return runtime_.get(); }
 private:
-    static constexpr double stepSeconds = 0.125;
+    static constexpr double updateIntervalSeconds = 0.1;
+    // Bound catch-up after stalls/native dialogs; discard excess wall-time debt.
+    static constexpr int maxCatchUpUpdates = 5;
     std::optional<nsi::core::Installation> source_;
     std::unique_ptr<StationSystemsRuntime> runtime_;
-    double targetSeconds_ = 0;
     double remainder_ = 0;
     int speedIndex_ = 2;
     bool playing_ = false;

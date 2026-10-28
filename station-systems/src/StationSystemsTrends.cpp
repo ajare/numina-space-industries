@@ -111,7 +111,7 @@ namespace station
 				auto v = o.read(snap, observationIndex);
 				if (o.cumulativeRate)
 				{
-					double const seconds = clock.secondsAt(tick) - previousExchangeSeconds;
+					double const seconds = clock.elapsedSeconds() - previousExchangeSeconds;
 					auto total = v.actual;
 					if (total && previousExchangeTotals[i] && seconds > 0)
 						v.actual = (*total - *previousExchangeTotals[i]) / seconds;
@@ -154,8 +154,8 @@ namespace station
 			}
 			put(constituentSlot + i, actual * o.sourceToCanonicalScale, requested * o.sourceToCanonicalScale);
 		}
-		previousExchangeSeconds = clock.secondsAt(tick);
-		history.observe(previousExchangeSeconds, recordingValues);
+		previousExchangeSeconds = clock.elapsedSeconds();
+		history.observe(previousExchangeSeconds, recordingValues, tick);
 	}
 	// #419: the endurance observation windows. One window per Resource
 	// store and per battery, advanced only at the existing observation
@@ -211,7 +211,8 @@ namespace station
 	}
 	void StationSystemsRuntime::Impl::updateEndurance(uint64_t tick)
 	{
-		auto const elapsed = clock.secondsAt(tick);
+		auto const elapsed = clock.elapsedSeconds();
+		(void)tick;
 		for (size_t index = 0; index < stores.size() && index < storeEndurance.size(); ++index)
 		{
 			auto const& store = stores[index];

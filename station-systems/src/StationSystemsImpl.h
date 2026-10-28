@@ -11,8 +11,13 @@ namespace station
 using namespace station_detail;
 	struct StationSystemsRuntime::Impl
 	{
-		Impl(uint32_t ratio, float baseSeconds) : clock(ratio, baseSeconds) {}
+		Impl(uint32_t ratio, float baseSeconds, bool variable) : clock(ratio, baseSeconds, variable) {}
 		StationClock clock;
+		// Run-length encoded committed deltas: replay must reproduce the exact
+		// partition, not merely the final elapsed time. Fixed runs need no log.
+		struct DurationRun { double seconds; uint64_t steps; };
+		std::vector<DurationRun> durationRuns;
+		double nextObservationSeconds{0};
 		struct FaultCommand
 		{
 			// One entry on the command journal. A settings update carries
@@ -1683,6 +1688,7 @@ using namespace station_detail;
 		struct MonitorState
 		{
 			uint64_t onSamples{0}, offSamples{0};
+			double onStartSeconds{0}, offStartSeconds{0};
 			// The value the Monitor last read. The Alert ledger is written only
 			// by the registered callback (#868), so the live reading the
 			// surfaces publish lives here, not in the ledger entry.

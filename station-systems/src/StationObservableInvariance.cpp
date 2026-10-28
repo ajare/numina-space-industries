@@ -11,8 +11,8 @@ namespace station
 		// stamps. Comparing a few inventories cannot certify the entire object.
 		static constexpr auto entries = []
 		{
-			constexpr std::array<std::string_view, 51> names{
-				"solarCycle", "enabled", "healthy", "systemsStepWorldTicks", "systemsTimestepSeconds",
+			constexpr std::array<std::string_view, 52> names{
+				"solarCycle", "enabled", "healthy", "variableTimestep", "systemsStepWorldTicks", "systemsTimestepSeconds",
 				"worldTick", "elapsedSeconds", "completedTicks", "stores", "transfers",
 				"connections", "conversions", "balances", "constituentBalances", "deliveries",
 				"wasteEjections", "outages", "maintenanceJobs", "power", "thermal", "coolantLoops",
@@ -23,7 +23,7 @@ namespace station
 				"algaeCultures", "fuelCells", "hasNextDelivery", "nextDeliverySeconds",
 				"hasNextWasteEjection", "nextWasteEjectionSeconds", "endurance", "forecast",
 				"balanceTolerance", "activeAlerts", "closedAlerts"};
-			std::array<StationObservableInvariance, 69> result{};
+			std::array<StationObservableInvariance, 70> result{};
 			for (size_t i = 0; i < names.size(); ++i)
 			{
 				auto& entry = result[i];
@@ -39,7 +39,7 @@ namespace station
 					entry.verifiedBy = "station/clock";
 					entry.verifiedThroughRatio = CORE_MAX_SYSTEMS_STEP_WORLD_TICKS;
 				}
-				if (entry.name == "enabled" || entry.name == "balanceTolerance")
+				if (entry.name == "enabled" || entry.name == "balanceTolerance" || entry.name == "variableTimestep")
 				{
 					entry.classification = StationObservableInvarianceClass::Exact;
 					entry.certifiedRatio = CORE_MAX_SYSTEMS_STEP_WORLD_TICKS;

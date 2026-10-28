@@ -36,8 +36,12 @@ namespace station
 	public:
 		StationHistory() = default;
 		StationHistory(std::vector<StationRecordingSlot> slots, double cadence, double retention,
-			StationRecordingLimits limits = {}, double stepSeconds = StationScheduleQuantumSeconds);
-		void observe(double seconds, std::vector<StationMetricSample> const& values);
+			StationRecordingLimits limits = {}, double stepSeconds = StationScheduleQuantumSeconds,
+			bool irregular = false);
+		// Irregular histories retain actual endpoint timestamps/step ids and
+		// time-weight coarsened samples. Resolution/sampleInterval is zero:
+		// consumers must use timestamps, not infer a uniform sampling grid.
+		void observe(double seconds, std::vector<StationMetricSample> const& values, uint64_t step = 0);
 		std::vector<StationMetricHistory> metrics() const;
 		std::vector<StationTrendSeries> trends() const;
 		StationRecordingStatus const& status() const { return mStatus; }
@@ -47,9 +51,12 @@ namespace station
 		StationChartData const& query(std::string const& id) const;
 		StationQueryWork queryWork() const { return mQueryWork; }
 	private:
-		struct Cell { double actual{0}, requested{0}; uint64_t valid{0}, count{0}; };
+		struct Cell { double actual{0}, requested{0}, validWeight{0}; uint64_t valid{0}, count{0}; };
 		std::vector<StationRecordingSlot> mSlots;
-		std::vector<double> mTimes;
+		std::vector<double> mTimes, mWeights;
+		std::vector<uint64_t> mSteps;
+		bool mIrregular{false};
+		double mLastObservation{0}, mPendingWeight{0};
 		std::vector<Cell> mCells, mPending;
 		StationRecordingStatus mStatus;
 		double mCadence{0}, mRetention{0}, mStepSeconds{StationScheduleQuantumSeconds};

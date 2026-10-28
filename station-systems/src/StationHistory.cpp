@@ -6,8 +6,8 @@
 namespace station
 {
 	StationHistory::StationHistory(std::vector<StationRecordingSlot> slots, double cadence,
-		double retention, StationRecordingLimits limits, double stepSeconds)
-		: mCadence(cadence), mRetention(retention), mStepSeconds(stepSeconds)
+		double retention, StationRecordingLimits limits, double stepSeconds, bool irregular)
+		: mIrregular(irregular), mCadence(cadence), mRetention(retention), mStepSeconds(stepSeconds)
 	{
 		// Bound metadata before retaining it; refuse the entire catalogue, never a subset.
 		size_t metadata = (slots.capacity() - slots.size()) * sizeof(StationRecordingSlot);
@@ -48,7 +48,7 @@ namespace station
 		}
 		// Reserve selected-query export/preparation and the editor's single plot
 		// copy under the same total budget, even when that view uses every slot.
-		auto const rowBytes = sizeof(double) + slots.size() * (sizeof(Cell)
+		auto const rowBytes = 2 * sizeof(double) + sizeof(uint64_t) + slots.size() * (sizeof(Cell)
 			+ sizeof(StationMetricSample) + 4 * 6 * sizeof(double));
 		// Conservative per-slot allowance for domain reader closures, cumulative
 		// baselines, indexed snapshot keys and selected-series metadata during
@@ -62,10 +62,12 @@ namespace station
 		mStatus.sampleLimit -= mStatus.sampleLimit % 2;
 		mSlots = std::move(slots);
 		mTimes.resize(mStatus.sampleLimit);
+		mWeights.resize(mStatus.sampleLimit);
+		mSteps.resize(mStatus.sampleLimit);
 		mCells.resize(mStatus.sampleLimit * mSlots.size());
 		mPending.resize(mSlots.size());
 		mStatus.recordingBytes = overhead + mStatus.sampleLimit * rowBytes;
-		mStatus.resolutionSeconds = cadence;
+		mStatus.resolutionSeconds = mIrregular ? 0 : cadence;
 		mCatalogue = std::move(catalogue);
 		mChartSlots.reserve(mCatalogue.size());
 		for (auto const& chart : mCatalogue)
@@ -81,10 +83,12 @@ namespace station
 		}
 	}
 
-	void StationHistory::observe(double seconds, std::vector<StationMetricSample> const& values)
+	void StationHistory::observe(double seconds, std::vector<StationMetricSample> const& values, uint64_t step)
 	{
 		if (mStatus.limited || mStatus.sampleLimit < 2 || !std::isfinite(seconds)
-			|| (mCount && seconds <= mTimes[mCount - 1])) return;
+			|| seconds <= mLastObservation) return;
+		auto const observationWeight = seconds - mLastObservation;
+		mLastObservation = seconds;
 		auto const n = mSlots.size();
 		if (mCount == mStatus.sampleLimit)
 		{
@@ -93,23 +97,30 @@ namespace station
 				for (size_t row = 0; row < mCount / 2; ++row)
 				{
 					mTimes[row] = mTimes[2 * row + 1];
+					mSteps[row] = mSteps[2 * row + 1];
+					auto const weightA = mWeights[2 * row], weightB = mWeights[2 * row + 1];
+					mWeights[row] = weightA + weightB;
 					for (size_t col = 0; col < n; ++col)
 					{
 						auto a = mCells[(2 * row) * n + col];
 						auto const b = mCells[(2 * row + 1) * n + col];
-						a.actual = a.actual / 2 + b.actual / 2;
-						a.requested = a.requested / 2 + b.requested / 2;
+						double const fraction = mIrregular ? weightA / (weightA + weightB) : 0.5;
+						a.actual = a.actual * fraction + b.actual * (1 - fraction);
+						a.requested = a.requested * fraction + b.requested * (1 - fraction);
+						a.validWeight += b.validWeight;
 						a.valid += b.valid; a.count += b.count;
 						mCells[row * n + col] = a;
 					}
 				}
 				mCount /= 2;
 				++mStatus.coarseningLevel;
-				mStatus.resolutionSeconds = std::ldexp(mCadence, mStatus.coarseningLevel);
+				mStatus.resolutionSeconds = mIrregular ? 0 : std::ldexp(mCadence, mStatus.coarseningLevel);
 			}
 			else
 			{
 				std::move(mTimes.begin() + 1, mTimes.begin() + mCount, mTimes.begin());
+				std::move(mWeights.begin() + 1, mWeights.begin() + mCount, mWeights.begin());
+				std::move(mSteps.begin() + 1, mSteps.begin() + mCount, mSteps.begin());
 				std::move(mCells.begin() + n, mCells.begin() + mCount * n, mCells.begin());
 				--mCount;
 			}
@@ -117,31 +128,45 @@ namespace station
 			++mRevision;
 		}
 		++mPendingCount;
+		mPendingWeight += observationWeight;
 		for (size_t col = 0; col < n; ++col)
 		{
 			auto& cell = mPending[col];
 			++cell.count;
+			// Incremental time-weighted mean, including unavailable intervals in
+			// the denominator. An incomplete bucket remains an invalid sample.
+			if (mIrregular) {
+				auto const oldFraction = (mPendingWeight - observationWeight) / mPendingWeight;
+				cell.actual *= oldFraction; cell.requested *= oldFraction;
+			}
 			if (col >= values.size()) continue;
 			auto const& v = values[col];
 			bool const valid = v.validity == StationMetricValidity::Valid && v.actual && std::isfinite(*v.actual)
 				&& (!mSlots[col].metric.requestedSemantics || (v.requested && std::isfinite(*v.requested)));
 			if (!valid) continue;
 			++cell.valid;
+			cell.validWeight += observationWeight;
 			// Divide before adding to avoid overflow for finite extreme observations.
-			double const weight = 1.0 / static_cast<double>(uint64_t{1} << mStatus.coarseningLevel);
+			double const weight = mIrregular ? observationWeight / mPendingWeight
+				: 1.0 / static_cast<double>(uint64_t{1} << mStatus.coarseningLevel);
 			cell.actual += *v.actual * weight;
 			if (v.requested) cell.requested += *v.requested * weight;
 		}
 		if (mPendingCount < (uint64_t{1} << mStatus.coarseningLevel)) return;
 		mTimes[mCount] = seconds;
+		mWeights[mCount] = mPendingWeight;
+		mSteps[mCount] = step ? step : static_cast<uint64_t>(std::llround(seconds / mStepSeconds));
 		std::copy(mPending.begin(), mPending.end(), mCells.begin() + mCount * n);
 		std::fill(mPending.begin(), mPending.end(), Cell{});
 		mPendingCount = 0;
+		mPendingWeight = 0;
 		++mCount;
 		++mRevision;
 		while (mCount > 1 && seconds - mTimes[0] > mRetention)
 		{
 			std::move(mTimes.begin() + 1, mTimes.begin() + mCount, mTimes.begin());
+			std::move(mWeights.begin() + 1, mWeights.begin() + mCount, mWeights.begin());
+			std::move(mSteps.begin() + 1, mSteps.begin() + mCount, mSteps.begin());
 			std::move(mCells.begin() + n, mCells.begin() + mCount * n, mCells.begin());
 			--mCount; mStatus.truncated = true;
 		}
@@ -160,7 +185,8 @@ namespace station
 			auto const& c = mCells[row * mSlots.size() + col];
 			StationMetricSample s;
 			s.elapsedSeconds = mTimes[row];
-			s.coverage = c.count ? double(c.valid) / double(c.count) : 0;
+			s.coverage = mIrregular ? c.validWeight / mWeights[row]
+				: c.count ? double(c.valid) / double(c.count) : 0;
 			s.validity = c.valid == c.count && c.count && std::isfinite(c.actual) && std::isfinite(c.requested)
 				? StationMetricValidity::Valid : StationMetricValidity::Invalid;
 			if (s.validity == StationMetricValidity::Valid)
@@ -211,10 +237,12 @@ namespace station
 			s.subsystem = slot.subsystem; s.id = slot.id; s.unit = slot.unit;
 			s.sampleIntervalSeconds = mStatus.resolutionSeconds;
 			s.downsampleLevel = mStatus.coarseningLevel; s.truncated = mStatus.truncated;
-			for (auto const& p : history[col].samples)
-				s.samples.push_back({static_cast<uint64_t>(std::llround(p.elapsedSeconds / mStepSeconds)), p.elapsedSeconds,
+			for (size_t row = 0; row < history[col].samples.size(); ++row) {
+				auto const& p = history[col].samples[row];
+				s.samples.push_back({mSteps[row], p.elapsedSeconds,
 					p.requested.value_or(p.actual.value_or(std::numeric_limits<double>::quiet_NaN())),
 					p.actual.value_or(std::numeric_limits<double>::quiet_NaN())});
+			}
 			result.push_back(std::move(s));
 		}
 		return result;

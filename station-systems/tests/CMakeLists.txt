@@ -35,6 +35,12 @@ add_test(NAME station-library-commands COMMAND station-command-consumer)
 set_tests_properties(station-library-commands PROPERTIES
     LABELS "station;functional;persistence;validation-fast" TIMEOUT 120)
 
+add_executable(station-variable-step-consumer VariableStepConsumer.cpp)
+target_link_libraries(station-variable-step-consumer PRIVATE StationSystems::StationSystems)
+add_test(NAME station-library-variable-step COMMAND station-variable-step-consumer)
+set_tests_properties(station-library-variable-step PROPERTIES
+    LABELS "station;functional;persistence;validation-fast" TIMEOUT 60)
+
 add_executable(station-runtime-consumer RuntimeConsumer.cpp)
 target_link_libraries(station-runtime-consumer PRIVATE StationSystems::StationSystems)
 add_test(NAME station-library-runtime COMMAND station-runtime-consumer)
@@ -61,7 +67,7 @@ set_tests_properties(station-library-authoring PROPERTIES
 
 add_executable(station-configuration-consumer ConfigurationConsumer.cpp)
 # The standalone build-and-test entry point builds all public API consumers.
-add_dependencies(station-configuration-consumer station-public-header-checks station-step-timing-consumer station-scenario-consumer station-command-consumer station-persistence-consumer station-authoring-consumer station-runtime-consumer station-reporting-consumer)
+add_dependencies(station-configuration-consumer station-public-header-checks station-step-timing-consumer station-scenario-consumer station-command-consumer station-persistence-consumer station-authoring-consumer station-runtime-consumer station-variable-step-consumer station-reporting-consumer)
 if(TARGET nsi-serialization-consumer)
     add_dependencies(station-configuration-consumer nsi-serialization-consumer)
 endif()

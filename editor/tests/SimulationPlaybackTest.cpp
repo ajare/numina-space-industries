@@ -38,16 +38,20 @@ int main() {
             playback.reset(session.installation());
             playback.setSpeedIndex(i);
             playback.togglePlaying();
-            for (int frame = 0; frame < 80; ++frame) playback.update(0.125);
+            for (int frame = 0; frame < 200; ++frame) playback.update(0.05);
+            require(playback.runtime()->snapshot().worldTick == 100, "Speed changed real-time update count");
+            near(playback.runtime()->snapshot().systemsTimestepSeconds, 0.1 * SimulationPlayback::speeds[i]);
             near(playback.runtime()->snapshot().elapsedSeconds, 10 * SimulationPlayback::speeds[i]);
             require(playback.runtime()->snapshot().atmospheres.at(0).oxygenKg < oxygen,
                     "Simulation did not consume oxygen");
+            near(playback.runtime()->snapshot().atmospheres.at(0).oxygenKg,
+                 oxygen - 0.00001 * playback.runtime()->snapshot().elapsedSeconds);
             playback.togglePlaying();
             const double elapsed = playback.runtime()->snapshot().elapsedSeconds;
             playback.update(100);
             near(playback.runtime()->snapshot().elapsedSeconds, elapsed);
             playback.togglePlaying();
-            playback.update(1.25);
+            playback.update(0.2);
             require(playback.runtime()->snapshot().elapsedSeconds > elapsed, "Resume failed");
         }
         playback.reset(session.installation());
@@ -57,13 +61,17 @@ int main() {
         require(session.installation() == installation, "Preview modified authored document");
         playback.setSpeedIndex(2);
         playback.togglePlaying();
-        playback.update(0.0625);
+        playback.update(0.05);
         near(playback.runtime()->snapshot().elapsedSeconds, 0);
         playback.togglePlaying();
         playback.update(20);
         playback.togglePlaying();
-        playback.update(0.0625);
-        near(playback.runtime()->snapshot().elapsedSeconds, 0.125);
+        playback.update(0.05);
+        near(playback.runtime()->snapshot().elapsedSeconds, 0.1);
+        playback.setSpeedIndex(4);
+        playback.update(0.1);
+        near(playback.runtime()->snapshot().elapsedSeconds, 1.1);
+        require(playback.runtime()->snapshot().worldTick == 2, "Speed switch reset or subdivided preview");
         playback.synchronize(session.installation());
         require(playback.playing(), "Unchanged document reset playback");
         session.toggleCell(0, 0, 0);
@@ -74,6 +82,11 @@ int main() {
         session.undo();
         playback.synchronize(session.installation());
         require(playback.runtime()->snapshot().atmospheres.size() == 1, "Undo did not rebuild preview");
+        playback.setSpeedIndex(2);
+        playback.togglePlaying();
+        playback.update(100); // a dialog/stall must not cause an unbounded catch-up loop
+        require(playback.runtime()->snapshot().worldTick == 5, "Catch-up work was not bounded");
+        near(playback.runtime()->snapshot().elapsedSeconds, 0.5);
         std::cout << "Simulation playback passed\n";
         return 0;
     } catch (const std::exception& error) {

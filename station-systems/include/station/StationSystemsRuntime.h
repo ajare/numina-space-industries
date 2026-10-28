@@ -35,6 +35,8 @@ namespace station
 		std::optional<uint32_t> previous;
 	};
 
+	enum class StationSystemsUpdateMode { Fixed, Variable };
+
 	// Station drive. The coordinator supplies target seconds in a World;
 	// standalone Station scenarios may drive the same boundary directly.
 	class StationSystemsRuntime
@@ -42,11 +44,22 @@ namespace station
 	public:
 		StationSystemsRuntime(StationSystemsSettings settings, float baseStepSeconds,
 			StationSystemsSource source = std::nullopt);
+		// Variable mode has no World quantum. Each update supplies its own duration.
+		StationSystemsRuntime(StationSystemsSettings settings, StationSystemsUpdateMode mode,
+			StationSystemsSource source = std::nullopt);
+		StationSystemsUpdateMode updateMode() const;
+		// Exactly one variable-duration Station update (internal event-driven
+		// subdivisions remain enabled). Positive finite seconds only; invalid
+		// or unrepresentable durations and fixed-mode calls are refused unchanged.
+		// Disabled settings are a no-op. Failed steps retain committed time and
+		// retire the run, just like advanceTo. Never mix the two drive modes.
+		bool update(double deltaSeconds);
 		~StationSystemsRuntime();
 		StationSystemsRuntime(StationSystemsRuntime const&) = delete;
 		StationSystemsRuntime& operator=(StationSystemsRuntime const&) = delete;
 		// Catch up using whole Station steps until elapsed >= target. Targets
 		// already reached are no-ops; invalid targets are rejected without mutation.
+		// Available only in Fixed mode.
 		bool advanceTo(double simulatedSeconds);
 		// Mean completed Station step cost in the trailing wall-clock second, or
 		// zero when no Station step completed. Sampled per Station step, so a
@@ -210,7 +223,7 @@ namespace station
 		// Fault, or parts that cannot currently be reserved.
 		bool repairFault(std::string_view installationId, std::string_view faultModeId,
 			std::string* jobIdOut = nullptr, std::string* diagnostic = nullptr);
-		// Command journal plus elapsed time reconstructs the fault ledger and
+		// Command journal plus the committed clock/duration journal reconstructs the fault ledger and
 		// all its bookings through the normal audited drive (YAML or binary).
 		void writeFaultReplay(Serializer& serializer) const;
 		static std::unique_ptr<StationSystemsRuntime> readFaultReplay(Serializer& serializer,
@@ -219,6 +232,7 @@ namespace station
 			StationSystemsSource source = std::nullopt);
 		bool hasFaultCommands() const;
 		// Whether a save must carry the fault/Condition replay block.
+		// Always true in Variable mode, which must preserve its duration journal.
 		// Condition is integrated over the run (#840), so a save of a
 		// Condition-modelled machine needs the block even when no client
 		// ever issued a command: without it the machine would come back
@@ -250,6 +264,8 @@ namespace station
 		StationQueryWork queryWork() const;
 		std::vector<StationSystemsDiagnostic> const& diagnostics() const;
 	private:
+		StationSystemsRuntime(StationSystemsSettings settings, float baseStepSeconds,
+			StationSystemsSource source, StationSystemsUpdateMode mode);
 		// Implemented in StationSystemsLiveSettings.cpp, where the private
 		// Impl state is visible, and explicitly instantiated there for every
 		// live-editable settings type. The mutator lambda never crosses into

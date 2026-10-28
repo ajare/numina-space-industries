@@ -919,14 +919,26 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 	}
 
 	StationSystemsRuntime::StationSystemsRuntime(StationSystemsSettings settings, float baseStepSeconds,
-		StationSystemsSource selectedSource)
+		StationSystemsSource source)
+		: StationSystemsRuntime(std::move(settings), baseStepSeconds, std::move(source), StationSystemsUpdateMode::Fixed) {}
+
+	StationSystemsRuntime::StationSystemsRuntime(StationSystemsSettings settings,
+		StationSystemsUpdateMode mode, StationSystemsSource source)
+		: StationSystemsRuntime(std::move(settings), 0.1f, std::move(source), mode) {}
+
+	StationSystemsRuntime::StationSystemsRuntime(StationSystemsSettings settings, float baseStepSeconds,
+		StationSystemsSource selectedSource, StationSystemsUpdateMode mode)
 	{
 		static std::atomic<uint64_t> nextRun{0};
 		mRun = ++nextRun;
-		if (stationSystemsRuntimeStepRatioOverride) settings.systemsStepWorldTicks = *stationSystemsRuntimeStepRatioOverride;
+		if (mode == StationSystemsUpdateMode::Fixed && stationSystemsRuntimeStepRatioOverride)
+			settings.systemsStepWorldTicks = *stationSystemsRuntimeStepRatioOverride;
 		std::string diagnostic;
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw serialization::SerializationException(diagnostic);
-		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds);
+		if (mode != StationSystemsUpdateMode::Fixed && mode != StationSystemsUpdateMode::Variable)
+			throw std::invalid_argument("Invalid Station update mode");
+		mImpl = std::make_unique<Impl>(settings.systemsStepWorldTicks, baseStepSeconds,
+			mode == StationSystemsUpdateMode::Variable);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
 		mImpl->effectiveMonitors = stationEffectiveMonitors(settings);
 		// Any runtime can be persisted through the public replay contract.
@@ -934,8 +946,9 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		// live edits (including load recovery before a BreakerReset) would be
 		// applied retroactively and its accepted commands could fail replay.
 		mImpl->faultReplayInitialSettings = settings;
-		mImpl->snapshot.systemsStepWorldTicks = settings.systemsStepWorldTicks;
-		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.stepSeconds();
+		mImpl->snapshot.variableTimestep = mImpl->clock.variable();
+		mImpl->snapshot.systemsStepWorldTicks = mImpl->clock.variable() ? 0 : settings.systemsStepWorldTicks;
+		mImpl->snapshot.systemsTimestepSeconds = mImpl->clock.variable() ? 0 : mImpl->clock.stepSeconds();
 		std::vector<StationRecordingSlot> slots;
 		auto addSlot = [&](std::string subsystem, std::string id, std::string unit, std::string metricId) {
 			StationRecordingSlot slot;
@@ -1066,11 +1079,13 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		// Share one integer observation stride between sampling and metadata.
 		// Float cadence products diverge from the count-derived timestamps and
 		// the discrepancy grows when the recorder coarsens its history.
-		mImpl->observationIntervalSteps = std::max(uint64_t{1},
+		mImpl->observationIntervalSteps = mImpl->clock.variable() ? 1 : std::max(uint64_t{1},
 			static_cast<uint64_t>(std::ceil(settings.observationIntervalSeconds / stepSeconds)));
+		mImpl->nextObservationSeconds = settings.observationIntervalSeconds;
 		mImpl->history = StationHistory(std::move(slots),
-			static_cast<double>(mImpl->observationIntervalSteps) * stepSeconds,
-			settings.trendRetentionSeconds, {}, mImpl->clock.stepSeconds());
+			mImpl->clock.variable() ? settings.observationIntervalSeconds
+				: static_cast<double>(mImpl->observationIntervalSteps) * stepSeconds,
+			settings.trendRetentionSeconds, {}, stepSeconds, mImpl->clock.variable());
 		if (!mImpl->history.status().limited) mImpl->recordingValues.resize(slotCount);
 		else
 		{
@@ -2011,8 +2026,35 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				: ", " + std::to_string(settings.wasteEjections.size()) + " terminal-waste ejection(s)"));
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
+	StationSystemsUpdateMode StationSystemsRuntime::updateMode() const
+	{
+		return mImpl->clock.variable() ? StationSystemsUpdateMode::Variable : StationSystemsUpdateMode::Fixed;
+	}
+	bool StationSystemsRuntime::update(double deltaSeconds)
+	{
+		if (!mImpl->clock.variable() || !std::isfinite(deltaSeconds) || deltaSeconds <= 0
+			|| deltaSeconds > std::numeric_limits<float>::max()) return false;
+		if (!mImpl->settings.enabled) return true;
+		if (!mImpl->snapshot.healthy || !mImpl->clock.prepare(deltaSeconds)) return false;
+		// Reserve before physical mutation so allocation failure cannot lose the
+		// duration of a committed step. Only successful steps enter the journal.
+		try {
+			if ((mImpl->durationRuns.empty() || mImpl->durationRuns.back().seconds != deltaSeconds)
+				&& mImpl->durationRuns.size() == mImpl->durationRuns.capacity())
+				mImpl->durationRuns.reserve(std::max(size_t{1}, mImpl->durationRuns.capacity() * 2));
+			auto const ok = advanceStep();
+			if (ok) {
+				if (!mImpl->durationRuns.empty() && mImpl->durationRuns.back().seconds == deltaSeconds)
+					++mImpl->durationRuns.back().steps;
+				else mImpl->durationRuns.push_back({deltaSeconds, 1});
+			}
+			mImpl->clock.cancelStep();
+			return ok;
+		} catch (...) { mImpl->clock.cancelStep(); throw; }
+	}
 	bool StationSystemsRuntime::advanceTo(double simulatedSeconds)
 	{
+		if (mImpl->clock.variable()) return false;
 		if (!std::isfinite(simulatedSeconds) || simulatedSeconds < 0) return false;
 		if (!mImpl->settings.enabled) return true;
 		if (!mImpl->snapshot.healthy) return false;
@@ -2099,6 +2141,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			}
 		}
 		next.worldTick = tick;
+		if (mImpl->clock.variable()) next.systemsTimestepSeconds = seconds;
 		mImpl->clock.commitStep();
 		next.elapsedSeconds = mImpl->clock.elapsedSeconds();
 		mImpl->snapshot = next;
@@ -2113,8 +2156,16 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 		mImpl->reconcileTransferAlerts();
 		mImpl->reconcileStandbyAlerts();
 		mImpl->reconcileBreakerAlerts();
-		if (tick % mImpl->observationIntervalSteps == 0)
+		bool const observationDue = mImpl->clock.variable()
+			? next.elapsedSeconds + 1e-10 >= mImpl->nextObservationSeconds
+			: tick % mImpl->observationIntervalSteps == 0;
+		if (observationDue)
 		{
+			if (mImpl->clock.variable()) {
+				auto const interval = mImpl->settings.observationIntervalSeconds;
+				// One actual endpoint sample, never fabricated intermediate states.
+				mImpl->nextObservationSeconds = (std::floor((next.elapsedSeconds + 1e-10) / interval) + 1) * interval;
+			}
 			appendBoundedEvent(mImpl->events, tick, "observation",
 				"All four Station systems completed the Station step");
 			// #418: trends are sampled on the same existing observation

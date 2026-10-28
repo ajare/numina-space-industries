@@ -2554,6 +2554,9 @@ namespace station
 		bool enabled{false};
 		bool healthy{true};
 		// Effective runtime clock, including an explicit test-runner override.
+		// Variable mode has no World ratio; duration is the last committed
+		// update delta (zero before the first update).
+		bool variableTimestep{false};
 		uint32_t systemsStepWorldTicks{1};
 		double systemsTimestepSeconds{0};
 		// Legacy tick-named fields count Station steps, not World ticks.
@@ -2749,7 +2752,7 @@ namespace station
 	// One bounded trend series (#418): the stable presentation contract
 	// for station resource/service trends. Subsystem identity, unit and
 	// the sampling window are explicit so the viewer never implies a
-	// complete history. #603 made the stride a hard invariant:
+	// complete history. In Fixed mode #603 made the stride a hard invariant:
 	// consecutive samples always stand exactly sampleIntervalSeconds of
 	// simulation time apart - the series is uniformly spaced at its
 	// current cadence, never a mix of a merged coarse tail and raw
@@ -2758,7 +2761,9 @@ namespace station
 	// StationTrendDownsampleLevelCap), and truncated reports that
 	// older history was merged or dropped beyond what is retained
 	// here. Later features add series through this same shape; the
-	// presentation never depends on their internals.
+	// presentation never depends on their internals. Variable mode instead
+	// reports sampleIntervalSeconds == 0: use the actual timestamps and
+	// step ids; coarsened values are weighted by observed interval duration.
 	struct StationTrendSeries
 	{
 		std::string subsystem; // metric family: "power", "equipment-load", "transfer"

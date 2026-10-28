@@ -145,6 +145,50 @@ biology, conservation audits, faults and failure containment use the same engine
 as World. `station/StationMetrics.h` and `station/StationHistory.h` provide the
 observation catalogues and bounded history queries.
 
+### Variable-duration updates
+
+```cpp
+station::StationSystemsRuntime runtime(settings, station::StationSystemsUpdateMode::Variable);
+bool advanced = runtime.update(0.1); // exactly one Station update for 0.1 simulated seconds
+advanced = runtime.update(1.0);      // next update covers 1 second; state is preserved
+```
+
+Select the drive mode at construction. `update(deltaSeconds)` is available only
+in Variable mode and `advanceTo(targetSeconds)` only in Fixed mode; calls to the
+wrong mode return false unchanged. Deltas must be positive, finite, no greater
+than `float` maximum, and representably advance elapsed time. Invalid deltas
+are refused without mutation; disabled runs do not advance. Script/audit failures
+retire the run without advancing committed time, just as in Fixed mode. Existing
+fixed-step clients retain count-derived time and whole-step target semantics.
+
+Variable updates send the supplied delta to every lifecycle sandbox and the
+same audited ledger. Event-driven subdivisions at schedule, profile, capacity,
+and protection boundaries remain enabled: one client update does not promise
+one indivisible physics calculation or constant execution cost. The tested Editor
+range is 0.01–1 second; this is not blanket timestep-invariance certification.
+
+Snapshots set `variableTimestep = true`, `systemsStepWorldTicks = 0` (no World
+ratio), and `systemsTimestepSeconds` to the last committed delta (initially zero).
+Step ids still count committed external updates. Monitor persistence uses elapsed
+durations rather than sample count times the most recent delta. Observation
+cadence is measured in simulated seconds: sample once at the first committed
+endpoint reaching a due boundary, skipping crossed boundaries without inventing
+intermediate states. Variable histories retain endpoint timestamps and step ids,
+time-weight coarsened values, and report zero `sampleIntervalSeconds` and
+`resolutionSeconds` to indicate irregular sampling; consumers must use timestamps.
+
+Replay schema 139 adds Variable mode and a run-length-encoded journal of committed
+update durations. Replay reproduces the exact step partition and command ordering,
+not merely elapsed time; old fixed-step replay remains readable. No historical
+step times are reinterpreted when a delta changes.
+
+The Editor schedules nominally ten updates per real second, passing `0.1 * speed`
+to `update`, independent of render frequency. It permits at most five catch-up
+updates per frame after stalls/native dialogs and discards excess wall-time debt
+rather than entering an unbounded catch-up loop. It remains synchronous, so heavy
+updates can still stall the interface; a slower-than-10-Hz renderer cannot promise
+precisely spaced wall-clock updates.
+
 The default source is embedded from `resources/lifecycle.lua` in this project;
 CMake tracks edits and regenerates the embedding on incremental builds. No file
 lookup occurs at runtime. Pass an optional source string as the constructor's

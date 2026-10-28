@@ -739,6 +739,7 @@ namespace station
 
 	bool StationSystemsRuntime::hasFaultReplayState() const
 	{
+		if (mImpl->clock.variable()) return true;
 		if (mImpl->settings.enabled && std::any_of(mImpl->settings.solarArrays.begin(), mImpl->settings.solarArrays.end(),
 			[](auto const& machine) { return machine.cellDegradation.has_value(); })) return true;
 		if (mImpl->settings.enabled && std::any_of(mImpl->settings.generators.begin(), mImpl->settings.generators.end(),
@@ -786,6 +787,17 @@ namespace station
 	{
 		s.beginMap("stationFaultReplay");
 		s.writeUint64("completedSteps", mImpl->clock.steps());
+		if (mImpl->clock.variable()) {
+			s.writeString("updateMode", "variable");
+			s.beginArray("durationRuns");
+			for (auto const& run : mImpl->durationRuns) {
+				s.beginMap("");
+				s.writeDouble("seconds", run.seconds);
+				s.writeUint64("steps", run.steps);
+				s.endMap();
+			}
+			s.endArray();
+		}
 		writeStationSystemsSettingsMap(s, mImpl->faultReplayInitialSettings.value_or(mImpl->settings));
 		s.beginArray("commands");
 		for (auto const& command : mImpl->faultCommands)
@@ -886,9 +898,45 @@ namespace station
 	{
 		s.beginMap("stationFaultReplay");
 		auto const steps = s.readUint64("completedSteps");
+		bool const variable = s.hasField("updateMode");
+		std::vector<Impl::DurationRun> durations;
+		if (variable) {
+			if (settingsSchemaVersion < 139 || s.readString("updateMode") != "variable")
+				throw serialization::SerializationException("Unsupported Station replay update mode");
+			uint64_t total = 0;
+			s.beginArray("durationRuns");
+			while (s.nextArrayItem()) {
+				s.beginMap("");
+				auto const seconds = s.readDouble("seconds");
+				auto const count = s.readUint64("steps");
+				if (!std::isfinite(seconds) || seconds <= 0 || seconds > std::numeric_limits<float>::max()
+					|| count == 0 || count > steps - total)
+					throw serialization::SerializationException("Invalid Station replay duration run");
+				durations.push_back({seconds, count});
+				total += count;
+				s.endMap();
+			}
+			s.endArray();
+			if (total != steps) throw serialization::SerializationException("Station replay duration count mismatch");
+		} else if (s.hasField("durationRuns"))
+			throw serialization::SerializationException("Station replay durations require variable mode");
 		StationSystemsSettings initial;
 		readStationSystemsSettingsMap(s, settingsSchemaVersion, initial);
-		auto runtime = std::make_unique<StationSystemsRuntime>(initial, baseSeconds, std::move(source));
+		auto runtime = variable
+			? std::make_unique<StationSystemsRuntime>(initial, StationSystemsUpdateMode::Variable, std::move(source))
+			: std::make_unique<StationSystemsRuntime>(initial, baseSeconds, std::move(source));
+		size_t durationIndex = 0;
+		uint64_t usedInRun = 0;
+		auto advanceUntil = [&](uint64_t target) {
+			if (!variable) return runtime->advanceTo(target * runtime->mImpl->clock.stepSeconds());
+			while (runtime->mImpl->clock.steps() < target) {
+				auto const before = runtime->mImpl->clock.steps();
+				if (durationIndex >= durations.size() || !runtime->update(durations[durationIndex].seconds)
+					|| runtime->mImpl->clock.steps() != before + 1) return false;
+				if (++usedInRun == durations[durationIndex].steps) { ++durationIndex; usedInRun = 0; }
+			}
+			return true;
+		};
 		s.beginArray("commands");
 		uint64_t previous = 0;
 		while (s.nextArrayItem())
@@ -897,7 +945,7 @@ namespace station
 			auto const after = s.readUint64("afterStep");
 			if (after < previous || after > steps)
 				throw serialization::SerializationException("Invalid fault replay command ordering");
-			if (!runtime->advanceTo(after * runtime->mImpl->clock.stepSeconds()))
+			if (!advanceUntil(after))
 				throw serialization::SerializationException("Fault replay advance failed");
 			std::string diagnostic;
 			if (s.hasField("stationSystems"))
@@ -986,7 +1034,7 @@ namespace station
 		s.endMap();
 		if (runtime->effectiveSettings() != settings)
 			throw serialization::SerializationException("Fault replay final settings disagree with the document");
-		if (!runtime->advanceTo(steps * runtime->mImpl->clock.stepSeconds()))
+		if (!advanceUntil(steps))
 			throw serialization::SerializationException("Fault replay advance failed");
 		// Monitor observation starts fresh at load. Breaker announcements are
 		// protection lifecycle state: a loaded Trip must remain visible, and a

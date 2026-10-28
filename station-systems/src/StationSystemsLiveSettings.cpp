@@ -139,6 +139,11 @@ namespace station
 		StationSystemsSettings const& offered, std::string* diagnostic)
 	{
 		auto& s = *mImpl;
+		if (s.clock.variable() && (!std::isfinite(offered.observationIntervalSeconds)
+			|| offered.observationIntervalSeconds < 0.1f || offered.observationIntervalSeconds > 60.0f)) {
+			if (diagnostic) *diagnostic = "Variable observation interval must be in [0.1, 60] seconds";
+			return false;
+		}
 		std::string validation;
 		if (!validateStationMonitors(offered, validation))
 		{
@@ -565,6 +570,10 @@ namespace station
 		// Keep the runtime's own settings copy in step with the live authored
 		// state, so a later snapshot or audit reads what the tick is using.
 		s.reconcileMonitors(offered);
+		if (s.clock.variable() && offered.observationIntervalSeconds != s.settings.observationIntervalSeconds) {
+			auto const interval = offered.observationIntervalSeconds;
+			s.nextObservationSeconds = (std::floor(s.clock.elapsedSeconds() / interval) + 1) * interval;
+		}
 		s.settings = offered;
 		syncAuthored(s.settings.stores, s.stores);
 		syncAuthored(s.settings.transfers, s.transfers);

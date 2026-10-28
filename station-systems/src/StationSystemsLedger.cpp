@@ -197,7 +197,7 @@ namespace station
 		// so one preview is not sufficient. No trial counters, events, flows or
 		// inventories are published. Ratio 1 retains its original single pass.
 		prediction = {};
-		prediction.active = settings.systemsStepWorldTicks > 1;
+		prediction.active = clock.variable() || settings.systemsStepWorldTicks > 1;
 		for (;;)
 		{
 			prediction.begin();
@@ -222,7 +222,7 @@ namespace station
 
 	bool StationSystemsRuntime::Impl::runLedger(uint64_t tick, double seconds, std::string& system, std::string& violation)
 	{
-		auto const end = clock.secondsAt(tick);
+		auto const end = clock.nextSeconds();
 		auto cursor = clock.elapsedSeconds();
 		Tick collected(*this, tick, seconds, system, violation, end, false);
 		// Reuse the due-since-last-commit collector and its total order. Only

@@ -267,13 +267,17 @@ namespace
 			bool const outside = rule.direction == AlertDirection::Above ? value > rule.threshold : value < rule.threshold;
 			// Each successful Station sample represents one completed step.
 			// A contrary sample resets persistence; equality is back inside.
-			// Count-derived duration, like StationClock, avoids accumulated drift.
+			// Fixed runs retain count-derived persistence. Variable runs measure
+			// from the first contributing interval's start, never count * last dt.
 			bool const raised = hasActiveAlert(monitor.id);
 			if (!raised)
 			{
 				state.offSamples = 0;
 				state.onSamples = outside ? state.onSamples + 1 : 0;
-				if (outside && state.onSamples * published.systemsTimestepSeconds >= rule.triggerOnSeconds)
+				if (state.onSamples == 1) state.onStartSeconds = published.elapsedSeconds - published.systemsTimestepSeconds;
+				auto const duration = clock.variable() ? published.elapsedSeconds - state.onStartSeconds
+					: state.onSamples * published.systemsTimestepSeconds;
+				if (outside && duration >= rule.triggerOnSeconds)
 				{
 					StationAlertSnapshot alert{monitor.id, monitor.subjectType, monitor.subjectId, monitor.metric,
 						value, rule.threshold, monitor.severity, monitor.provenance, published.elapsedSeconds, {}, {}};
@@ -285,7 +289,10 @@ namespace
 			{
 				state.onSamples = 0;
 				state.offSamples = outside ? 0 : state.offSamples + 1;
-				if (!outside && state.offSamples * published.systemsTimestepSeconds >= rule.triggerOffSeconds)
+				if (state.offSamples == 1) state.offStartSeconds = published.elapsedSeconds - published.systemsTimestepSeconds;
+				auto const duration = clock.variable() ? published.elapsedSeconds - state.offStartSeconds
+					: state.offSamples * published.systemsTimestepSeconds;
+				if (!outside && duration >= rule.triggerOffSeconds)
 				{
 					clearAlert(monitor.id, AlertClearReason::AutoClear);
 					state.offSamples = 0;

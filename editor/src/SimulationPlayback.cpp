@@ -13,13 +13,13 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     playing_ = false;
     runtime_.reset();
     source_ = installation;
-    targetSeconds_ = remainder_ = 0;
+    remainder_ = 0;
     StationSystemsSettings settings;
     settings.enabled = true;
     settings.systemsStepWorldTicks = 1;
     settings.observationIntervalSeconds = 1;
     settings.atmospheres = nsi::systems::expandInstallation(installation);
-    runtime_ = std::make_unique<StationSystemsRuntime>(std::move(settings), stepSeconds);
+    runtime_ = std::make_unique<StationSystemsRuntime>(std::move(settings), StationSystemsUpdateMode::Variable);
 }
 
 void SimulationPlayback::setSpeedIndex(int index) {
@@ -33,15 +33,15 @@ void SimulationPlayback::update(double wallSeconds) {
         throw std::invalid_argument("Invalid simulation frame duration");
     if (!playing_ || !runtime_) return;
     try {
-        remainder_ += wallSeconds * speeds[speedIndex_];
-        const auto steps = std::floor((remainder_ + 1e-9) / stepSeconds);
-        if (steps < 1) return;
-        remainder_ = std::max(0.0, remainder_ - steps * stepSeconds);
-        targetSeconds_ += steps * stepSeconds;
-        if (!runtime_->advanceTo(targetSeconds_)) {
-            const auto diagnostics = runtime_->diagnostics();
-            throw std::runtime_error(diagnostics.empty() ? "Simulation advance failed"
-                                                        : diagnostics.front().message);
+        remainder_ = std::min(remainder_ + wallSeconds, maxCatchUpUpdates * updateIntervalSeconds);
+        const int updates = static_cast<int>(std::floor((remainder_ + 1e-9) / updateIntervalSeconds));
+        remainder_ = std::max(0.0, remainder_ - updates * updateIntervalSeconds);
+        for (int i = 0; i < updates; ++i) {
+            if (!runtime_->update(updateIntervalSeconds * speeds[speedIndex_])) {
+                const auto diagnostics = runtime_->diagnostics();
+                throw std::runtime_error(diagnostics.empty() ? "Simulation advance failed"
+                                                            : diagnostics.front().message);
+            }
         }
     } catch (...) {
         playing_ = false;
