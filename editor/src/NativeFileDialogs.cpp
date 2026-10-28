@@ -20,7 +20,7 @@ station::editor::FileSelection selection(nfdresult_t result, nfdu8char_t* path) 
     } owned{path};
     return {FileOutcome::Success, std::filesystem::path(reinterpret_cast<const char8_t*>(path)), {}};
 }
-constexpr nfdu8filteritem_t yamlFilter[] = {{"Space Station YAML", "yaml,yml"}};
+constexpr nfdu8filteritem_t yamlFilter[] = {{"Installation YAML", "yaml,yml"}};
 }  // namespace
 
 NativeFileDialogs::NativeFileDialogs() {

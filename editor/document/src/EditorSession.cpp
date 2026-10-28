@@ -5,10 +5,11 @@
 namespace station::editor {
 
 EditorSession::EditorSession()
-    : mStation(SpaceStation::createDefault()), mBaseline(mStation) {}
+    : mStation(Installation::createDefault()), mBaseline(mStation) {}
 
 FileResult EditorSession::request(DocumentAction action, UnsavedChangesPrompt& prompt,
-                                  FileDialogs& dialogs, DocumentFiles& files) {
+                                  FileDialogs& dialogs, DocumentFiles& files,
+                                  std::uint32_t width, std::uint32_t depth) {
     // A window close can interrupt a held pointer gesture. Keep that whole
     // edit undoable if the user cancels, and save exactly the visible geometry.
     endStroke();
@@ -28,7 +29,7 @@ FileResult EditorSession::request(DocumentAction action, UnsavedChangesPrompt& p
         }
         switch (action) {
             case DocumentAction::New:
-                newDocument();
+                newDocument(width, depth);
                 return {FileOutcome::Success, {}};
             case DocumentAction::Open:
                 return open(dialogs, files);
@@ -41,16 +42,17 @@ FileResult EditorSession::request(DocumentAction action, UnsavedChangesPrompt& p
     }
 }
 
-void EditorSession::newDocument() {
-    replaceDocument(SpaceStation::createDefault());
+void EditorSession::newDocument(std::uint32_t width, std::uint32_t depth) {
+    replaceDocument(Installation(width, depth));
 }
 
-void EditorSession::replaceDocument(SpaceStation station) {
+void EditorSession::replaceDocument(Installation station) {
     // A different document starts clean: no stroke in flight, and no
     // history that could undo the previous document's Cells into it.
     mStroke.reset();
-    mStrokeState.reset();
-    clearHistory();
+    mWallStrokeState.reset();
+    mUndoHistory.clear();
+    mRedoHistory.clear();
     mStation = std::move(station);
     mBaseline = mStation;
     mPath.clear();
@@ -100,106 +102,92 @@ FileResult EditorSession::saveTo(const FileSelection& selection, DocumentFiles& 
     }
 }
 
-void EditorSession::toggleCell(std::size_t deck_index, std::uint32_t x,
-                              std::uint32_t y) {
-    beginStroke(deck_index, x, y);
-    paintStroke(x, y);
+void EditorSession::commit(Installation before) {
+    if (mStation == before) return;
+    mUndoHistory.push_back(std::move(before));
+    mRedoHistory.clear();
+}
+void EditorSession::edit(const std::function<void(Installation&)>& operation) {
     endStroke();
+    auto next=mStation;
+    operation(next);
+    next.validate();
+    auto before=std::move(mStation);
+    mStation=std::move(next);
+    commit(std::move(before));
 }
-
-void EditorSession::beginStroke(std::size_t deck_index, std::uint32_t x,
-                               std::uint32_t y) {
-    // Sampled before anything is painted, so the stroke's state is the
-    // starting Cell's original state inverted.
-    const CellState start = mStation.deck(deck_index).cell(x, y);
-    mStrokeDeck = deck_index;
-    mStrokeState = start == CellState::Filled ? CellState::Void
-                                            : CellState::Filled;
-    mStroke = Gesture{};
+void EditorSession::toggleCell(std::size_t l,std::uint32_t x,std::uint32_t y) {
+    beginStroke(l,x,y); paintStroke(x,y); endStroke();
 }
-
-void EditorSession::paintStroke(std::uint32_t x, std::uint32_t y) {
-    if (!strokeActive() || !mStrokeState.has_value()) {
-        return;
-    }
-    if (!mStation.deck(mStrokeDeck).contains(x, y)) {
-        return;
-    }
-    record(mStrokeDeck, x, y, *mStrokeState);
+void EditorSession::beginStroke(std::size_t l,std::uint32_t x,std::uint32_t y) {
+    endStroke();
+    auto type=mStation.level(l).cell(x,y);
+    mStrokeState=type==SectorType::Interior ? SectorType::Void : SectorType::Interior;
+    mStrokeLevel=l; mStroke=mStation;
 }
-
-void EditorSession::endStroke() {
-    if (!strokeActive()) {
-        return;
-    }
-    Gesture gesture = std::move(*mStroke);
+void EditorSession::paintStroke(std::uint32_t x,std::uint32_t y) {
+    if (!mStroke || mWallStrokeState.has_value() || !mStation.level(mStrokeLevel).contains(x,y)) return;
+    try { mStation.setCell(mStrokeLevel,x,y,mStrokeState); }
+    catch (...) { cancelStroke(); throw; }
+}
+void EditorSession::cancelStroke() {
+    mStation=std::move(*mStroke);
     mStroke.reset();
-    mStrokeState.reset();
-    if (!gesture.empty()) {
-        commitGesture(std::move(gesture));
-    }
+    mWallStrokeState.reset();
 }
-
+void EditorSession::endStroke() {
+    if (!mStroke) return;
+    auto before=std::move(*mStroke);
+    mStroke.reset();
+    mWallStrokeState.reset();
+    commit(std::move(before));
+}
+void EditorSession::toggleWall(std::size_t l,std::size_t w) {
+    beginWallStroke(l,w);
+    paintWallStroke(w);
+    endStroke();
+}
+void EditorSession::beginWallStroke(std::size_t l,std::size_t w) {
+    endStroke();
+    const auto walls=mStation.level(l).walls();
+    if (w>=walls.size()) throw std::out_of_range("Wall outside Level");
+    const bool add=walls[w].type==Installation::WallType::None;
+    mStroke=mStation;
+    mStrokeLevel=l;
+    mWallStrokeState=add;
+}
+void EditorSession::paintWallStroke(std::size_t w) {
+    if (!mStroke || !mWallStrokeState.has_value()) return;
+    const auto walls=mStation.level(mStrokeLevel).walls();
+    if (w>=walls.size()) return;
+    const bool present=walls[w].type!=Installation::WallType::None;
+    if (present==*mWallStrokeState) return;
+    try { mStation.toggleWall(mStrokeLevel,w); }
+    catch (...) { cancelStroke(); throw; }
+}
+void EditorSession::setSector(std::size_t l,std::size_t s,std::string name,int height) {
+    edit([&](auto& i){ i.setSector(l,s,std::move(name),height); });
+}
+void EditorSession::setOffset(std::size_t l,int x,int y) {
+    edit([&](auto& i){ i.setOffset(l,x,y); });
+}
+void EditorSession::addLevel(std::uint32_t w,std::uint32_t d,int x,int y) {
+    edit([&](auto& i){ i.addLevel(w,d,x,y); });
+}
+bool EditorSession::removeTopLevel() {
+    bool removed=false; edit([&](auto& i){ removed=i.removeTopLevel(); }); return removed;
+}
+void EditorSession::setName(std::string name) {
+    edit([&](auto& i){ i.setName(std::move(name)); });
+}
 void EditorSession::undo() {
-    // A gesture still held down is committed before stepping back, so the
-    // history never holds a half-finished stroke.
-    endStroke();
-    if (mUndoHistory.empty()) {
-        return;
-    }
-    Gesture gesture = std::move(mUndoHistory.back());
-    mUndoHistory.pop_back();
-    applyGesture(gesture, false);
-    mRedoHistory.push_back(std::move(gesture));
+    endStroke(); if (mUndoHistory.empty()) return;
+    mRedoHistory.push_back(std::move(mStation));
+    mStation=std::move(mUndoHistory.back()); mUndoHistory.pop_back();
 }
-
 void EditorSession::redo() {
-    endStroke();
-    if (mRedoHistory.empty()) {
-        return;
-    }
-    Gesture gesture = std::move(mRedoHistory.back());
-    mRedoHistory.pop_back();
-    applyGesture(gesture, true);
-    mUndoHistory.push_back(std::move(gesture));
+    endStroke(); if (mRedoHistory.empty()) return;
+    mUndoHistory.push_back(std::move(mStation));
+    mStation=std::move(mRedoHistory.back()); mRedoHistory.pop_back();
 }
-
-void EditorSession::record(std::size_t deck_index, std::uint32_t x,
-                          std::uint32_t y, CellState next) {
-    if (!mStroke) {
-        return;
-    }
-    const CellState previous = mStation.deck(deck_index).cell(x, y);
-    if (previous == next) {
-        return;
-    }
-    mStation.setCell(deck_index, x, y, next);
-    mStroke->push_back(Change{deck_index, x, y, previous, next});
-}
-
-void EditorSession::commitGesture(Gesture gesture) {
-    mUndoHistory.push_back(std::move(gesture));
-    // A fresh edit abandons the redo branch: undone work cannot be
-    // restored alongside a different choice.
-    mRedoHistory.clear();
-}
-
-void EditorSession::applyGesture(Gesture& gesture, bool forward) {
-    if (forward) {
-        for (const Change& change : gesture) {
-            mStation.setCell(change.deckIndex, change.x, change.y, change.next);
-        }
-        return;
-    }
-    for (auto change = gesture.rbegin(); change != gesture.rend(); ++change) {
-        mStation.setCell(change->deckIndex, change->x, change->y,
-                        change->previous);
-    }
-}
-
-void EditorSession::clearHistory() {
-    mUndoHistory.clear();
-    mRedoHistory.clear();
-}
-
-}  // namespace station::editor
+} // namespace station::editor

@@ -66,14 +66,9 @@ add_executable(editor
     src/NativeFileDialogs.cpp
     src/EditorFonts.cpp
     src/DeckGridWidget.cpp
-    src/OverviewRenderer.cpp
 )
 target_compile_features(editor PRIVATE cxx_std_20)
 target_include_directories(editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-# MPP logger output lives in the build tree regardless of launch directory,
-# mirroring the sibling Promethium application's PF_RENDER_LOG_DIR.
-target_compile_definitions(editor PRIVATE
-    EDITOR_MPP_LOG_DIR="${CMAKE_BINARY_DIR}/logs/$<CONFIG>")
 # Binaries land under bin/<platform>/<config>, matching the sibling
 # Promethium application's output layout.
 set_target_properties(editor PROPERTIES
@@ -83,15 +78,13 @@ if(MSVC)
 else()
     target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+find_package(OpenGL REQUIRED)
 target_link_libraries(editor PRIVATE
     editor::document
     nfd
     editor::imgui
     SDL2::SDL2-static
-    ext::mpp
-    ext::mpp-mesh
-    ext::mpp-helper
-    ext::mpp-program
+    OpenGL::GL
 )
 # Keep runtime fonts beside the executable, independent of the launch directory.
 # A target (rather than POST_BUILD) also picks up font-only changes.
@@ -108,6 +101,33 @@ add_custom_target(editor-font-assets
 add_dependencies(editor editor-font-assets)
 
 if(BUILD_TESTING)
+    add_executable(editor-events-test tests/EditorEventsTest.cpp)
+    target_compile_features(editor-events-test PRIVATE cxx_std_20)
+    target_include_directories(editor-events-test PRIVATE src)
+    target_link_libraries(editor-events-test PRIVATE SDL2::SDL2-static)
+    add_test(NAME editor-event-responsiveness COMMAND editor-events-test)
+    set_tests_properties(editor-event-responsiveness PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 10)
+
+    add_executable(editor-overview-test tests/OverviewGeometryTest.cpp src/OverviewGeometry.cpp)
+    target_include_directories(editor-overview-test PRIVATE src)
+    target_link_libraries(editor-overview-test PRIVATE editor::document)
+    add_test(NAME editor-overview-geometry COMMAND editor-overview-test)
+    set_tests_properties(editor-overview-geometry PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
+    add_executable(editor-overview-render-test
+        tests/OverviewRenderTest.cpp src/OverviewRenderer.cpp src/OverviewGeometry.cpp)
+    target_compile_features(editor-overview-render-test PRIVATE cxx_std_20)
+    target_include_directories(editor-overview-render-test PRIVATE src)
+    target_compile_definitions(editor-overview-render-test PRIVATE
+        EDITOR_MPP_LOG_DIR="${CMAKE_BINARY_DIR}/logs/overview-test/$<CONFIG>")
+    target_link_libraries(editor-overview-render-test PRIVATE
+        editor::document SDL2::SDL2-static ext::mpp ext::mpp-mesh ext::mpp-helper ext::mpp-program)
+    add_test(NAME editor-overview-render COMMAND editor-overview-render-test)
+    set_tests_properties(editor-overview-render PROPERTIES
+        LABELS "editor;gui;functional;validation-fast" TIMEOUT 30 SKIP_RETURN_CODE 77)
+
     add_executable(editor-fonts-test tests/EditorFontsTest.cpp src/EditorFonts.cpp)
     target_include_directories(editor-fonts-test PRIVATE include src)
     target_link_libraries(editor-fonts-test PRIVATE editor::imgui)

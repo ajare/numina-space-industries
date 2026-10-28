@@ -1,6 +1,7 @@
 #include "DeckGridWidget.h"
 
 #include "imgui.h"
+#include "station/editor/GridPicking.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,9 +11,9 @@ namespace {
 constexpr float kMaxCellPx = 34.0f;
 constexpr float kMinCellPx = 8.0f;
 
-ImU32 cellColour(station::editor::CellState state) {
-    // Filled reads as a lit floor plate, Void as open space behind it.
-    return state == station::editor::CellState::Filled
+ImU32 cellColour(station::editor::SectorType state) {
+    // Interior reads as a lit floor plate, Void as open space behind it.
+    return state == station::editor::SectorType::Interior
                ? IM_COL32(126, 168, 200, 255)
                : IM_COL32(26, 29, 34, 255);
 }
@@ -20,16 +21,19 @@ ImU32 cellColour(station::editor::CellState state) {
 // The Cell under a screen point, or nullopt when the point is outside the
 // drawn grid.
 std::optional<DeckCellCoord> cellAt(const ImVec2& origin, float cell,
-                                   const station::editor::Deck& deck,
+                                   const station::editor::Level& level,
                                    const ImVec2& point) {
-    if (point.x < origin.x || point.y < origin.y) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+        point.x < origin.x || point.y < origin.y ||
+        point.x >= origin.x + cell * static_cast<float>(level.width()) ||
+        point.y >= origin.y + cell * static_cast<float>(level.depth())) {
         return std::nullopt;
     }
     const std::uint32_t x =
         static_cast<std::uint32_t>((point.x - origin.x) / cell);
     const std::uint32_t y =
         static_cast<std::uint32_t>((point.y - origin.y) / cell);
-    if (!deck.contains(x, y)) {
+    if (!level.contains(x, y)) {
         return std::nullopt;
     }
     return DeckCellCoord{x, y};
@@ -38,38 +42,41 @@ std::optional<DeckCellCoord> cellAt(const ImVec2& origin, float cell,
 }  // namespace
 
 DeckPointerEvent drawDeckGrid(const char* id,
-                             const station::editor::Deck& deck) {
+                             const station::editor::Level& level, EditMode mode,
+                             std::optional<int> selectedSector) {
     DeckPointerEvent event;
 
     const float available_width = ImGui::GetContentRegionAvail().x;
     const float columns =
-        static_cast<float>(std::max<std::uint32_t>(1, deck.width()));
+        static_cast<float>(std::max<std::uint32_t>(1, level.width()));
     const float cell = std::clamp(std::floor(available_width / columns),
                                  kMinCellPx, kMaxCellPx);
-    const ImVec2 grid_size(cell * static_cast<float>(deck.width()),
-                          cell * static_cast<float>(deck.height()));
+    const ImVec2 grid_size(cell * static_cast<float>(level.width()),
+                          cell * static_cast<float>(level.depth()));
 
     ImGui::InvisibleButton(id, grid_size);
 
     const ImVec2 origin = ImGui::GetItemRectMin();
     ImDrawList* draw = ImGui::GetWindowDrawList();
 
-    for (std::uint32_t y = 0; y < deck.height(); ++y) {
-        for (std::uint32_t x = 0; x < deck.width(); ++x) {
+    for (std::uint32_t y = 0; y < level.depth(); ++y) {
+        for (std::uint32_t x = 0; x < level.width(); ++x) {
             const ImVec2 a(origin.x + cell * static_cast<float>(x),
                           origin.y + cell * static_cast<float>(y));
             const ImVec2 b(a.x + cell, a.y + cell);
-            draw->AddRectFilled(a, b, cellColour(deck.cell(x, y)));
+            draw->AddRectFilled(a, b, cellColour(level.cell(x, y)));
+            if (selectedSector && level.cellData(x,y).sector == *selectedSector)
+                draw->AddRectFilled(a,b,IM_COL32(245,190,60,85));
         }
     }
 
     const ImU32 grid_colour = IM_COL32(70, 78, 90, 255);
-    for (std::uint32_t i = 0; i <= deck.width(); ++i) {
+    for (std::uint32_t i = 0; i <= level.width(); ++i) {
         const float x = origin.x + cell * static_cast<float>(i);
         draw->AddLine(ImVec2(x, origin.y),
                      ImVec2(x, origin.y + grid_size.y), grid_colour);
     }
-    for (std::uint32_t i = 0; i <= deck.height(); ++i) {
+    for (std::uint32_t i = 0; i <= level.depth(); ++i) {
         const float y = origin.y + cell * static_cast<float>(i);
         draw->AddLine(ImVec2(origin.x, y),
                      ImVec2(origin.x + grid_size.x, y), grid_colour);
@@ -78,10 +85,35 @@ DeckPointerEvent drawDeckGrid(const char* id,
                  ImGui::GetColorU32(ImGuiCol_Border));
 
     const ImGuiIO& io = ImGui::GetIO();
+    const auto wall = station::editor::nearestWall(level,
+        (io.MousePos.x-origin.x)/cell, (io.MousePos.y-origin.y)/cell);
+    auto drawWall = [&](std::size_t index, ImU32 colour, float thickness) {
+        const auto horizontal = std::size_t(level.width())*(std::size_t(level.depth())+1);
+        ImVec2 a,b;
+        if (index < horizontal) {
+            a=ImVec2(origin.x+float(index%level.width())*cell,
+                     origin.y+float(index/level.width())*cell);
+            b=ImVec2(a.x+cell,a.y);
+        } else {
+            const auto i=index-horizontal;
+            a=ImVec2(origin.x+float(i%(std::size_t(level.width())+1))*cell,
+                     origin.y+float(i/(std::size_t(level.width())+1))*cell);
+            b=ImVec2(a.x,a.y+cell);
+        }
+        draw->AddLine(a,b,colour,thickness);
+    };
+    using WallType=nsi::core::Installation::WallType;
+    for (std::size_t i=0;i<level.walls().size();++i) {
+        auto type=level.walls()[i].type;
+        if (type!=WallType::None)
+            drawWall(i,type==WallType::Exterior ? IM_COL32(245,180,95,255) : IM_COL32(215,225,235,255),3.0f);
+    }
+    if (mode==EditMode::Wall && ImGui::IsItemHovered() && wall)
+        drawWall(*wall,IM_COL32(100,255,140,255),5.0f);
     const std::optional<DeckCellCoord> under =
-        cellAt(origin, cell, deck, io.MousePos);
+        cellAt(origin, cell, level, io.MousePos);
 
-    if (ImGui::IsItemHovered() && under.has_value()) {
+    if (mode!=EditMode::Wall && ImGui::IsItemHovered() && under.has_value()) {
         const ImVec2 a(origin.x + cell * static_cast<float>(under->x),
                       origin.y + cell * static_cast<float>(under->y));
         draw->AddRectFilled(a, ImVec2(a.x + cell, a.y + cell),
@@ -102,17 +134,18 @@ DeckPointerEvent drawDeckGrid(const char* id,
         event.cell = under;
     }
 
+    event.wall=wall;
     const std::optional<DeckCellCoord> readout =
         ImGui::IsItemHovered() ? under : std::nullopt;
     if (readout.has_value()) {
-        const station::editor::CellState state =
-            deck.cell(readout->x, readout->y);
+        const station::editor::SectorType state =
+            level.cell(readout->x, readout->y);
         ImGui::Text("Cell (%u, %u): %s", readout->x, readout->y,
-                   state == station::editor::CellState::Filled ? "Filled"
+                   state == station::editor::SectorType::Interior ? "Interior"
                                                              : "Void");
     } else {
-        ImGui::Text("Click to toggle, drag to paint (%zu Filled of %zu)",
-                   deck.filledCount(), deck.cellCount());
+        ImGui::Text("%zu Interior Cells of %zu",
+                   level.interiorCount(), level.cellCount());
     }
 
     return event;

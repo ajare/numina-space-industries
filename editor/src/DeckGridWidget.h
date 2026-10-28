@@ -1,13 +1,13 @@
-// Top-down, clickable view of a Deck for the Editor panel.
+// Top-down, clickable view of a Level for the Editor panel.
 //
-// Draws every Cell with a visually distinct Filled/Void appearance and
+// Draws every Cell with a visually distinct Interior/Void appearance and
 // reports the pointer phases over the grid, so the host can turn them into
 // session gestures (a press starts a stroke, dragging paints, release
 // commits it). Input goes through an InvisibleButton so the widget owns its
 // own gestures and never steals them from the rest of the Editor.
 #pragma once
 
-#include "station/editor/Deck.h"
+#include "station/editor/Installation.h"
 
 #include <cstdint>
 #include <optional>
@@ -25,10 +25,15 @@ enum class DeckPointerPhase {
 };
 
 // The pointer event for this frame. `cell` is the Cell under the pointer,
-// empty when the pointer is off the Deck — a drag may wander outside it.
+// empty when the pointer is off the Level — a drag may wander outside it.
+enum class EditMode { Cell, Wall, Sector };
+
 struct DeckPointerEvent {
     DeckPointerPhase phase = DeckPointerPhase::None;
     std::optional<DeckCellCoord> cell;
+    std::optional<std::size_t> wall;
 };
 
-DeckPointerEvent drawDeckGrid(const char* id, const station::editor::Deck& deck);
+DeckPointerEvent drawDeckGrid(const char* id, const station::editor::Level& level,
+                              EditMode mode = EditMode::Cell,
+                              std::optional<int> selectedSector = std::nullopt);

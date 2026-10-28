@@ -1,31 +1,59 @@
 # Core
 
-C++20 foundation for classes in `nsi::core`, using `Promethium::Serialization`.
-No existing classes or APIs have been moved.
+C++20 geometry in `nsi::core`. Include `<nsi/core/Installation.h>` (or
+`<nsi/core/Core.h>`) and link `nsi::core`.
 
-`Installation` stores a name (empty by default), exposed through `getName()`
-and `setName(std::string)`. Include `<nsi/core/Installation.h>` or the umbrella
-header `<nsi/core/Core.h>`.
+## Installation
 
-`serialize()` returns a YAML map containing `name`; `deserialize(yaml)` loads
-that map. The name field is required (empty strings are allowed). Invalid YAML
-or a missing/non-convertible name throws `serialization::SerializationException`
-without changing the Installation. String conversion follows the serialization
-module (for example, YAML `null` becomes the string `"null"`). Unknown fields
-are ignored.
+`Installation(width, depth)` creates one Interior Level with Exterior perimeter
+Walls. Default dimensions are 16×16. All geometry types are nested within
+`Installation`: `FloorLayer`, `WiringLayer`, `PipingLayer`, `Cell`, `SectorType`,
+`Sector`, `WallType`, `Wall`, and `Level`. Layer objects are empty extension points.
+The Installation name defaults to empty.
 
-Link the CMake target `nsi::core` (alias of `nsi-core`). Public headers live
-under `include/nsi/core/` and are included as `<nsi/core/Core.h>`.
-Implementation files live in `src/`.
+Levels expose read-only Cells, Sectors, Walls and bounds. Use Installation
+commands (`setCell`, `toggleWall`, `setSector`, `setOffset`, `addLevel`,
+`removeTopLevel`) for validated edits. A Cell references its Sector by integer
+index; a Sector carries its containing Level index. Areas are cached Cell
+counts, not calculated by scanning Cells on access.
 
-The root build includes this module automatically. Consumers can also use
-`add_subdirectory(path/to/core)` without the Editor or Station Systems.
+Walls represent shared edges, with `width*(depth+1)` horizontal edges followed
+by `(width+1)*depth` vertical edges. `horizontalWall(x,y)` and
+`verticalWall(x,y)` return indices into this single array. Interior/Interior
+edges can carry Interior Walls; Interior/Void or Interior/outside edges can
+carry Exterior Walls. Void/Void edges cannot carry Walls. Cell painting updates
+its four adjoining edges: Interior/Void and Interior/outside boundaries receive
+Exterior Walls; obsolete Exterior Walls and Void/Void Walls are removed.
+Still-valid authored Interior Walls are preserved. Unrelated Walls are unchanged.
+
+Sectors are flood-filled connected components of same-type Cells across None
+Walls. Changes rebuild components and cached areas. The largest surviving
+fragment retains a Sector's name; other fragments inherit height but start
+unnamed. Merges inherit the largest contributor's properties. Ties use the
+lowest row-major Cell coordinate, independent of serialized Sector indices.
+
+Interior height claims the footprint across consecutive existing Levels.
+Overlapping Interior volumes, nonpositive heights, Void heights other than 1,
+and claims above the highest Level are rejected transactionally. Signed offsets
+are measured in Cells. Appended Levels start Void. Only the top Level can be
+removed, retaining at least one; if removing it would truncate a lower Sector,
+it is instead cleared to one unnamed Void Sector with no Walls, preserving
+its dimensions and offset. `removeTopLevel()` returns false in that case.
+
+## Persistence
+
+`serialize()` emits version-2 YAML with name and all Levels, including dimensions,
+offsets, Cell Sector indices, empty layer maps, Sector name/type/height and Walls.
+Cached Sector areas and Sector-to-Level indices are omitted and rebuilt on load.
+`deserialize()` checks membership/topology, dimensions, Wall classification and
+vertical occupancy. Invalid input throws `serialization::SerializationException`
+and leaves the Installation unchanged. Old name-only and editor deck-row formats
+are intentionally unsupported. Unknown fields are ignored, not preserved.
 
 ## Standalone build and test
 
-Builds reuse an installed yaml-cpp CMake package when available, otherwise
-fetch the same pinned version used by Station Systems (requiring network
-access on first configuration).
+An installed yaml-cpp package is reused when available; otherwise the pinned
+version is fetched on first configuration.
 
 ```sh
 cmake -S core -B build-core -DCMAKE_BUILD_TYPE=Release

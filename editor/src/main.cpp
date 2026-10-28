@@ -2,9 +2,8 @@
 //
 // A full-viewport host frame owns the document File menu, toolbar,
 // and statusbar; a DockSpace between them holds the
-// single "Editor" panel docked to the left and the "Overview" tab in the
-// central node. The Editor panel edits the active session's Deck geometry
-// and the Overview previews that same live geometry. All editing behaviour
+// "Editor" inspector docked to the left and the Level Grid in the central
+// node. All editing behaviour
 // lives in the headless station::editor::EditorSession; this file only
 // draws, forwards input, and supplies native-dialog and storage adapters.
 
@@ -16,12 +15,12 @@
 
 #include "imgui/IconsFontAwesome5.h"
 #include "EditorFonts.h"
+#include "EditorEvents.h"
 #include "DeckGridWidget.h"
-#include "OverviewRenderer.h"
 #include "NativeFileDialogs.h"
 
 #include "station/editor/EditorSession.h"
-#include "station/editor/SpaceStation.h"
+#include "station/editor/Installation.h"
 
 #include <SDL.h>
 
@@ -29,6 +28,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <stdexcept>
+#include <vector>
+#include <cstring>
 
 namespace {
 
@@ -36,7 +37,7 @@ constexpr int kInitialWindowWidth = 1280;
 constexpr int kInitialWindowHeight = 800;
 constexpr float kInitialLeftDockWidthPx = 500.0f;
 constexpr const char* kPanelTitle = "Editor";
-constexpr const char* kOverviewTitle = "Overview";
+constexpr const char* kGridTitle = "Level Grid";
 
 class SdlUnsavedChangesPrompt final : public station::editor::UnsavedChangesPrompt {
 public:
@@ -46,8 +47,8 @@ public:
                                             const std::filesystem::path& path) override {
         using station::editor::DocumentAction;
         using station::editor::UnsavedDecision;
-        const char* next = action == DocumentAction::New ? "creating a new Space Station" :
-                           action == DocumentAction::Open ? "opening another Space Station" :
+        const char* next = action == DocumentAction::New ? "creating a new Installation" :
+                           action == DocumentAction::Open ? "opening another Installation" :
                            "exiting the Editor";
         const std::string message = "Save changes to " +
             (path.empty() ? std::string("Untitled") : path.filename().string()) +
@@ -59,7 +60,7 @@ public:
              0, "Cancel"}
         };
         const SDL_MessageBoxData data = {SDL_MESSAGEBOX_WARNING, mWindow,
-            "Unsaved Space Station changes", message.c_str(), 3, buttons, nullptr};
+            "Unsaved Installation changes", message.c_str(), 3, buttons, nullptr};
         int chosen = 0;
         if (SDL_ShowMessageBox(&data, &chosen) != 0) {
             throw std::runtime_error(std::string("Unsaved prompt failed: ") + SDL_GetError());
@@ -101,6 +102,7 @@ void buildInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size) {
     }
 
     ImGui::DockBuilderDockWindow(kPanelTitle, left);
+    ImGui::DockBuilderDockWindow(kGridTitle, right);
     ImGui::DockBuilderFinish(dockspace_id);
 }
 
@@ -174,30 +176,6 @@ int runEditor() {
     }
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
 
-    // MPP renders the Overview tab offscreen into a render texture that
-    // ImGui presents as an image. It must initialise with the GL context
-    // current, and shut down before that context dies.
-    OverviewRenderer overview;
-    {
-        int drawable_width = 0;
-        int drawable_height = 0;
-        SDL_GL_GetDrawableSize(window, &drawable_width, &drawable_height);
-        try {
-            overview.initialise(static_cast<std::size_t>(drawable_width),
-                               static_cast<std::size_t>(drawable_height));
-        } catch (const std::exception& error) {
-            SDL_Log("MPP initialisation failed: %s", error.what());
-            overview.shutdown();
-            ImGui_ImplSDL2_Shutdown();
-            ImGui_ImplOpenGL3_Shutdown();
-            ImGui::DestroyContext(context);
-            SDL_GL_DeleteContext(gl_context);
-            SDL_DestroyWindow(window);
-            SDL_Quit();
-            return 1;
-        }
-    }
-
     bool running = true;
     bool first_frame = true;
     // The one headless editing session: the GUI holds no geometry of its
@@ -210,27 +188,39 @@ int runEditor() {
         if (result.outcome == FileOutcome::Failed) {
             file_status = result.diagnostic;
             SDL_Log("%s", file_status.c_str());
-            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Space Station file error",
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Installation file error",
                                      file_status.c_str(), window);
         } else if (result.outcome == FileOutcome::Success) {
             file_status = "File operation completed";
         }
     };
 
+    int new_size[2] = {16,16};
+    int added_size[2] = {16,16};
+    int added_offset[2] = {0,0};
+    bool request_new = false;
+    int mode_index = 0;
+    std::size_t active_level = 0;
+    std::optional<DeckCellCoord> selected_cell;
+    auto edit = [&](auto operation) {
+        try { file_status.clear(); operation(); }
+        catch (const std::exception& error) { file_status=error.what(); }
+    };
     auto perform = [&](station::editor::DocumentAction action) {
-        const auto result = session.request(action, unsaved_prompt, dialogs, files);
+        const auto result = session.request(action, unsaved_prompt, dialogs, files,
+            static_cast<std::uint32_t>(new_size[0]),static_cast<std::uint32_t>(new_size[1]));
         if (result.outcome == station::editor::FileOutcome::Success) {
             file_status.clear();
             if (action == station::editor::DocumentAction::Exit) running = false;
         } else {
             report(result);
         }
+        return result;
     };
 
     while (running) {
         bool close_requested = false;
-        SDL_Event event;
-        while (SDL_WaitEventTimeout(&event, 16) != 0) {
+        processEditorEvents([&](SDL_Event& event) {
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT ||
                 (event.type == SDL_WINDOWEVENT &&
@@ -238,7 +228,7 @@ int runEditor() {
                  event.window.event == SDL_WINDOWEVENT_CLOSE)) {
                 close_requested = true;
             }
-        }
+        });
         // Coalesce duplicate close events; Cancel keeps the application alive.
         if (close_requested) perform(station::editor::DocumentAction::Exit);
         if (!running) {
@@ -276,7 +266,7 @@ int runEditor() {
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
                 if (ImGui::MenuItem(ICON_FA_FILE " New")) {
-                    perform(station::editor::DocumentAction::New);
+                    request_new = true;
                 }
                 if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN " Open...")) {
                     perform(station::editor::DocumentAction::Open);
@@ -309,6 +299,23 @@ int runEditor() {
             ImGui::EndMenuBar();
         }
 
+        if (request_new) { ImGui::OpenPopup("New Installation"); request_new=false; }
+        if (ImGui::BeginPopupModal("New Installation", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::InputInt2("Width / depth",new_size);
+            ImGui::BeginDisabled(new_size[0]<=0 || new_size[1]<=0);
+            if (ImGui::Button("Create")) {
+                const auto result=perform(station::editor::DocumentAction::New);
+                if (result.outcome==station::editor::FileOutcome::Success) {
+                    active_level=0; selected_cell.reset();
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
         // Toolbar: a fixed-height framed strip. The undo/redo buttons drive
         // the same session calls as the hotkeys and menu items, and are
         // disabled exactly when the session has nothing to step over.
@@ -331,6 +338,30 @@ int runEditor() {
         }
         ImGui::PopItemFlag();
 
+        // Plain-letter shortcuts must not consume text-field input or chords.
+        if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt && !io.KeySuper && !io.KeyShift &&
+            !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
+            int requested_mode = mode_index;
+            if (ImGui::IsKeyPressed(ImGuiKey_C, false)) requested_mode = static_cast<int>(EditMode::Cell);
+            else if (ImGui::IsKeyPressed(ImGuiKey_W, false)) requested_mode = static_cast<int>(EditMode::Wall);
+            else if (ImGui::IsKeyPressed(ImGuiKey_S, false)) requested_mode = static_cast<int>(EditMode::Sector);
+            if (requested_mode != mode_index) {
+                session.endStroke();
+                mode_index = requested_mode;
+            }
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::Combo("Mode", &mode_index, "Cell (C)\0Wall (W)\0Sector (S)\0")) session.endStroke();
+        const auto mode=static_cast<EditMode>(mode_index);
+        active_level=std::min(active_level,session.installation().levelCount()-1);
+        if (ImGui::FindWindowSettingsByID(ImHashStr(kGridTitle)) == nullptr) {
+            // Add the grid to existing user layouts without rebuilding them.
+            const ImGuiID saved_dockspace=ImGui::GetID("EditorDockSpace");
+            if (auto* central=ImGui::DockBuilderGetCentralNode(saved_dockspace))
+                ImGui::DockBuilderDockWindow(kGridTitle,central->ID);
+        }
+
         // Reserve the statusbar's height so the dockspace stops above it.
         const float statusbar_reserve =
             ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y;
@@ -342,31 +373,15 @@ int runEditor() {
                 dockspace_id,
                 ImVec2(avail.x, avail.y - statusbar_reserve));
         }
-        // The Overview window claims the right-hand (central) node, which
-        // keeps its tab bar: future panels docked alongside join as further
-        // tabs. A tree restored from ini only learns its central node during
-        // the first docking update pass, so the claim is retried until it
-        // lands. Once window settings record the dock, the claim is done and
-        // a user-arranged layout survives restarts.
-        if (ImGui::FindWindowSettingsByID(ImHashStr(kOverviewTitle)) ==
-            nullptr) {
-            if (ImGuiDockNode* central =
-                    ImGui::DockBuilderGetCentralNode(dockspace_id)) {
-                ImGui::DockBuilderDockWindow(kOverviewTitle, central->ID);
-            }
-        }
-        const bool overview_ready =
-            ImGui::FindWindowSettingsByID(ImHashStr(kOverviewTitle)) !=
-            nullptr;
         first_frame = false;
         ImGui::DockSpace(dockspace_id, ImVec2(0.0f, -statusbar_reserve),
                         ImGuiDockNodeFlags_None);
 
         ImGui::Separator();
-        ImGui::Text("%s - %zu of %zu Cells Filled",
+        ImGui::Text("%s - %zu of %zu Cells Interior",
                    session.unsavedChanges() ? "Unsaved changes" : "Ready",
-                   session.station().deck(0).filledCount(),
-                   session.station().deck(0).cellCount());
+                   session.installation().level(active_level).interiorCount(),
+                   session.installation().level(active_level).cellCount());
         if (!file_status.empty()) {
             ImGui::SameLine();
             ImGui::TextUnformatted(file_status.c_str());
@@ -377,68 +392,104 @@ int runEditor() {
             (session.unsavedChanges() ? " *" : "");
         SDL_SetWindowTitle(window, title.c_str());
 
-        // --- The Editor panel ----------------------------------------------
-        // The active session's Deck, drawn top-down and clickable. The panel
-        // reads geometry from the session and sends clicks back to it; it
-        // never keeps a copy of its own.
-        const station::editor::Deck& deck = session.station().deck(0);
-        // p_open is null, so the panel has no close button and cannot be
-        // closed into an empty application.
+        // --- Installation and Sector inspector (left) ---------------------
         ImGui::Begin(kPanelTitle);
-        // Layouts restored from an older imgui.ini may still carry a tab bar;
-        // re-assert the flag so the panel always renders as a plain window.
-        if (ImGuiWindow* panel = ImGui::GetCurrentWindow();
-            panel->DockNode != nullptr) {
+        if (ImGuiWindow* panel = ImGui::GetCurrentWindow(); panel->DockNode)
             panel->DockNode->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
+        auto textField = [&](const char* label, const std::string& value, auto commit) {
+            std::vector<char> buffer(value.size()+1024,0);
+            std::copy(value.begin(),value.end(),buffer.begin());
+            if (ImGui::InputText(label,buffer.data(),buffer.size()))
+                edit([&]{ commit(std::string(buffer.data())); });
+        };
+        textField("Installation name",session.installation().getName(),
+                  [&](std::string name){ session.setName(std::move(name)); });
+        const auto level_label="Level "+std::to_string(active_level);
+        if (ImGui::BeginCombo("Level",level_label.c_str())) {
+            for (std::size_t l=0;l<session.installation().levelCount();++l) {
+                const auto label="Level "+std::to_string(l);
+                if (ImGui::Selectable(label.c_str(),l==active_level)) {
+                    session.endStroke(); active_level=l; selected_cell.reset();
+                }
+            }
+            ImGui::EndCombo();
         }
-        // Pointer phases drive the session's gestures: a press opens a
-        // stroke whose paint state is the opposite of the Cell it started
-        // on, dragging paints every Cell it visits, and the release
-        // commits the whole gesture as one undo step.
-        const DeckPointerEvent pointer = drawDeckGrid("DeckGrid", deck);
-        switch (pointer.phase) {
-            case DeckPointerPhase::Press:
-                if (pointer.cell.has_value()) {
-                    // The press paints its own Cell, so a click with no
-                    // drag is a one-Cell gesture.
-                    session.beginStroke(0, pointer.cell->x, pointer.cell->y);
-                    session.paintStroke(pointer.cell->x, pointer.cell->y);
+        const auto inspected=session.installation().level(active_level);
+        ImGui::Text("Size: %u x %u",inspected.width(),inspected.depth());
+        int offsets[2]={inspected.offsetX(),inspected.offsetY()};
+        if (ImGui::InputInt2("Offset",offsets))
+            edit([&]{ session.setOffset(active_level,offsets[0],offsets[1]); });
+        if (ImGui::CollapsingHeader("Add Level")) {
+            ImGui::InputInt2("New width / depth",added_size);
+            ImGui::InputInt2("New offset",added_offset);
+            if (ImGui::Button("Append Void Level")) edit([&]{
+                if (added_size[0]<=0 || added_size[1]<=0)
+                    throw std::invalid_argument("Level dimensions must be positive");
+                session.addLevel(added_size[0],added_size[1],added_offset[0],added_offset[1]);
+                active_level=session.installation().levelCount()-1; selected_cell.reset();
+            });
+        }
+        ImGui::BeginDisabled(session.installation().levelCount()==1);
+        if (ImGui::Button("Remove top Level")) {
+            edit([&]{
+                if (!session.removeTopLevel())
+                    file_status="Top Level cleared: a lower Sector still claims its volume";
+                active_level=std::min(active_level,session.installation().levelCount()-1);
+                selected_cell.reset();
+            });
+        }
+        ImGui::EndDisabled();
+        if (mode==EditMode::Sector && selected_cell) {
+            const auto current=session.installation().level(active_level);
+            if (current.contains(selected_cell->x,selected_cell->y)) {
+                const int id=current.cellData(selected_cell->x,selected_cell->y).sector;
+                const auto sector=current.sectors()[id];
+                if (ImGui::CollapsingHeader("Selected Sector",ImGuiTreeNodeFlags_DefaultOpen)) {
+                    ImGui::Text("Sector %d | Level %d | Area %zu",id,sector.level,sector.area);
+                    ImGui::Text("Type: %s",sector.type==nsi::core::Installation::SectorType::Interior ? "Interior" : "Void");
+                    textField("Name",sector.name,[&](std::string name){
+                        session.setSector(active_level,id,std::move(name),sector.height);
+                    });
+                    int height=sector.height;
+                    ImGui::BeginDisabled(sector.type==nsi::core::Installation::SectorType::Void);
+                    if (ImGui::InputInt("Height",&height)) edit([&]{
+                        session.setSector(active_level,id,session.installation().level(active_level).sectors()[id].name,height);
+                    });
+                    ImGui::EndDisabled();
                 }
-                break;
-            case DeckPointerPhase::Drag:
-                if (pointer.cell.has_value()) {
-                    session.paintStroke(pointer.cell->x, pointer.cell->y);
-                }
-                break;
-            case DeckPointerPhase::Release:
-                session.endStroke();
-                break;
-            case DeckPointerPhase::None:
-                break;
+            }
         }
         ImGui::End();
 
-        // --- The Overview panel --------------------------------------------
-        // Docked right in the tabbed central node: its tab shows now, and
-        // more tabs appear as further panels join the node. Created only
-        // once the dock claim has landed, so it never flashes floating.
-        // p_open is null: the tab carries no close button.
-        if (overview_ready) {
-            ImGui::Begin(kOverviewTitle);
-            const ImVec2 available = ImGui::GetContentRegionAvail();
-            const auto grid_width = static_cast<std::size_t>(
-                std::max(1.0f, std::floor(available.x)));
-            const auto grid_height = static_cast<std::size_t>(
-                std::max(1.0f, std::floor(available.y)));
-            const std::uint32_t texture_id =
-                overview.render(grid_width, grid_height, session.station());
-            ImGui::Image(
-                reinterpret_cast<ImTextureID>(
-                    static_cast<std::uintptr_t>(texture_id)),
-                ImVec2(static_cast<float>(grid_width),
-                       static_cast<float>(grid_height)));
-            ImGui::End();
-        }
+        // --- Grid input ----------------------------------------------------
+        ImGui::Begin(kGridTitle);
+        const auto grid=session.installation().level(active_level);
+        std::optional<int> selected_sector;
+        if (mode==EditMode::Sector && selected_cell && grid.contains(selected_cell->x,selected_cell->y))
+            selected_sector=grid.cellData(selected_cell->x,selected_cell->y).sector;
+        const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector);
+        const bool stroke_event=session.strokeActive() &&
+            (pointer.phase==DeckPointerPhase::Release ||
+             (pointer.phase==DeckPointerPhase::Drag &&
+              ((mode==EditMode::Cell && pointer.cell) || (mode==EditMode::Wall && pointer.wall))));
+        if (pointer.phase==DeckPointerPhase::Press || stroke_event) edit([&]{
+            if (pointer.phase==DeckPointerPhase::Press) {
+                if (mode==EditMode::Wall && pointer.wall) {
+                    session.beginWallStroke(active_level,*pointer.wall);
+                    session.paintWallStroke(*pointer.wall);
+                }
+                else if (mode==EditMode::Sector) selected_cell=pointer.cell;
+                else if (mode==EditMode::Cell && pointer.cell) {
+                    session.beginStroke(active_level,pointer.cell->x,pointer.cell->y);
+                    session.paintStroke(pointer.cell->x,pointer.cell->y);
+                }
+            } else if (pointer.phase==DeckPointerPhase::Drag && mode==EditMode::Cell && pointer.cell)
+                session.paintStroke(pointer.cell->x,pointer.cell->y);
+            else if (pointer.phase==DeckPointerPhase::Drag && mode==EditMode::Wall && pointer.wall)
+                session.paintWallStroke(*pointer.wall);
+            else if (pointer.phase==DeckPointerPhase::Release) session.endStroke();
+        });
+        ImGui::End();
 
         ImGui::Render();
         int drawable_width = 0;
@@ -451,9 +502,6 @@ int runEditor() {
         SDL_GL_SwapWindow(window);
     }
 
-    // MPP owns GPU resources created against the GL context; release them
-    // while that context is still current.
-    overview.shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext(context);

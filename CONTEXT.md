@@ -1,51 +1,45 @@
 # Numina Space Industries
 
-Station Systems and generic serialization as a standalone library, plus the
-Editor application shell that will present them.
+Installation geometry, station systems simulation, and the Editor used to author installations.
 
 ## Language
 
-**Space Station**:
-A structure represented by a stack of Decks, with at least one Deck. Its
-geometry is distinct from the systems simulated aboard it.
-_Avoid_: station systems
+**Installation**:
+A structure consisting of one or more Levels. Its geometry is distinct from the systems simulated aboard it.
+_Avoid_: Space Station (for the geometry model)
 
-**Deck**:
-A rectangular grid of Cells at one level of a Space Station. Decks may have
-different dimensions and share an origin so matching cell coordinates align
-vertically.
+**Level**:
+A rectangular grid of Cells at one vertical position in an Installation. Levels may have different dimensions and horizontal offsets; consecutive Levels are one grid unit apart vertically.
+_Avoid_: Deck
 
 **Cell**:
-One position in a Deck's grid, either Filled or Void. Filled Cells need not
-form a connected region, and a Deck may consist entirely of Void Cells.
+One position in a Level's grid, belonging to exactly one Sector and carrying floor, wiring, and piping layers.
 
-**Filled**:
-The Cell state indicating that station floor exists at that position, not a
-solid block of material. Rooms, walls, and equipment are separate concepts.
+**Sector**:
+A connected region of same-type Cells joined across absent Walls on one Level. It has a name, an area measured in Cells, and a height.
+
+**Interior**:
+The Sector type indicating that floor exists at its Cells. Its height claims the space above that footprint across consecutive existing Levels, where overlapping floors or other Interior volumes are forbidden.
+_Avoid_: Filled
 
 **Void**:
-The Cell state indicating empty space with no station floor at that position.
+The Sector type indicating empty space with no floor. Void Sectors claim no volume and have height one.
+
+**Wall**:
+A shared edge between neighbouring Cells, or an edge at a Level's boundary. A present Wall is Interior between two Interior Cells and Exterior between Interior and Void or outside the grid; an absent Wall is None.
+
+**Floor Layer**, **Wiring Layer**, **Piping Layer**:
+The floor, electrical wiring, and piping content associated with a Cell, respectively.
 
 **Paint Stroke**:
-One continuous pointer gesture over a Deck; a click is a stroke of one
-Cell. Its painted state is fixed when the stroke begins, as the opposite of
-the starting Cell's state, and the whole stroke is one undo step however
-many Cells it crosses.
+One continuous pointer gesture over a Level. Cell strokes paint the opposite of the starting Cell's type; Wall strokes add or erase according to whether the starting Wall is absent or present, and each whole stroke is one undo step.
 
 **Editor**:
-The standalone GUI application in this repository (`editor/`) that hosts
-dockable panels over a shared frame (menubar, toolbar, statusbar). Not to be
-confused with the Promethium editor, which lives in another repository and is
-not this term.
+The standalone GUI application in this repository that hosts dockable panels over a shared frame. Not to be confused with the Promethium editor in another repository.
 _Avoid_: Promethium editor, station editor
 
 **Panel**:
-A dockable content window inside the Editor's dockspace; the "Editor" panel
-is the first. Panels never own chrome (menubar, toolbar, statusbar) — the
-host frame does.
+A dockable content window inside the Editor's dockspace. Panels do not own the application's menubar, toolbar, or statusbar.
 
 **Editing Session**:
-The headless boundary between the Editor's interface and its geometry. It
-owns the active Space Station document and the user-level commands performed
-on it, and is driven both by the Editor GUI and by automated tests. Rendering,
-native dialogs, and file I/O stay outside the session.
+The headless boundary between the Editor's interface and the Installation. It owns the active document and user-level commands; rendering, native dialogs, and file I/O stay outside it.

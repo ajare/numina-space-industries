@@ -1,6 +1,6 @@
 #pragma once
 
-#include "station/editor/SpaceStation.h"
+#include "station/editor/Installation.h"
 
 #include <filesystem>
 #include <string>
@@ -33,16 +33,16 @@ public:
     virtual ~DocumentFiles() = default;
     // Throw with a useful diagnostic on failure. Read validates before returning;
     // write must not expose a partially written destination.
-    virtual SpaceStation read(const std::filesystem::path& path) = 0;
+    virtual Installation read(const std::filesystem::path& path) = 0;
     virtual void write(const std::filesystem::path& path,
-                       const SpaceStation& station) = 0;
+                       const Installation& station) = 0;
 };
 
 class YamlDocumentFiles final : public DocumentFiles {
 public:
-    SpaceStation read(const std::filesystem::path& path) override;
+    Installation read(const std::filesystem::path& path) override;
     void write(const std::filesystem::path& path,
-               const SpaceStation& station) override;
+               const Installation& station) override;
 };
 
 }  // namespace station::editor

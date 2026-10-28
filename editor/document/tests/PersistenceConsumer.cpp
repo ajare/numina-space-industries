@@ -1,6 +1,7 @@
 // Real YAML and files through the shared session seam, without NFD or GL.
 #include "station/editor/EditorSession.h"
 #include "serialization/TransactionalFileWriter.h"
+#include <yaml-cpp/yaml.h>
 
 #include <chrono>
 #include <fstream>
@@ -86,10 +87,11 @@ void roundTrips(TempFiles& temp) {
         require(dialogs.saves == requests + 1, "untitled Save requests destination");
         require(session.path() == path && !session.unsavedChanges(), "successful Save adopts clean path");
         const auto emitted = readText(path);
-        require(emitted.find("version: 1") != std::string::npos, "readable versioned YAML");
-        std::size_t quotedRows = 0;
-        for (std::size_t pos = 0; (pos = emitted.find("- \"", pos)) != std::string::npos; pos += 3) ++quotedRows;
-        require(quotedRows == 16, "every row is explicitly quoted, including all-Void rows");
+        const auto parsed=YAML::Load(emitted);
+        require(parsed["version"].as<int>()==2 && parsed["levels"].IsSequence(),
+                "versioned Installation YAML");
+        require(emitted.find("area:") == std::string::npos,
+                "cached Sector areas are not serialized");
         session.toggleCell(0, 5, 8);
         session.undo();
         require(!session.unsavedChanges(), "undo restores saved baseline");
@@ -187,14 +189,14 @@ void invalidDocuments(TempFiles& temp) {
     const std::vector<std::pair<std::string, std::string>> invalid = {
         {"malformed YAML", "version: [\n"},
         {"empty document", ""},
-        {"missing version", "decks: []\n"},
+        {"missing version", "levels: []\n"},
         {"unsupported version", yaml("2")},
         {"invalid version type", yaml("true")},
         {"missing Decks", "version: 1\n"},
         {"zero Decks", "version: 1\ndecks: []\n"},
         {"multiple Decks", yaml() + "  - width: 16\n    height: 16\n    rows: []\n"},
         {"Decks map instead of sequence", "version: 1\ndecks: {}\n"},
-        {"Deck not map", "version: 1\ndecks: [16]\n"},
+        {"Level not map", "version: 1\ndecks: [16]\n"},
         {"wrong width", yaml("1", "15")},
         {"wrong height", yaml("1", "16", "17")},
         {"non-integer dimension", yaml("1", "16.5")},
@@ -219,7 +221,7 @@ void invalidDocuments(TempFiles& temp) {
         require(session.station() == before && session.path() == path && session.unsavedChanges(), name + " preserves document");
         require(session.canUndo() && session.canRedo(), name + " preserves history availability");
         session.redo();
-        require(session.station().deck(0).cell(7, 12) == CellState::Void, name + " preserves redo content");
+        require(session.station().level(0).cell(7, 12) == SectorType::Void, name + " preserves redo content");
         session.undo();
         require(session.station() == before, name + " preserves undo content");
     }
@@ -293,7 +295,7 @@ void guardedActionMatrix(TempFiles& temp) {
                             "pending action saves the old document, not its replacement");
                 }
                 if (!cancelled && action != DocumentAction::Exit) {
-                    require(session.station() == (action == DocumentAction::New ? SpaceStation::createDefault() : loaded),
+                    require(session.station() == (action == DocumentAction::New ? Installation::createDefault() : loaded),
                             "permitted New/Open replaces geometry");
                     require(session.path() == (action == DocumentAction::New ? fs::path{} : openedPath),
                             "permitted New/Open establishes correct identity");
@@ -305,7 +307,7 @@ void guardedActionMatrix(TempFiles& temp) {
                     require(session.unsavedChanges() == !saved, "Cancel/Discard do not clear dirty baseline");
                     require(session.canUndo() && session.canRedo(), "Cancel/Exit preserves history");
                     session.redo();
-                    require(session.station().deck(0).cell(8, 11) == CellState::Void, "redo content preserved");
+                    require(session.station().level(0).cell(8, 11) == SectorType::Void, "redo content preserved");
                     session.undo();
                     require(session.station() == before, "undo content preserved");
                 }
@@ -365,7 +367,7 @@ void unsuccessfulGuards(TempFiles& temp) {
                     "blocked action retains editable unsaved document and identity");
             require(session.canUndo() && session.canRedo(), "blocked action retains history");
             session.redo();
-            require(session.station().deck(0).cell(1, 2) == CellState::Void, "blocked action preserves redo content");
+            require(session.station().level(0).cell(1, 2) == SectorType::Void, "blocked action preserves redo content");
             session.undo();
             require(session.station() == before, "blocked action preserves undo content");
         }
