@@ -21,6 +21,10 @@ Consumers may use `add_subdirectory(path/to/numina-space-industries)` or add
 `station-systems/` directly. Link `StationSystems::StationSystems`; generic
 serialization consumers link `Promethium::Serialization`.
 
+The root-level [Core](core/README.md) module provides a dependency-free C++20
+scaffold for new classes in `nsi::core`. Link `nsi::core`; it is included in the
+main build and also supports standalone builds or direct `add_subdirectory(core)`.
+
 `resources/` contains shared reference/test inputs and the Editor's Font Awesome
 5 solid/regular fonts, copied with `editor/include/imgui/IconsFontAwesome5.h`
 from the sibling `promethium-fermide-systems-simulation` repository. The build
