@@ -21,6 +21,6 @@ endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/ext/willpower/cmake/Helpers.cmake")
 add_subdirectory(ext/willpower)
 
-add_subdirectory(core)
 add_subdirectory(station-systems)
+add_subdirectory(core)
 add_subdirectory(editor)

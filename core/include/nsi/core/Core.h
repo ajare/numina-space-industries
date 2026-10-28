@@ -1,5 +1,3 @@
 #pragma once
 
-namespace nsi::core {
-// Public core types belong in this namespace.
-}
+#include <nsi/core/Installation.h>
