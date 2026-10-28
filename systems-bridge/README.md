@@ -31,5 +31,14 @@ Thermal capacity uses 0.851 kJ/(K·m³), density × **cv**, not advected **cp**
 (1.005 kJ/(kg·K)). Declared limits are 90–110 kPa total, minimum 16 kPa O₂,
 and maximum 5 kPa CO₂.
 
-This is the #7 starting-condition tracer. Authored load/coupling pass-through
-is tracked by #8, editing-identity coverage by #9, and domain records by #10.
+Sector assignments pass through unchanged: occupant count and all four rates,
+leak rate, reservoir id and exchanger conductance, and optional fire parameters.
+A reservoir supplies heat-only coupling; an empty id leaves the compartment
+adiabatic. Fire parameters enable the simulation's injectable `fire` fault;
+they do not ignite a fire at startup. Declared limits report crossings without
+clamping the integrated state.
+
+The runtime consumer follows the station-systems scenario-rig precedent and
+checks isolated temperatures across ticks, active loads/couplings, and pressure
+and gas-quality crossings. Editing-identity coverage is tracked by #9, and
+domain records by #10.

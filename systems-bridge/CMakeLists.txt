@@ -27,6 +27,14 @@ if(BUILD_TESTING)
     add_executable(nsi-systems-bridge-consumer tests/AtmosphereConsumer.cpp)
     target_link_libraries(nsi-systems-bridge-consumer PRIVATE nsi::systemsBridge)
     add_test(NAME nsi-systems-bridge-consumer COMMAND nsi-systems-bridge-consumer)
+    add_executable(nsi-systems-bridge-runtime-consumer tests/AtmosphereRuntimeConsumer.cpp)
+    target_link_libraries(nsi-systems-bridge-runtime-consumer PRIVATE nsi::systemsBridge)
+    target_include_directories(nsi-systems-bridge-runtime-consumer PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../station-systems/tests/scenarios"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../station-systems/tests/support")
+    add_test(NAME nsi-systems-bridge-runtime-consumer COMMAND nsi-systems-bridge-runtime-consumer)
+    set_tests_properties(nsi-systems-bridge-runtime-consumer PROPERTIES
+        LABELS "systems;functional;validation-fast" TIMEOUT 30)
     set_tests_properties(nsi-systems-bridge-consumer PROPERTIES
         LABELS "systems;functional;validation-fast" TIMEOUT 30)
 endif()

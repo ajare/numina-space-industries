@@ -52,6 +52,21 @@ std::optional<station::AtmosphereSettings> expandSector(
     result.maxPressureKPa = spec->maxPressureKPa;
     result.minOxygenPartialPressureKPa = spec->minOxygenPartialPressureKPa;
     result.maxCarbonDioxidePartialPressureKPa = spec->maxCarbonDioxidePartialPressureKPa;
+    const auto& assignment = source.atmosphereAssignment;
+    result.occupants = assignment.occupants;
+    result.oxygenUsePerOccupantKgPerS = assignment.oxygenUsePerOccupantKgPerS;
+    result.co2ProductionPerOccupantKgPerS = assignment.co2ProductionPerOccupantKgPerS;
+    result.sensibleHeatPerOccupantKW = assignment.sensibleHeatPerOccupantKW;
+    result.moistureAdditionPerOccupantKgPerS = assignment.moistureAdditionPerOccupantKgPerS;
+    result.leakRateKgPerS = assignment.leakRateKgPerS;
+    result.reservoirId = assignment.reservoirId;
+    result.exchangerConductanceKWPerK = assignment.exchangerConductanceKWPerK;
+    if (assignment.fire) {
+        const auto& fire = *assignment.fire;
+        result.fire = station::AtmosphereFireSettings{fire.oxygenKgPerS,
+            fire.carbonMonoxideKgPerS, fire.carbonDioxideKgPerS,
+            fire.heatKW, fire.oxygenThresholdKg};
+    }
     return result;
 }
 
