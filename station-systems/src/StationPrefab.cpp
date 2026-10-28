@@ -268,9 +268,6 @@ namespace station
 		fn("Heat engine", MaxStationHeatEngines);
 		fn("Generator", MaxStationGenerators);
 		fn("Thermal buffer", MaxStationThermalBuffers);
-		fn("Atmosphere", MaxStationAtmospheres);
-		fn("Atmosphere pathway", MaxStationPathways);
-		fn("Thermal link", MaxStationThermalLinks);
 		fn("Airlock cycle", MaxStationAirlockCycles);
 		fn("Crew", MaxStationCrews);
 		fn("Water collector", MaxStationWaterCollectors);

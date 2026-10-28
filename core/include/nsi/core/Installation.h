@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <nsi/core/Units.h>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -16,6 +18,55 @@ public:
     struct PipingLayer { bool operator==(const PipingLayer&) const = default; };
     enum class SectorType { Void, Interior };
     enum class WallType { None, Interior, Exterior };
+    // The starting condition of a Sector's air, referenced rather than stored.
+    // A preset carries only intensive constants - composition fractions,
+    // pressure, temperature - so Sectors of any volume share one definition and
+    // the extensive quantities (gas masses, thermal capacity) are derived from
+    // the preset and the Sector's volume at expansion time, and can never go
+    // stale when the Sector is resized. Void is the absence of a compartment:
+    // a Void Sector claims no volume and can hold no air.
+    enum class AtmospherePreset { Void, EarthLike };
+    // The authored per-compartment loads and couplings that no intensive preset
+    // can carry: occupancy is a count rather than a density, a leak is a
+    // total-mass flow rather than a fraction, and a thermal coupling names one
+    // specific reservoir. Defaults are inert, so a Sector that only names a
+    // preset still expands into a valid compartment.
+    //
+    // Sectors do not exchange heat with one another. The bridge authors no
+    // ThermalLink between neighbouring Sectors, so a compartment is adiabatic
+    // unless this assignment names a reservoir coupling - the only heat path a
+    // Sector owns is the one it declares for itself, never one implied by a
+    // shared Wall. Exterior heat loss is out of scope here too: vacuum conducts
+    // nothing, and the radiative path belongs to the Hull model, not to a
+    // conduction boundary.
+    struct AtmosphereAssignment {
+        int occupants = 0;
+        double oxygenUsePerOccupantKgPerS = 0.0;
+        double co2ProductionPerOccupantKgPerS = 0.0;
+        double sensibleHeatPerOccupantKW = 0.0;
+        double moistureAdditionPerOccupantKgPerS = 0.0;
+        double leakRateKgPerS = 0.0;
+        std::string reservoirId;  // empty: adiabatic, no thermal coupling
+        double exchangerConductanceKWPerK = 0.0;
+        struct Fire {
+            double oxygenKgPerS = 0.0;
+            double carbonMonoxideKgPerS = 0.0;
+            double carbonDioxideKgPerS = 0.0;
+            double heatKW = 0.0;
+            double oxygenThresholdKg = 0.0;
+            bool operator==(const Fire&) const = default;
+        };
+        std::optional<Fire> fire{};
+        // True when nothing is assigned, so the whole block can be left out of a
+        // document rather than written as zeros.
+        bool inert() const noexcept {
+            return occupants == 0 && oxygenUsePerOccupantKgPerS == 0.0
+                && co2ProductionPerOccupantKgPerS == 0.0 && sensibleHeatPerOccupantKW == 0.0
+                && moistureAdditionPerOccupantKgPerS == 0.0 && leakRateKgPerS == 0.0
+                && reservoirId.empty() && exchangerConductanceKWPerK == 0.0 && !fire;
+        }
+        bool operator==(const AtmosphereAssignment&) const = default;
+    };
     struct Cell {
         FloorLayer floor;
         WiringLayer wiring;
@@ -34,6 +85,15 @@ public:
         // systems bridge (atmosphere ids, pathways, monitors) survive Cell and
         // Wall edits that reshuffle Sector indices. 0 means unassigned.
         std::int64_t uid = 0;
+        AtmospherePreset atmosphere = AtmospherePreset::EarthLike;
+        AtmosphereAssignment atmosphereAssignment{};
+        // Enclosed volume in cubic metres. A Void Sector claims no volume, so
+        // it reports zero and can never be given a pressurized compartment.
+        double volumeM3() const noexcept {
+            return type == SectorType::Void
+                ? 0.0
+                : static_cast<double>(area) * static_cast<double>(height) * CellVolumeM3;
+        }
         bool operator==(const Sector&) const = default;
     };
     struct Wall {

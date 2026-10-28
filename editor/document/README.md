@@ -45,7 +45,7 @@ actions. Discard does not eagerly reset geometry, so a subsequent cancelled Open
 still preserves the document. Successful saves alone adopt a destination/baseline.
 The title's `*` and statusbar compare the whole Installation to that baseline.
 
-Files use the [core version-2 YAML schema](../../core/README.md). Old deck-row and
+Files use the [core version-3 YAML schema](../../core/README.md). Old deck-row and
 name-only documents are rejected entirely. The core validates loads transactionally;
 `YamlDocumentFiles` uses the shared `Promethium::Serialization` transactional file
 writer for saves, preserving an existing file after a partial write failure.

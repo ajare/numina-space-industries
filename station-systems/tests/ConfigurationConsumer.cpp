@@ -32,14 +32,23 @@ void checkConfiguration()
         require(!station::validateStationSystemsSettings(bad, diagnostic)
             && diagnostic.find("reserved") != std::string::npos, "exterior id was allowed as a real compartment"); }
     { auto bad = settings; bad.atmospherePathways[0].bAtmosphereId.clear(); refuse(bad, "unknown"); }
+    // The per-type count ceilings on atmospheres, pathways and thermal links
+    // were removed: a configuration far past the old 8-compartment and
+    // 64-pathway caps must validate rather than be refused on count alone.
     auto many = settings;
     many.atmospherePathways.clear();
-    for (size_t i = 0; i < station::MaxStationPathways; ++i)
+    for (size_t i = 0; i < 256; ++i)
         many.atmospherePathways.push_back({"p" + std::to_string(i), "a", "b", 1, 0});
     require(station::validateStationSystemsSettings(many, diagnostic), diagnostic.c_str());
-    many.atmospherePathways.push_back({"over-limit", "a", "b", 1, 1});
-    require(!station::validateStationSystemsSettings(many, diagnostic) && diagnostic.find("limited") != std::string::npos,
-        "pathway count ceiling was not enforced");
+    if (!many.atmospheres.empty()) {
+        auto const seed = many.atmospheres.front();
+        while (many.atmospheres.size() < 64) {
+            auto compartment = seed;
+            compartment.id = "comp" + std::to_string(many.atmospheres.size());
+            many.atmospheres.push_back(compartment);
+        }
+        require(station::validateStationSystemsSettings(many, diagnostic), diagnostic.c_str());
+    }
     require(settings == original, "validation changed the valid configuration");
 
     // Exercise the catalogue and connection-identity dependencies of validation,

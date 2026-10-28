@@ -27,6 +27,9 @@ std::size_t gridSize(std::uint32_t w, std::uint32_t d) {
 const char* typeName(Installation::SectorType t) {
     return t == Installation::SectorType::Interior ? "Interior" : "Void";
 }
+const char* presetName(Installation::AtmospherePreset p) {
+    return p == Installation::AtmospherePreset::Void ? "Void" : "Earth-like";
+}
 const char* typeName(Installation::WallType t) {
     switch (t) {
         case Installation::WallType::Interior: return "Interior";
@@ -49,6 +52,9 @@ Installation::Level::Level(std::uint32_t w, std::uint32_t d, SectorType initial)
       sectors_{{"", initial, 1, cells_.size(), 0, 1}},
       walls_(std::size_t(w)*(std::size_t(d)+1)+(std::size_t(w)+1)*d) {
     require(initial == SectorType::Interior || initial == SectorType::Void, "Invalid Cell type");
+    // A Level seeded with Void cells owns no volume, so its Sector carries the
+    // Void atmosphere rather than the pressurized default.
+    if (initial == SectorType::Void) sectors_[0].atmosphere = AtmospherePreset::Void;
     if (initial == SectorType::Interior) {
         for (std::uint32_t x=0; x<w; ++x) {
             walls_[horizontalWall(x,0)].type = WallType::Exterior;
@@ -164,9 +170,16 @@ void Installation::Level::rebuild(const std::vector<SectorType>& types) {
             }
         if (donor>=0) {
             s.height=oldSectors[donor].height;
-            if (largest[donor]==int(g)) s.name=oldSectors[donor].name;
+            // The donor's starting condition carries to every fragment of it:
+            // they are all the same kind of space. The name follows the largest
+            // fragment only.
+            s.atmosphere=oldSectors[donor].atmosphere;
+            if (largest[donor]==int(g)) {
+                s.name=oldSectors[donor].name;
+                s.atmosphereAssignment=oldSectors[donor].atmosphereAssignment;
+            }
         }
-        if (s.type==SectorType::Void) s.height=1;
+        if (s.type==SectorType::Void) { s.height=1; s.atmosphere=AtmospherePreset::Void; }
         // Identity: a fragment inherits the uid of a contributor it dominates,
         // taking the lowest such uid so that merging two Sectors returns the
         // survivor the identity the smaller of the pair had had before the split
@@ -264,6 +277,10 @@ void Installation::validate() const {
             require(s.type!=SectorType::Void || s.height==1,"Void height must be 1");
             require(s.type!=SectorType::Interior || std::size_t(s.height)<=levels_.size()-l,
                     "Sector height extends above the highest Level");
+            require(s.type!=SectorType::Void || s.atmosphere==AtmospherePreset::Void,
+                    "Void Sector must carry the Void atmosphere");
+            require(s.type!=SectorType::Void || s.atmosphereAssignment.inert(),
+                    "Void Sector must carry no atmosphere loads");
         }
         for (std::size_t i=0;i<grid.cells_.size();++i) {
             const auto& s=grid.sectors_.at(grid.cells_[i].sector);
@@ -278,7 +295,7 @@ void Installation::validate() const {
 
 std::string Installation::serialize() const {
     validate();
-    YAML::Node root; root["version"]=2; root["name"]=name_;
+    YAML::Node root; root["version"]=3; root["name"]=name_;
     root["levels"]=YAML::Node(YAML::NodeType::Sequence);
     for (const auto& grid:levels_) {
         YAML::Node l; l["width"]=grid.width_; l["depth"]=grid.depth_;
@@ -286,6 +303,29 @@ std::string Installation::serialize() const {
         l["sectors"]=YAML::Node(YAML::NodeType::Sequence);
         for (const auto& s:grid.sectors_) {
             YAML::Node n; n["name"]=s.name; n["type"]=typeName(s.type); n["height"]=s.height;
+            n["uid"]=s.uid; n["atmosphere"]=presetName(s.atmosphere);
+            if (!s.atmosphereAssignment.inert()) {
+                const auto& a=s.atmosphereAssignment;
+                YAML::Node loads;
+                loads["occupants"]=a.occupants;
+                loads["oxygenUsePerOccupantKgPerS"]=a.oxygenUsePerOccupantKgPerS;
+                loads["co2ProductionPerOccupantKgPerS"]=a.co2ProductionPerOccupantKgPerS;
+                loads["sensibleHeatPerOccupantKW"]=a.sensibleHeatPerOccupantKW;
+                loads["moistureAdditionPerOccupantKgPerS"]=a.moistureAdditionPerOccupantKgPerS;
+                loads["leakRateKgPerS"]=a.leakRateKgPerS;
+                if (!a.reservoirId.empty()) loads["reservoirId"]=a.reservoirId;
+                loads["exchangerConductanceKWPerK"]=a.exchangerConductanceKWPerK;
+                if (a.fire) {
+                    YAML::Node f;
+                    f["oxygenKgPerS"]=a.fire->oxygenKgPerS;
+                    f["carbonMonoxideKgPerS"]=a.fire->carbonMonoxideKgPerS;
+                    f["carbonDioxideKgPerS"]=a.fire->carbonDioxideKgPerS;
+                    f["heatKW"]=a.fire->heatKW;
+                    f["oxygenThresholdKg"]=a.fire->oxygenThresholdKg;
+                    loads["fire"]=f;
+                }
+                n["atmosphereLoads"]=loads;
+            }
             l["sectors"].push_back(n);
         }
         l["cells"]=YAML::Node(YAML::NodeType::Sequence);
@@ -308,7 +348,7 @@ void Installation::deserialize(const std::string& text) {
     try {
         auto documents=YAML::LoadAll(text); require(documents.size()==1,"Expected one YAML document");
         auto root=documents.front(); mapNode(root,"Installation");
-        require(root["version"].as<int>()==2,"Unsupported Installation format");
+        require(root["version"].as<int>()==3,"Unsupported Installation format");
         auto ls=root["levels"]; require(ls.IsSequence() && ls.size()>0,"Expected Levels");
         std::vector<Level> loaded;
         for (const auto& n:ls) {
@@ -317,11 +357,43 @@ void Installation::deserialize(const std::string& text) {
             grid.offsetX_=n["offset_x"].as<int>(); grid.offsetY_=n["offset_y"].as<int>();
             auto ss=n["sectors"]; require(ss.IsSequence() && ss.size()>0 && ss.size()<=grid.cells_.size(),"Invalid Sector count");
             grid.sectors_.clear();
+            auto num=[](const YAML::Node& n,const char* key){ return n[key] ? n[key].as<double>() : 0.0; };
             for (const auto& sn:ss) {
                 mapNode(sn,"Sector"); auto type=sn["type"].as<std::string>();
                 require(type=="Void" || type=="Interior","Invalid Sector type");
-                grid.sectors_.push_back({sn["name"].as<std::string>(),type=="Void" ? SectorType::Void : SectorType::Interior,
-                                         sn["height"].as<int>(),0,int(loaded.size())});
+                Sector sec;
+                sec.name=sn["name"].as<std::string>();
+                sec.type=type=="Void" ? SectorType::Void : SectorType::Interior;
+                sec.height=sn["height"].as<int>();
+                sec.level=int(loaded.size());
+                if (sn["uid"]) sec.uid=sn["uid"].as<std::int64_t>();
+                auto preset=sn["atmosphere"] ? sn["atmosphere"].as<std::string>()
+                    : (sec.type==SectorType::Void ? "Void" : "Earth-like");
+                require(preset=="Void" || preset=="Earth-like","Invalid Sector atmosphere preset");
+                sec.atmosphere=preset=="Void" ? AtmospherePreset::Void : AtmospherePreset::EarthLike;
+                if (sn["atmosphereLoads"]) {
+                    auto ln=sn["atmosphereLoads"]; mapNode(ln,"atmosphereLoads");
+                    auto& a=sec.atmosphereAssignment;
+                    a.occupants=ln["occupants"] ? ln["occupants"].as<int>() : 0;
+                    a.oxygenUsePerOccupantKgPerS=num(ln,"oxygenUsePerOccupantKgPerS");
+                    a.co2ProductionPerOccupantKgPerS=num(ln,"co2ProductionPerOccupantKgPerS");
+                    a.sensibleHeatPerOccupantKW=num(ln,"sensibleHeatPerOccupantKW");
+                    a.moistureAdditionPerOccupantKgPerS=num(ln,"moistureAdditionPerOccupantKgPerS");
+                    a.leakRateKgPerS=num(ln,"leakRateKgPerS");
+                    a.reservoirId=ln["reservoirId"] ? ln["reservoirId"].as<std::string>() : std::string{};
+                    a.exchangerConductanceKWPerK=num(ln,"exchangerConductanceKWPerK");
+                    if (ln["fire"]) {
+                        auto f=ln["fire"]; mapNode(f,"fire");
+                        AtmosphereAssignment::Fire fire;
+                        fire.oxygenKgPerS=num(f,"oxygenKgPerS");
+                        fire.carbonMonoxideKgPerS=num(f,"carbonMonoxideKgPerS");
+                        fire.carbonDioxideKgPerS=num(f,"carbonDioxideKgPerS");
+                        fire.heatKW=num(f,"heatKW");
+                        fire.oxygenThresholdKg=num(f,"oxygenThresholdKg");
+                        a.fire=fire;
+                    }
+                }
+                grid.sectors_.push_back(std::move(sec));
             }
             auto cs=n["cells"]; require(cs.IsSequence() && cs.size()==grid.cells_.size(),"Cell count does not match dimensions");
             std::vector<SectorType> types;

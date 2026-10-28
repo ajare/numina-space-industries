@@ -2337,9 +2337,6 @@ namespace
 		// capacity, an optional heat-only reservoir coupling and an
 		// authored occupancy/load assignment. Only explicit pathways exchange
 		// gas between compartments; exterior pathways, leaks and airlock cycles book external loss.
-		if (settings.atmospheres.size() > MaxStationAtmospheres)
-			return refuse("Station atmospheres are limited to "
-				+ std::to_string(MaxStationAtmospheres) + " entries");
 		std::set<std::string> atmosphereIds;
 		for (auto const& atmosphere : settings.atmospheres) try
 		{
@@ -2348,9 +2345,6 @@ namespace
 			if (!validateStationWaterGasWiring(settings, atmosphere, reason, false, brokenReferences))
 				return refuse(reason);
 		} catch (BrokenDraftEntry const&) {}
-		if (settings.atmospherePathways.size() > MaxStationPathways)
-			return refuse("Station atmosphere pathways are limited to "
-				+ std::to_string(MaxStationPathways) + " entries");
 		std::set<std::string> pathwayIds;
 		for (auto const& pathway : settings.atmospherePathways) try
 		{
@@ -2388,9 +2382,6 @@ namespace
 		// endpoint: it has no temperature to conduct against, and heat loss
 		// to space is a radiative T^4 law that already lives on the
 		// radiator, not a linear conduction boundary.
-		if (settings.thermalLinks.size() > MaxStationThermalLinks)
-			return refuse("Station thermal links are limited to "
-				+ std::to_string(MaxStationThermalLinks) + " entries");
 		std::set<std::string> thermalLinkIds;
 		using NodeKey = std::pair<ThermalNodeKind, std::string>;
 		std::set<std::pair<NodeKey, NodeKey>> thermalPairs;

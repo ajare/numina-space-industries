@@ -1407,7 +1407,6 @@ namespace station
 		std::optional<AtmosphereFireSettings> fire{};
 		bool operator==(AtmosphereSettings const&) const = default;
 	};
-	inline constexpr size_t MaxStationAtmospheres{8};
 
 	// Reserved pathway endpoint: fixed zero partial pressures, no inventory,
 	// volume or temperature. An Atmosphere compartment may not use this id.
@@ -1427,7 +1426,6 @@ namespace station
 		double openFraction{1.0};
 		bool operator==(AtmospherePathwaySettings const&) const = default;
 	};
-	inline constexpr size_t MaxStationPathways{64};
 	// A Thermal link (#794): an explicitly authored, undirected conduction
 	// relationship between two Thermal nodes (Atmosphere or Reservoir),
 	// carrying a declared conductance in kW/K. Unlike the enthalpy carried
@@ -1458,7 +1456,6 @@ namespace station
 		ThermalNodeKind bKind{ThermalNodeKind::Atmosphere};
 		bool operator==(ThermalLinkSettings const&) const = default;
 	};
-	inline constexpr size_t MaxStationThermalLinks{64};
 	// Species order for pathway arrays: oxygen, nitrogen, carbon dioxide,
 	// water vapour (including vapour, unlike StationAtmosphereGases).
 	inline constexpr std::array<char const*, 4> StationPathwayGases{

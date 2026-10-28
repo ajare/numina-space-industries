@@ -42,9 +42,10 @@ its dimensions and offset. `removeTopLevel()` returns false in that case.
 
 ## Persistence
 
-`serialize()` emits version-2 YAML with name and all Levels, including dimensions,
-offsets, Cell Sector indices, empty layer maps, Sector name/type/height and Walls.
-Cached Sector areas and Sector-to-Level indices are omitted and rebuilt on load.
+`serialize()` emits version-3 YAML with name and all Levels, including dimensions,
+offsets, Cell Sector indices, empty layer maps, Sector name/type/height/uid,
+Sector atmosphere preset and, when non-inert, its atmosphere loads. Cached Sector
+areas and Sector-to-Level indices are omitted and rebuilt on load.
 `deserialize()` checks membership/topology, dimensions, Wall classification and
 vertical occupancy. Invalid input throws `serialization::SerializationException`
 and leaves the Installation unchanged. Old name-only and editor deck-row formats
