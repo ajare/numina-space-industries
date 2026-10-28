@@ -9,11 +9,11 @@ A structure consisting of one or more Levels. Its geometry is distinct from the 
 _Avoid_: Space Station (for the geometry model)
 
 **Level**:
-A rectangular grid of Cells at one vertical position in an Installation. Levels may have different dimensions and horizontal offsets; consecutive Levels are one grid unit apart vertically.
+A rectangular grid of Cells at one vertical position in an Installation. Levels may have different dimensions and horizontal offsets; consecutive Levels are 3 m apart vertically.
 _Avoid_: Deck
 
 **Cell**:
-One position in a Level's grid, belonging to exactly one Sector and carrying floor, wiring, and piping layers.
+One position in a Level's grid with a 2 m × 2 m footprint, belonging to exactly one Sector and carrying floor, wiring, and piping layers. One Cell across one Level's height represents 12 m³.
 
 **Sector**:
 A connected region of same-type Cells joined across absent Walls on one Level. It has a name, an area measured in Cells, and a height.
@@ -23,7 +23,10 @@ The Sector type indicating that floor exists at its Cells. Its height claims the
 _Avoid_: Filled
 
 **Void**:
-The Sector type indicating empty space with no floor. Void Sectors claim no volume and have height one.
+The Sector type indicating empty space with no floor, distinct from the Void atmosphere preset, which means no atmosphere compartment. Void Sectors claim no volume and have height one.
+
+**Atmosphere preset**:
+A Sector's starting atmosphere condition, independent of its size: Earth-like specifies gas composition, pressure, temperature and humidity, while Void means no atmosphere compartment, not a zero-pressure compartment. Unlike the Void Sector type, the Void atmosphere preset can describe an Interior Sector with a floor but no compartment.
 
 **Wall**:
 A shared edge between neighbouring Cells, or an edge at a Level's boundary. A present Wall is Interior between two Interior Cells and Exterior between Interior and Void or outside the grid; an absent Wall is None.
