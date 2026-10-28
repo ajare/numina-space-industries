@@ -64,10 +64,12 @@ endif()
 add_executable(editor
     src/main.cpp
     src/NativeFileDialogs.cpp
+    src/EditorFonts.cpp
     src/DeckGridWidget.cpp
     src/OverviewRenderer.cpp
 )
 target_compile_features(editor PRIVATE cxx_std_20)
+target_include_directories(editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 # MPP logger output lives in the build tree regardless of launch directory,
 # mirroring the sibling Promethium application's PF_RENDER_LOG_DIR.
 target_compile_definitions(editor PRIVATE
@@ -91,6 +93,30 @@ target_link_libraries(editor PRIVATE
     ext::mpp-helper
     ext::mpp-program
 )
+# Keep runtime fonts beside the executable, independent of the launch directory.
+# A target (rather than POST_BUILD) also picks up font-only changes.
+set(editor_resource_directory "${CMAKE_BINARY_DIR}/bin/x64/$<CONFIG>/resources")
+add_custom_target(editor-font-assets
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${editor_resource_directory}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${PROJECT_SOURCE_DIR}/resources/fa-solid-900.ttf"
+        "${PROJECT_SOURCE_DIR}/resources/fa-regular-400.ttf"
+        "${PROJECT_SOURCE_DIR}/resources/FontAwesome-LICENSE.txt"
+        "${editor_resource_directory}"
+    VERBATIM
+)
+add_dependencies(editor editor-font-assets)
+
+if(BUILD_TESTING)
+    add_executable(editor-fonts-test tests/EditorFontsTest.cpp src/EditorFonts.cpp)
+    target_include_directories(editor-fonts-test PRIVATE include src)
+    target_link_libraries(editor-fonts-test PRIVATE editor::imgui)
+    add_dependencies(editor-fonts-test editor-font-assets)
+    add_test(NAME editor-fonts COMMAND editor-fonts-test "${editor_resource_directory}")
+    set_tests_properties(editor-fonts PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+endif()
+
 if(WIN32)
     target_link_libraries(editor PRIVATE SDL2::SDL2main)
     set_target_properties(editor PROPERTIES WIN32_EXECUTABLE TRUE)

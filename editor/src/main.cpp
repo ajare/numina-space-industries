@@ -14,6 +14,8 @@
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_opengl3_loader.h"
 
+#include "imgui/IconsFontAwesome5.h"
+#include "EditorFonts.h"
 #include "DeckGridWidget.h"
 #include "OverviewRenderer.h"
 #include "NativeFileDialogs.h"
@@ -145,6 +147,23 @@ int runEditor() {
     // Layout persistence stays on the default: io.IniFilename == "imgui.ini".
     const bool saved_layout_exists = hasSavedLayout(io);
 
+    char* base_path = SDL_GetBasePath();
+    try {
+        if (base_path == nullptr) {
+            throw std::runtime_error(std::string("SDL_GetBasePath failed: ") + SDL_GetError());
+        }
+        loadEditorFonts(io, std::filesystem::path(base_path) / "resources");
+    } catch (const std::exception& error) {
+        SDL_free(base_path);
+        SDL_Log("Editor font initialisation failed: %s", error.what());
+        ImGui::DestroyContext(context);
+        SDL_GL_DeleteContext(gl_context);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+    SDL_free(base_path);
+
     if (!ImGui_ImplOpenGL3_Init("#version 330")) {
         SDL_Log("ImGui_ImplOpenGL3_Init failed");
         SDL_GL_DeleteContext(gl_context);
@@ -256,20 +275,20 @@ int runEditor() {
 
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
-                if (ImGui::MenuItem("New")) {
+                if (ImGui::MenuItem(ICON_FA_FILE " New")) {
                     perform(station::editor::DocumentAction::New);
                 }
-                if (ImGui::MenuItem("Open...")) {
+                if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN " Open...")) {
                     perform(station::editor::DocumentAction::Open);
                 }
-                if (ImGui::MenuItem("Save")) {
+                if (ImGui::MenuItem(ICON_FA_SAVE " Save")) {
                     report(session.save(dialogs, files));
                 }
-                if (ImGui::MenuItem("Save As...")) {
+                if (ImGui::MenuItem(ICON_FA_COPY " Save As...")) {
                     report(session.saveAs(dialogs, files));
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem("Exit")) {
+                if (ImGui::MenuItem(ICON_FA_SIGN_OUT_ALT " Exit")) {
                     perform(station::editor::DocumentAction::Exit);
                 }
                 ImGui::EndMenu();
@@ -277,11 +296,11 @@ int runEditor() {
             if (ImGui::BeginMenu("Edit")) {
                 // The chord is spelled out in the label: passing it as the
                 // shortcut would register a second handler for it.
-                if (ImGui::MenuItem("Undo  (Ctrl+Z)", nullptr, false,
+                if (ImGui::MenuItem(ICON_FA_UNDO " Undo  (Ctrl+Z)", nullptr, false,
                                    session.canUndo())) {
                     session.undo();
                 }
-                if (ImGui::MenuItem("Redo  (Ctrl+Y)", nullptr, false,
+                if (ImGui::MenuItem(ICON_FA_REDO " Redo  (Ctrl+Y)", nullptr, false,
                                    session.canRedo())) {
                     session.redo();
                 }
@@ -290,15 +309,27 @@ int runEditor() {
             ImGui::EndMenuBar();
         }
 
-        // Toolbar: a fixed-height framed strip, empty until tools exist.
+        // Toolbar: a fixed-height framed strip. The undo/redo buttons drive
+        // the same session calls as the hotkeys and menu items, and are
+        // disabled exactly when the session has nothing to step over.
         const ImVec2 toolbar_min = ImGui::GetCursorScreenPos();
         const float toolbar_width = ImGui::GetContentRegionAvail().x;
         const float toolbar_height = ImGui::GetFrameHeight();
-        ImGui::Dummy(ImVec2(toolbar_width, toolbar_height));
         ImGui::GetWindowDrawList()->AddRect(
             toolbar_min,
             ImVec2(toolbar_min.x + toolbar_width, toolbar_min.y + toolbar_height),
             ImGui::GetColorU32(ImGuiCol_Border));
+        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, !session.canUndo());
+        if (ImGui::Button(ICON_FA_UNDO " Undo")) {
+            session.undo();
+        }
+        ImGui::PopItemFlag();
+        ImGui::SameLine();
+        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, !session.canRedo());
+        if (ImGui::Button(ICON_FA_REDO " Redo")) {
+            session.redo();
+        }
+        ImGui::PopItemFlag();
 
         // Reserve the statusbar's height so the dockspace stops above it.
         const float statusbar_reserve =

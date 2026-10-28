@@ -21,6 +21,14 @@ Consumers may use `add_subdirectory(path/to/numina-space-industries)` or add
 `station-systems/` directly. Link `StationSystems::StationSystems`; generic
 serialization consumers link `Promethium::Serialization`.
 
-`resources/` contains shared reference/test inputs, not a required runtime asset
-installation. The library embeds its own default Lua. World/editor-specific
-code, documents and assets remain in Promethium.
+`resources/` contains shared reference/test inputs and the Editor's Font Awesome
+5 solid/regular fonts, copied with `editor/include/imgui/IconsFontAwesome5.h`
+from the sibling `promethium-fermide-systems-simulation` repository. The build
+copies the fonts and their license into `resources/` beside the Editor executable;
+keep that directory with the executable when moving it. Fonts load relative to
+the executable, not the working directory. Font licenses are recorded in
+`resources/FontAwesome-LICENSE.txt`; the icon header's license is alongside it
+under `editor/include/imgui/`.
+
+The Station Systems library needs no runtime asset installation and embeds its
+own default Lua. World-specific code, documents and assets remain in Promethium.
