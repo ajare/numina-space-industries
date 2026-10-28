@@ -55,6 +55,7 @@ void EditorSession::replaceDocument(Installation station) {
     mRedoHistory.clear();
     mStation = std::move(station);
     mBaseline = mStation;
+    mHasDocument = true;
     mPath.clear();
 }
 
@@ -96,6 +97,7 @@ FileResult EditorSession::saveTo(const FileSelection& selection, DocumentFiles& 
         files.write(selection.path, mStation);
         mPath = selection.path;
         mBaseline = mStation;
+        mHasDocument = true;
         return {FileOutcome::Success, {}};
     } catch (const std::exception& error) {
         return {FileOutcome::Failed, std::string("Save failed: ") + error.what()};

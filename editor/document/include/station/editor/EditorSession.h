@@ -15,6 +15,9 @@ public:
                        std::uint32_t width = 16, std::uint32_t depth = 16);
     void newDocument(std::uint32_t width = 16, std::uint32_t depth = 16);
     void replaceDocument(Installation installation);
+    // Startup geometry is a placeholder until New/Open (or a successful Save).
+    // This is independent of path(): newly created unsaved documents are active.
+    bool hasDocument() const noexcept { return mHasDocument; }
     const Installation& installation() const noexcept { return mStation; }
     const Installation& station() const noexcept { return mStation; }
     const std::filesystem::path& path() const noexcept { return mPath; }
@@ -49,6 +52,7 @@ private:
     void cancelStroke();
     FileResult saveTo(const FileSelection& selection, DocumentFiles& files);
     Installation mStation, mBaseline;
+    bool mHasDocument = false;
     std::filesystem::path mPath;
     std::size_t mStrokeLevel = 0;
     SectorType mStrokeState = SectorType::Void;

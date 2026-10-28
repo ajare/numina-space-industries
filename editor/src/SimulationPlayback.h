@@ -12,9 +12,11 @@ namespace station::editor {
 class SimulationPlayback {
 public:
     static constexpr std::array<double, 5> speeds{0.1, 0.5, 1.0, 2.0, 10.0};
-    void synchronize(const nsi::core::Installation& installation);
+    // nullptr means no active Installation: retire the preview and pause.
+    void synchronize(const nsi::core::Installation* installation);
+    void synchronize(const nsi::core::Installation& installation) { synchronize(&installation); }
     void reset(const nsi::core::Installation& installation);
-    void togglePlaying() noexcept { playing_ = !playing_; }
+    void togglePlaying() noexcept { if (runtime_) playing_ = !playing_; }
     bool playing() const noexcept { return playing_; }
     void setSpeedIndex(int index);
     int speedIndex() const noexcept { return speedIndex_; }

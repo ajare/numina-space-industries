@@ -12,11 +12,70 @@ void require(bool value, const char* message) {
 void near(double a, double b) {
     require(std::abs(a - b) < 1e-6, "Unexpected simulation time");
 }
+
+void documentAvailability() {
+    using namespace station::editor;
+    struct Dialogs : FileDialogs {
+        FileSelection next{FileOutcome::Cancelled, {}, {}};
+        FileSelection openYaml() override { return next; }
+        FileSelection saveYaml(const std::filesystem::path&) override { return next; }
+    } dialogs;
+    struct Files : DocumentFiles {
+        bool fail = false;
+        Installation read(const std::filesystem::path&) override {
+            if (fail) throw std::runtime_error("Read failed");
+            return Installation(1, 1);
+        }
+        void write(const std::filesystem::path&, const Installation&) override {
+            if (fail) throw std::runtime_error("Write failed");
+        }
+    } files;
+    EditorSession session;
+    SimulationPlayback playback;
+    auto synchronize = [&] {
+        playback.synchronize(session.hasDocument() ? &session.installation() : nullptr);
+    };
+    require(!session.hasDocument(), "Startup placeholder counted as a loaded Installation");
+    synchronize();
+    playback.togglePlaying();
+    playback.update(0.1);
+    require(!playback.playing() && !playback.runtime(), "No-document playback was enabled");
+    require(session.open(dialogs, files).outcome == FileOutcome::Cancelled && !session.hasDocument(),
+            "Cancelled Open enabled playback");
+    dialogs.next = {FileOutcome::Success, "installation.yaml", {}};
+    files.fail = true;
+    require(session.open(dialogs, files).outcome == FileOutcome::Failed && !session.hasDocument(),
+            "Failed Open enabled playback");
+    require(session.save(dialogs, files).outcome == FileOutcome::Failed && !session.hasDocument(),
+            "Failed Save activated placeholder");
+    files.fail = false;
+    require(session.open(dialogs, files).outcome == FileOutcome::Success && session.hasDocument(),
+            "Successful Open did not enable playback");
+    synchronize();
+    playback.togglePlaying();
+    playback.update(0.1);
+    require(playback.playing() && playback.runtime()->snapshot().worldTick == 1, "Loaded Installation did not run");
+    playback.synchronize(nullptr);
+    playback.togglePlaying();
+    playback.update(0.1);
+    require(!playback.playing() && !playback.runtime(), "Removing Installation retained a running preview");
+    EditorSession created;
+    created.newDocument(1, 1);
+    require(created.hasDocument() && created.path().empty(), "New unsaved Installation was not active");
+    playback.synchronize(created.hasDocument() ? &created.installation() : nullptr);
+    playback.togglePlaying();
+    playback.update(0.1);
+    require(playback.runtime()->snapshot().worldTick == 1, "New unsaved Installation could not run");
+    EditorSession saved;
+    require(saved.save(dialogs, files).outcome == FileOutcome::Success && saved.hasDocument(),
+            "Successful Save did not establish an Installation");
+}
 }
 
 int main() {
     try {
         using namespace station::editor;
+        documentAvailability();
         EditorSession session;
         // A real load makes it impossible for a clock-only mock to pass.
         auto yaml = nsi::core::Installation(1, 1).serialize();

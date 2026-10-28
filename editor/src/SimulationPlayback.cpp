@@ -5,8 +5,13 @@
 #include <stdexcept>
 
 namespace station::editor {
-void SimulationPlayback::synchronize(const nsi::core::Installation& installation) {
-    if (!source_ || *source_ != installation) reset(installation);
+void SimulationPlayback::synchronize(const nsi::core::Installation* installation) {
+    if (!installation) {
+        playing_ = false;
+        runtime_.reset();
+        source_.reset();
+        remainder_ = 0;
+    } else if (!source_ || *source_ != *installation) reset(*installation);
 }
 
 void SimulationPlayback::reset(const nsi::core::Installation& installation) {

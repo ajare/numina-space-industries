@@ -346,7 +346,7 @@ int runEditor() {
         }
         ImGui::PopItemFlag();
 
-        try { simulation.synchronize(session.installation()); }
+        try { simulation.synchronize(session.hasDocument() ? &session.installation() : nullptr); }
         catch (const std::exception& error) { file_status = error.what(); }
         ImGui::SameLine();
         ImGui::BeginDisabled(simulation.runtime() == nullptr);
@@ -354,6 +354,7 @@ int runEditor() {
             simulation.togglePlaying();
         ImGui::EndDisabled();
         ImGui::SameLine();
+        ImGui::BeginDisabled(!session.hasDocument());
         if (ImGui::Button(ICON_FA_UNDO " Reset"))
             edit([&]{ simulation.reset(session.installation()); });
         ImGui::SameLine();
@@ -361,6 +362,7 @@ int runEditor() {
         int speed_index = simulation.speedIndex();
         if (ImGui::Combo("Speed", &speed_index, "0.1x\0" "0.5x\0" "1x\0" "2x\0" "10x\0"))
             simulation.setSpeedIndex(speed_index);
+        ImGui::EndDisabled();
         // Do not erase an earlier diagnostic on every successful frame.
         try { simulation.update(io.DeltaTime); }
         catch (const std::exception& error) { file_status = error.what(); }
@@ -411,6 +413,9 @@ int runEditor() {
                    session.unsavedChanges() ? "Unsaved changes" : "Ready",
                    session.installation().level(active_level).interiorCount(),
                    session.installation().level(active_level).cellCount());
+        ImGui::SameLine();
+        ImGui::Text("| Sim update: %.1f \xC2\xB5s (1s avg)",
+                    simulation.runtime() ? simulation.runtime()->averageStepMicroseconds() : 0.0);
         if (!file_status.empty()) {
             ImGui::SameLine();
             ImGui::TextUnformatted(file_status.c_str());
