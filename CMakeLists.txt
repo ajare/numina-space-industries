@@ -23,4 +23,5 @@ add_subdirectory(ext/willpower)
 
 add_subdirectory(station-systems)
 add_subdirectory(core)
+add_subdirectory(systems-bridge)
 add_subdirectory(editor)
