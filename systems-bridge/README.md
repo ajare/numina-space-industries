@@ -5,6 +5,11 @@ records provisional passive material/film candidates and the Release
 `nsi-thermal-calibration` fixture. It does not change these production mappings
 or the default thermal backend.
 
+The [serial structural/cavity cost review](../docs/structural-cost-review.md)
+(#25) adds a test-local P1 prototype, recorded Release measurements and the
+`editor-structural-cost-benchmark` executable. Its measured cost/accuracy limits
+are not approval for default rollout.
+
 Source-integrated C++20 mapping from Installation geometry to Station Systems
 atmosphere compartments. Add this directory with `add_subdirectory` and link
 only `nsi::systemsBridge`; its public headers and dependencies are transitive.

@@ -173,6 +173,10 @@ if(BUILD_TESTING)
     set_tests_properties(editor-sector-systems PROPERTIES
         LABELS "editor;functional;validation-fast" TIMEOUT 30)
 
+    add_executable(editor-structural-cost-benchmark
+        tests/StructuralCostBenchmark.cpp src/SectorThermalPanel.cpp src/SectorAtmospherePanel.cpp src/SimulationTimingPanel.cpp)
+    target_include_directories(editor-structural-cost-benchmark PRIVATE "${PROJECT_SOURCE_DIR}/systems-bridge/tests")
+    target_link_libraries(editor-structural-cost-benchmark PRIVATE editor-simulation editor::implot)
     add_executable(editor-cell-playback-benchmark tests/CellPlaybackBenchmark.cpp)
     target_link_libraries(editor-cell-playback-benchmark PRIVATE editor-simulation)
     add_executable(editor-simulation-test tests/SimulationPlaybackTest.cpp)

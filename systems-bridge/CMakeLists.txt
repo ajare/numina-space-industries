@@ -24,6 +24,11 @@ target_include_directories(nsi-systems-bridge PUBLIC
 set_target_properties(nsi-systems-bridge PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(BUILD_TESTING)
+    # Non-production serial cost study; no backend/default changes.
+    add_executable(nsi-structural-cost-test tests/StructuralCostTest.cpp)
+    target_link_libraries(nsi-structural-cost-test PRIVATE nsi::systemsBridge)
+    add_test(NAME nsi-structural-cost COMMAND nsi-structural-cost-test)
+    set_tests_properties(nsi-structural-cost PROPERTIES LABELS "systems;functional;validation-fast" TIMEOUT 30)
     # Calibration study only: candidate values are not installed production presets.
     add_executable(nsi-thermal-calibration tests/ThermalCalibration.cpp)
     target_link_libraries(nsi-thermal-calibration PRIVATE nsi::systemsBridge)
