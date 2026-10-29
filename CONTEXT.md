@@ -88,6 +88,54 @@ An opening that exchanges thermal radiation between cavities or with exterior sp
 The surface area of a Sector facing void, comprising its sides, roof and exposed floor underside, measured in square metres. It includes surfaces facing internal voids, not just the Installation's outer perimeter.
 _Avoid_: Exterior Wall (only an edge contributing to side area), Hull (the physical assembly, not an area), perimeter
 
+**Orbital period**:
+The time for the Installation to complete one revolution about its planet, measured in the inertial frame. It sets the period of both stellar exposure and eclipse; the planet's own rotation affects neither.
+_Avoid_: Relative speed, rotation period (for the Installation's motion), orbit speed
+
+**Nadir lock**:
+The Installation's attitude convention: one face continuously faces the planet, so the Installation turns once per orbit. It makes each hull panel's solar incidence well defined from that panel's outward normal.
+_Avoid_: Geostationary (an orbital condition, not an attitude), tumbling, spin-stabilised
+
+**Geostationary**:
+The special case where the Installation's Orbital period equals the planet's sidereal rotation, so it holds one position over the surface. A derived condition shown to the author, never an input.
+_Avoid_: Hovering, stationary, locked orbit
+
+**Stellar irradiance**:
+Stellar power per unit area at the planet's orbital distance, measured in W/m² (1361 for the Sun at Earth). A property of the star and the orbit, never of the hull.
+_Avoid_: Solar constant, luminosity, fullSunIrradianceKWPerM2 (legacy wire name that wrongly places it on the Hull)
+
+**Stellar exposure**:
+The fraction of full stellar irradiance reaching one hull surface at an instant, after eclipse and incidence. Zero means none; one means full sun at normal incidence.
+_Avoid_: Sunlight level, solar intensity, insolation
+
+**Beta angle**:
+The angle between the star's direction and the Installation's orbital plane. It decides whether eclipse occurs at all, how deep it is, and how much direct light the cross-track faces receive.
+_Avoid_: Solar declination (a planet-surface frame concept), axial tilt, inclination
+
+**Eclipse**:
+The interval in which the planet blocks the Installation's direct view of the star. It is a shadow, not night, and unrelated to the Void atmosphere preset.
+_Avoid_: Night, shadow phase, blackout
+
+**Planet shine**:
+Stellar light reflected from the planet's disc plus the planet's own infrared, arriving at the hull indirectly. Distinct from direct stellar exposure and from the deep-space sink.
+_Avoid_: Albedo (only its reflective half), back-radiation, ground glow
+
+**Albedo**:
+The fraction of incident stellar light the planet reflects. Distinct from the planet's infrared emission, which continues when albedo contributes nothing.
+_Avoid_: Reflectivity, planet shine (the whole of it)
+
+**Deep-space sink**:
+The radiative background a surface sees when the planet does not occupy its view. Not a reservoir, and not what every exterior face sees.
+_Avoid_: Vacuum temperature, exterior temperature
+
+**Local noon**:
+The orbit phase at which the star is directly overhead of the Installation, and the t = 0 reference; the sunlit arc is centred on it.
+_Avoid_: Sunrise, orbit start
+
+**Ground drift**:
+The apparent motion of the Installation's sub-point across the planet's surface, in degrees per day. A derived readout for the author; zero means Geostationary.
+_Avoid_: Relative speed (as an input), orbital drift
+
 **Thermal transmittance (U-value)**:
 Heat flow per unit surface area per unit temperature difference through a hull or partition assembly, measured in W/(m²·K).
 _Avoid_: Thermal conductivity (a material property), conductance (the whole-surface value after multiplying by area), insulation rating
