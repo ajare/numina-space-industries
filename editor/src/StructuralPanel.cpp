@@ -47,7 +47,7 @@ void drawStructuralPanel(const SimulationPlayback& playback,nsi::systems::Struct
     if (!ImGui::CollapsingHeader("Structure / real thermal topology",ImGuiTreeNodeFlags_DefaultOpen)) return;
     const auto* runtime=playback.runtime();
     if (!runtime || !runtime->structuralSnapshot().enabled) {
-        ImGui::TextWrapped("Structural observations unavailable. Choose LocalStructure at Reset; gas Thermal is a separate view.");return;
+        ImGui::TextWrapped("Structural observations unavailable. Gas Thermal is a separate view.");return;
     }
     if (view.owner!=owner) {view.owner=owner;view.page=0;view.surface=0;}
     const auto cavity=structuralCavity(*runtime,owner);

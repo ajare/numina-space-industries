@@ -365,9 +365,11 @@ void hullPlayback() {
         playback.togglePlaying();
         for (int frame=0;frame<600;++frame) playback.update(0.1);
         const auto state=playback.runtime()->snapshot();
-        require(state.healthy && state.thermal.hull.has_value(),"Playback omitted Hull");
-        require(state.thermal.hull->emittedEnergyKJ>0,"Playback Hull did not radiate");
-        require(state.thermal.hull->absorbedEnergyKJ==0,"Playback sky not dark");
+        const auto& structure=playback.runtime()->structuralSnapshot();
+        require(state.healthy && !structure.bodies.empty(),"Playback omitted local Hull panels");
+        require(!state.thermal.hull && state.thermalLinks.empty(),"Playback published legacy Hull");
+        require(structure.paths.exteriorRadiationJ>0,"Playback Hull did not radiate");
+        require(structure.paths.absorbedSolarJ==0,"Playback sky not dark");
         return state.atmospheres[0].temperatureC;
     };
     const auto bare=temperature(I::HullType::BareSkin);
@@ -445,9 +447,8 @@ void nativeSnapshots() {
 }
 void localStructuralPlayback() {
     using namespace station::editor;using I=nsi::core::Installation;
-    constexpr auto mode=nsi::systems::CellThermalMode::LocalStructure;
     I scene(1,1);scene.setHullType(I::HullType::BareSkin);const auto authored=scene;
-    SimulationPlayback playback(std::nullopt,mode);playback.reset(scene);
+    SimulationPlayback playback(std::nullopt);playback.reset(scene);
     require(playback.editingAllowed() && !playback.runtime()->structuralSnapshot().bodies.empty(),"Local-solid Reset failed");
     const auto energy=playback.runtime()->structuralSnapshot().solidEnergyJ;
     playback.togglePlaying();playback.setSpeedIndex(4);playback.update(0.1);
@@ -464,7 +465,7 @@ void localStructuralPlayback() {
     require(playback.runtime()->structuralSnapshot().paths==paths && playback.runtime()->structuralSnapshot().rates==rates,"Pause changed structural observations");
     playback.reset(scene);require(playback.runtime()->structuralSnapshot().paths==station::NativeThermalPaths{},"Reset retained heat paths");require(playback.editingAllowed() && playback.runtime()->structuralSnapshot().solidEnergyJ==energy,"Local Reset retained cooled energy");
     for (const double duration:{0.1,1.0}) {
-        CellPlaybackRuntime runtime(scene,{},std::nullopt,mode);require(runtime.update(0.1),"Local publication setup failed");
+        CellPlaybackRuntime runtime(scene,{},std::nullopt);require(runtime.update(0.1),"Local publication setup failed");
         const auto before=runtime.snapshot();const auto bodies=runtime.structuralSnapshot().bodies;
         const auto paths=runtime.structuralSnapshot().paths;const auto rates=runtime.structuralSnapshot().rates;
         require(!runtime.update(duration,4096,0),"Local facade ignored thermal refusal");
@@ -482,8 +483,8 @@ void failedPlaybackDebt() {
     auto yaml=scene.serialize();const auto preset=yaml.find("atmosphere: Earth-like");const auto line=yaml.rfind('\n',preset)+1;
     yaml.insert(yaml.find('\n',preset),"\n"+std::string(preset-line,' ')+"atmosphereLoads: {occupants: 1, sensibleHeatPerOccupantKW: 1e11}");
     scene.deserialize(yaml);
-    for (const auto mode:{nsi::systems::CellThermalMode::Geometry,nsi::systems::CellThermalMode::LocalStructure}) {
-    SimulationPlayback p(std::nullopt,mode);p.reset(scene);p.togglePlaying();p.toggleDoor(0,door);
+    {
+    SimulationPlayback p(std::nullopt);p.reset(scene);p.togglePlaying();p.toggleDoor(0,door);
     bool failed=false;try {p.update(0.1);} catch (const std::runtime_error&) {failed=true;}
     require(failed && !p.playing() && p.runtime()->snapshot().elapsedSeconds==0,"Work refusal did not pause/roll back playback");
     require(p.temperatureHistory(p.runtime()->snapshot().atmospheres[0].id).size()==1,"Refused update added history");

@@ -14,12 +14,12 @@ StationSystemsSettings lifecycleSettings(const nsi::systems::CellAtmosphereExpan
     settings.solarCycle=geometry.thermal.solarCycle;return settings;
 }
 }
-CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,CellObservationOptions options,StationSystemsSource source,nsi::systems::CellThermalMode mode)
-    :CellPlaybackRuntime(installation,nsi::systems::expandCellAtmosphere(installation,mode==nsi::systems::CellThermalMode::LocalStructure),
-        options,std::move(source),mode) {}
+CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,CellObservationOptions options,StationSystemsSource source)
+    :CellPlaybackRuntime(installation,nsi::systems::expandCellAtmosphere(installation),
+        options,std::move(source)) {}
 CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,nsi::systems::CellAtmosphereExpansion expansion,
-    CellObservationOptions options,StationSystemsSource source,nsi::systems::CellThermalMode mode)
-    :model_(std::move(expansion),mode),lifecycle_(lifecycleSettings(model_.geometry()),std::move(source)),
+    CellObservationOptions options,StationSystemsSource source)
+    :model_(std::move(expansion)),lifecycle_(lifecycleSettings(model_.geometry()),std::move(source)),
     aerodynamics_(model_.fluid().states().size()),options_(options),previous_(model_.sectors().size()) {
     diagnostics_.reserve(1);snapshot_.enabled=true;snapshot_.variableTimestep=true;snapshot_.systemsStepWorldTicks=0;
     const auto& geometry=model_.geometry();snapshot_.atmospheres.resize(geometry.atmospheres.size());
@@ -31,16 +31,14 @@ CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installa
         s.moistureAdditionPerOccupantKgPerS=a.moistureAdditionPerOccupantKgPerS;s.leakRateKgPerS=a.leakRateKgPerS;
         s.minPressureKPa=a.minPressureKPa;s.maxPressureKPa=a.maxPressureKPa;
         s.minOxygenPartialPressureKPa=a.minOxygenPartialPressureKPa;s.maxCarbonDioxidePartialPressureKPa=a.maxCarbonDioxidePartialPressureKPa;
-        s.spatial=true;s.inventoryThermodynamics=true;s.thermallyCoupled=std::any_of(geometry.thermal.links.begin(),geometry.thermal.links.end(),[&](const auto& link){return link.aAtmosphereId==a.id || link.bAtmosphereId==a.id;});
+        s.spatial=true;s.inventoryThermodynamics=true;
     }
     snapshot_.cellAtmospheres.resize(model_.fluid().states().size());
     for (std::size_t i=0;i<snapshot_.cellAtmospheres.size();++i) {
         const auto& c=model_.fluid().mesh().cells[i];const auto& grid=installation.level(c.level);auto& s=snapshot_.cellAtmospheres[i];
         s.level=c.level;s.gridIndex=c.gridIndex;s.sectorUid=grid.sectorAt(c.gridIndex%grid.width(),c.gridIndex/grid.width()).uid;
-    }
-    if (mode==nsi::systems::CellThermalMode::Geometry) for (const auto& link:geometry.thermal.links) {
-        StationThermalLinkSnapshot s;s.id=link.id;s.aAtmosphereId=link.aAtmosphereId;s.bAtmosphereId=link.bAtmosphereId;
-        s.aKind=link.aKind;s.bKind=link.bKind;s.conductanceKWPerK=link.conductanceKWPerK;snapshot_.thermalLinks.push_back(std::move(s));
+        if (model_.structuralSummary(geometry.gasOwners[i]).all.surfaces)
+            snapshot_.atmospheres[c.atmosphere].thermallyCoupled=true;
     }
     for (const auto& d:nsi::systems::expandDoors(installation)) if (d.pathway) {
         const auto it=std::find_if(geometry.doors.begin(),geometry.doors.end(),[&](const auto& x){return x.level==d.level && x.wall==d.wall;});
@@ -189,23 +187,6 @@ void CellPlaybackRuntime::publish(double seconds) {
     }
     for (auto& a:snapshot_.atmospheres) {
         a.belowPressureLimit=a.minCellPressureKPa<a.minPressureKPa;a.abovePressureLimit=a.maxCellPressureKPa>a.maxPressureKPa;
-    }
-    for (std::size_t i=0;i<snapshot_.thermalLinks.size();++i) {
-        auto& s=snapshot_.thermalLinks[i];const double energy=model_.thermal().linkEnergyJ[i]/1000;
-        s.flowRateKW=seconds>0 ? (energy-s.netTransferredKJ)/seconds : 0;s.netTransferredKJ=energy;
-        s.status=s.flowRateKW!=0 ? StationThermalLinkStatus::Active : StationThermalLinkStatus::Idle;
-    }
-    if (model_.thermal().hull) {
-        const auto& h=*model_.thermal().hull;const auto& cfg=*geometry.thermal.hull;
-        const auto previous=snapshot_.thermal.hull.value_or(StationHullSnapshot{});StationHullSnapshot s;
-        s.temperatureC=static_cast<double>(h.temperatureK-StationCelsiusOffset);
-        s.startingEnergyKJ=cfg.heatCapacityKJPerK*cfg.startingTemperatureC;s.currentEnergyKJ=cfg.heatCapacityKJPerK*s.temperatureC;
-        s.absorbedEnergyKJ=h.absorbedJ/1000;s.emittedEnergyKJ=h.emittedJ/1000;s.conductedKJ=h.conductedJ/1000;
-        if (seconds>0) {s.absorbedKW=(s.absorbedEnergyKJ-previous.absorbedEnergyKJ)/seconds;
-            s.emittedKW=(s.emittedEnergyKJ-previous.emittedEnergyKJ)/seconds;s.conductedKW=(s.conductedKJ-previous.conductedKJ)/seconds;}
-        s.residualKJ=s.startingEnergyKJ+s.absorbedEnergyKJ-s.emittedEnergyKJ+s.conductedKJ-s.currentEnergyKJ;
-        s.belowMin=s.temperatureC<cfg.minTemperatureC;s.aboveMax=s.temperatureC>cfg.maxTemperatureC;snapshot_.thermal.hull=s;
-        snapshot_.thermal.totalAbsorbedKW=s.absorbedKW;snapshot_.thermal.totalRejectedKW=s.emittedKW;
     }
     for (std::size_t i=0;i<paths_.size();++i) {
         auto& s=snapshot_.atmospherePathways[i];const auto& binding=paths_[i];const auto& q=model_.faceTransfers()[binding.face].q;

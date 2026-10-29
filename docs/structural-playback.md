@@ -1,18 +1,19 @@
-# Opt-in native local-solid playback (#29)
+# Native local-solid playback (#29)
 
-`CellThermalMode::LocalStructure` selects the #27 topology and #28 numerical
-solver **at construction/Reset only**. `Geometry` (shared Hull) remains the
-Editor default until #35. Standalone compartment APIs and YAML are unchanged.
+LocalStructure is the only native thermal backend, used by default at
+construction/Reset. The legacy Geometry shared-Hull/direct-gas backend and
+Editor selector have been removed at the owner's request. Standalone compartment
+APIs and YAML are unchanged. `CellThermalMode::Adiabatic` remains an explicit
+gas-only numerical test/benchmark mode, unavailable in Editor playback.
 
 ```cpp
-nsi::systems::CellAtmosphereTransport model(installation,
-    nsi::systems::CellThermalMode::LocalStructure);
-// Or construct SimulationPlayback(std::nullopt, CellThermalMode::LocalStructure)
-// in an Editor prototype host. No in-flight backend setter exists.
+nsi::systems::CellAtmosphereTransport model(installation);
+station::editor::SimulationPlayback playback;
+playback.reset(installation);
 ```
 
 For consumers editing an expansion before construction, use
-`expandCellAtmosphere(installation, true)`. This builds checked structural
+`expandCellAtmosphere(installation)`. This builds checked structural
 geometry and a world-coordinate source-Cell owner map. Passing an expansion
 without structural topology to LocalStructure refuses explicitly. Structural
 limits/errors remain separate from gas limits; see [topology](structural-topology.md).
@@ -31,7 +32,7 @@ enters pressure or sound speed. Solid connections persist through evacuation.
 Only one backend executes: LocalStructure constructs neither the legacy Hull
 state nor its direct gas-to-gas links. `hull: none` still produces no geometry
 thermal bodies/contacts. Missing Partition types remain opaque adiabatic
-boundaries. Unresolved reservoirs refuse as in Geometry mode.
+boundaries. Unresolved reservoirs refuse explicitly.
 
 Exterior solid sides use their own material emissivity and temperature. Solar
 input preserves the aggregate projected-area approximation: each exterior

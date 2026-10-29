@@ -1,5 +1,13 @@
 # Integrated serial thermal rollout review (#35)
 
+> **Current policy:** At the owner's request LocalStructure is now the only native
+> thermal backend. Geometry and the Editor selector have been removed. The
+> comparison measurements and gate decision below are historical evidence, not
+> current API/UI instructions. The performance target remains unmet; solver
+> limits, physical fidelity and explicit refusal behavior are unchanged. The
+> current integrated benchmark emits LocalStructure rows only.
+
+
 **Gate not passed. Production rollout is not approved.** The reusable playback
 APIs still default to Geometry. After this measurement, the owner explicitly
 requested LocalStructure enabled for hands-on testing: the Editor now selects it

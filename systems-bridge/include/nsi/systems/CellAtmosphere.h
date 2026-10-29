@@ -2,7 +2,6 @@
 #include <station/DiffuseRadiation.h>
 #include <nsi/systems/Atmosphere.h>
 #include <station/CellFluid.h>
-#include <station/CellThermal.h>
 #include <station/NativeThermal.h>
 #include <nsi/systems/StructuralTopology.h>
 #include <nsi/systems/StructuralObservations.h>
@@ -16,24 +15,19 @@ struct CellFluidDoor {
     double fullOpenFraction{}; // Door clear area / full fluid face area
     StructuralAssemblyId structuralId{};
 };
-struct CellThermalContact {
-    std::size_t a{},b{SIZE_MAX},link{}; // b missing: singleton Hull
-    double areaM2{},conductanceKWPerK{};
-};
 struct CellAtmosphereExpansion {
     station::CellFluidMesh mesh;
     std::vector<station::AtmosphereSettings> atmospheres;
     std::vector<CellFluidDoor> doors;
     ThermalExpansion thermal;
-    std::optional<StructuralTopology> structure; // constructed only for the Reset-selected candidate
+    std::optional<StructuralTopology> structure; // constructed at Reset for LocalStructure
     std::vector<StructuralOwner> gasOwners; // fluid index -> physical source Cell
-    std::vector<CellThermalContact> thermalContacts;
     // Level-local, row-major geometry -> active fluid Cell; missing is SIZE_MAX.
     std::vector<std::vector<std::size_t>> cellIndices;
 };
 // Authored geometry only; no simulation, no document mutations. Missing Walls
 // facing geometric Void/outside breach; unmodelled Interior never becomes vacuum.
-CellAtmosphereExpansion expandCellAtmosphere(const core::Installation&,bool localStructure=false);
+CellAtmosphereExpansion expandCellAtmosphere(const core::Installation&,bool localStructure=true);
 
 struct CellAtmosphereLedger {
     std::array<double,4> sourceKg{},transportedKg{},exteriorLostKg{},leakedKg{};
@@ -53,7 +47,8 @@ struct CellSectorAtmosphere {
     bool resolvedGas{};
     CellAtmosphereLedger ledger;
 };
-enum class CellThermalMode { Adiabatic, Geometry, LocalStructure };
+// Adiabatic is a gas-only numerical test/benchmark mode, not an Editor backend.
+enum class CellThermalMode { Adiabatic, LocalStructure };
 struct StructuralHeatRates {
     long double gasIntoSolidW{}, solidConductionMagnitudeW{}, interiorRadiationMagnitudeW{};
     long double portalEscapeW{}, exteriorRadiationW{}, absorbedSolarW{};
@@ -75,23 +70,13 @@ struct CellStructuralThermalState {
     std::size_t assemblies{}, solidContacts{}, gasContacts{}, exteriorContacts{}, cavities{}, portals{}, topologyStorageBytes{};
     std::size_t observationIndexPayloadBytes{}; // vector capacities + map value payloads; excludes allocator/tree overhead
 };
-struct CellHullThermalState {
-    long double temperatureK{};
-    double capacityJPerK{},startingEnergyJ{},absorbedJ{},emittedJ{},conductedJ{};
-    long double energyJ() const {return capacityJPerK*temperatureK;}
-    bool operator==(const CellHullThermalState&) const = default;
-};
-struct CellAtmosphereThermalState {
-    std::optional<CellHullThermalState> hull;
-    std::vector<double> linkEnergyJ;
-};
-// Native gas/load layer, optionally coupled to exactly one geometry heat backend.
+// Native gas/load layer coupled to LocalStructure; Adiabatic isolates gas tests.
 // Explicit reservoir references have no definitions in Installation expansion
-// and refuse Geometry mode. No StationSystemsRuntime runs alongside this layer.
+// and refuse thermal playback. No StationSystemsRuntime runs alongside this layer.
 class CellAtmosphereTransport {
 public:
-    explicit CellAtmosphereTransport(CellAtmosphereExpansion,CellThermalMode=CellThermalMode::Adiabatic);
-    explicit CellAtmosphereTransport(const core::Installation& installation,CellThermalMode mode=CellThermalMode::Adiabatic)
+    explicit CellAtmosphereTransport(CellAtmosphereExpansion,CellThermalMode=CellThermalMode::LocalStructure);
+    explicit CellAtmosphereTransport(const core::Installation& installation,CellThermalMode mode=CellThermalMode::LocalStructure)
         :CellAtmosphereTransport(expandCellAtmosphere(installation,mode==CellThermalMode::LocalStructure),mode) {}
     // Source/phase splitting is bounded to 0.1 s, including accelerated updates.
     // At most 4096 source slices and maxSubsteps acoustic steps per whole call.
@@ -104,7 +89,6 @@ public:
     const CellAtmosphereExpansion& geometry() const {return geometry_;}
     std::span<const CellSectorAtmosphere> sectors() const {return sectors_;}
     const CellAtmosphereMomentum& momentum() const {return momentum_;}
-    const CellAtmosphereThermalState& thermal() const {return thermal_;}
     std::size_t thermalIterations() const {return thermalIterations_;}
     CellThermalMode thermalMode() const {return mode_;}
     const CellStructuralThermalState& structure() const {return structure_;}
@@ -135,7 +119,6 @@ private:
     std::map<StructuralSurfaceId,std::size_t> surfaceBodies_;
     std::vector<std::pair<std::size_t,unsigned>> surfaceSlots_; // assembly/side in body order
     void sources(double seconds);
-    void thermalStep(double seconds,double midpoint,std::size_t maxIterations);
     void publish();
     void structuralStep(double seconds,double midpoint,std::size_t maxWork);
     CellAtmosphereExpansion geometry_;
@@ -148,10 +131,6 @@ private:
     double elapsed_{};
     station::CellFluidWork work_;
     CellAtmosphereMomentum momentum_;
-    CellAtmosphereThermalState thermal_;
-    std::optional<station::CellThermalSolver> thermalSolver_;
-    std::vector<long double> thermalCapacity_,thermalTemperature_;
-    std::vector<double> checkpointThermalLinks_;
     std::size_t thermalIterations_{};
     double thermalFluxResidual_{};
     CellThermalMode mode_;

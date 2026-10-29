@@ -124,7 +124,7 @@ void atmosphereSimulation(SectorSystemNode& node, const station::StationSystemsS
 
 SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& installation,
                                           std::size_t level, std::size_t sector,
-                                          const station::StationSystemsSnapshot* snapshot, bool localStructure) {
+                                          const station::StationSystemsSnapshot* snapshot) {
     SectorSystemsGraph result;
     if (level >= installation.levelCount() || sector >= installation.level(level).sectors().size()) {
         result.message = "No Sector selected.";
@@ -173,15 +173,6 @@ SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& instal
     }
     // LocalStructure's real sides/contacts live in the bounded structural view.
     // Keep authored gas/devices here without fabricating legacy geometry links.
-    const auto thermal=localStructure ? nsi::systems::ThermalExpansion{} : nsi::systems::expandThermal(installation);
-    for (const auto& link:thermal.links) {
-        if (!(link.aKind==ThermalNodeKind::Atmosphere && link.aAtmosphereId==atmosphere->id)
-            && !(link.bKind==ThermalNodeKind::Atmosphere && link.bAtmosphereId==atmosphere->id)) continue;
-        settings.thermalLinks.push_back(link);
-        if (link.aKind==ThermalNodeKind::Atmosphere) neighbours.insert(link.aAtmosphereId);
-        if (link.bKind==ThermalNodeKind::Atmosphere) neighbours.insert(link.bAtmosphereId);
-        if (link.aKind==ThermalNodeKind::Hull || link.bKind==ThermalNodeKind::Hull) settings.hull=thermal.hull;
-    }
     const auto allAtmospheres=nsi::systems::expandInstallation(installation);
     for (auto neighbour:allAtmospheres) {
         if (neighbour.id==atmosphere->id || !neighbours.contains(neighbour.id)) continue;
@@ -259,32 +250,6 @@ SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& instal
                 node.simulation.emplace_back("Flow convention","Last-step averages; positive leaves selected Sector");
             }
         }
-        else if (node.type=="Thermal link") {
-            const auto& link=*std::find_if(settings.thermalLinks.begin(),settings.thermalLinks.end(),
-                [&](const auto& link){return link.id==node.id;});
-            node.configuration={{"End A",link.aAtmosphereId},{"End B",link.bAtmosphereId},
-                {"Conductance",number(link.conductanceKWPerK,"kW/K")}};
-            const StationThermalLinkSnapshot* live=nullptr;
-            if (snapshot && snapshot->enabled)
-                for (const auto& candidate:snapshot->thermalLinks) if (candidate.id==node.id) live=&candidate;
-            liveStatus(node,live!=nullptr);
-            if (live) {
-                const double sign=link.aKind==ThermalNodeKind::Atmosphere && link.aAtmosphereId==atmosphere->id ? 1 : -1;
-                node.simulation.emplace_back("Heat flow (outward)",number(sign*live->flowRateKW,"kW"));
-                node.simulation.emplace_back("Net heat transferred (outward)",number(sign*live->netTransferredKJ,"kJ"));
-                node.simulation.emplace_back("Flow convention","Last-step average; positive leaves selected Sector");
-            }
-        }
-        else if (node.type=="Hull" && settings.hull) {
-            node.unresolved=false;
-            node.configuration.emplace_back("Emitting area",number(settings.hull->emittingAreaM2,"m2"));
-            const auto* live=snapshot && snapshot->enabled && snapshot->thermal.hull ? &*snapshot->thermal.hull : nullptr;
-            liveStatus(node,live!=nullptr);
-            if (live) {
-                node.simulation.emplace_back("Temperature",number(live->temperatureC,"C"));
-                node.simulation.emplace_back("Radiated heat",number(live->emittedKW,"kW"));
-            }
-        }
         else if (n.unresolved) {
             node.configuration.emplace_back("Reference", "Unresolved (not defined in this Installation)");
         } else if (!n.detail.empty()) node.configuration.emplace_back("Details", n.detail);
@@ -295,8 +260,6 @@ SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& instal
         }
         // Derived boundary nodes have no editable catalogue ports. Their
         // display-only connectors make real boundary crossings visible here.
-        if (node.type=="Hull")
-            node.ports.push_back({{"Hull",node.id,"Thermal links"},StationPortDirection::Output,false,"thermal-link-host"});
         if (node.type=="Exterior")
             node.ports.push_back({{"Exterior",node.id,"Boundary"},StationPortDirection::Output,false,"pathway-host"});
         result.nodes.push_back(std::move(node));

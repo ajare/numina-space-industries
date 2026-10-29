@@ -100,7 +100,7 @@ references refuse native playback rather than silently omitting their heat.
 The toolbar's **Render mode** combo switches between **Default** (the existing
 floor/void view), **Thermal (gas)** (live Cell atmosphere temperatures),
 **Pressure** (live absolute total pressure in kPa), and **Structure (surfaces)**
-(area-weighted exposed-side temperatures, opt-in LocalStructure backend). In Thermal
+(area-weighted exposed-side temperatures, LocalStructure backend). In Thermal
 mode, expand **Thermal rendering** in the left panel to adjust minimum, maximum
 and reference temperatures in Celsius (defaults: -273, 100 and 20). The scale
 interpolates blue → green → red, with pure green at the reference temperature;
@@ -166,32 +166,22 @@ do not edit the Installation or advance the simulation.
 
 ## Sector thermal inspection
 
-For opt-in local solids, choose **LocalStructure (candidate)** in the left
-panel's **Thermal backend (resets run)** combo while paused. This performs a full
-Reset; Geometry remains the default pending #35. **Structure (surfaces)** keeps
-solid temperatures separate from air, including warm surfaces in rooms without
-resolved gas. Select a Cell in Sector mode to inspect directional surface
-means/min/max, capacity/energy, heat-path ledgers, a bounded one-hop real-topology
-graph and simulation-time surface histories. See
-[Structural Editor observations](docs/structural-editor.md) for aggregation,
+**LocalStructure is the only native thermal backend**; there is no backend selector.
+**Structure (surfaces)** keeps solid temperatures separate from air, including
+warm surfaces in rooms without resolved gas. Select a Cell in Sector mode to
+inspect directional surface means/min/max, capacity/energy, heat-path ledgers,
+a bounded one-hop real-topology graph and simulation-time surface histories.
+See [Structural Editor observations](docs/structural-editor.md) for aggregation,
 diffuse well-mixed cavity/binary Door approximations, unavailable gaps and
-lifecycle semantics. Legacy cooldown indicators are not shown for LocalStructure.
+lifecycle semantics.
 
-With the default Geometry backend, choose Sector mode and select a Cell. The **Sector** panel's
-**Thermal** tab shows side, roof and exposed floor-underside skin areas,
-conductance and signed heat flow for every attached neighbour/Hull link.
-The **Systems graph** tab draws those connections; arrows follow the last
-simulation step's heat flow. Inspection remains available during playback.
-
-Timescales use the selected atmosphere's current inventory-dependent air capacity
-(authored capacity only before live data exists):
-`diffusion = C / G_neighbour`, `drain = C / G_hull`, in seconds. Each neighbour's
-ratio is `diffusion / drain`. These are local response times with the other
-endpoint held fixed, not two-body equilibration or nonlinear radiative cooling
-predictions. No Hull link means an infinite drain time (ratio zero for existing
-neighbour links); no links means thermally isolated. Void atmosphere presets
-have no compartment and no connections. Flow is unavailable without a runtime,
-and zero until the first simulation step.
+The **Sector / Thermal** tab reports gas thermal state and exterior skin areas;
+local solid temperatures and real thermal edges live in **Structure**. Legacy
+shared-Hull/direct-gas links, C/G cooldown indicators and their Systems graph
+are removed. Reset reconstructs the initial gas and solid state. The measured
+performance target is still unmet; accelerated updates may explicitly refuse
+without dropping time or changing fidelity. Standalone compartment APIs and
+Installation YAML remain unchanged.
 
 The Station Systems library needs no runtime asset installation and embeds its
 own default Lua. World-specific code, documents and assets remain in Promethium.

@@ -19,7 +19,7 @@ void drawInstallationRenderModeCombo(InstallationRenderSettings& settings) {
 void drawThermalRenderControls(InstallationRenderSettings& settings) {
     if (settings.mode != InstallationRenderMode::Thermal && settings.mode != InstallationRenderMode::Structure) return;
     if (settings.mode == InstallationRenderMode::Structure)
-        ImGui::TextWrapped("Structure: area-weighted temperature of all exposed sides owned by each Cell (walls, floor and ceiling). Not air temperature. Grey = no measured surfaces. Requires LocalStructure backend at Reset.");
+        ImGui::TextWrapped("Structure: area-weighted temperature of all exposed sides owned by each Cell (walls, floor and ceiling). Not air temperature. Grey = no measured surfaces. LocalStructure surfaces are independent of gas temperature.");
     if (ImGui::CollapsingHeader("Thermal rendering",ImGuiTreeNodeFlags_DefaultOpen)) {
         auto& scale = settings.thermal;
         // Keep the green anchor strictly inside the scale, including Ctrl-click

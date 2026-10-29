@@ -1,10 +1,10 @@
 # Systems bridge
 
-The opt-in [local-solid playback backend](../docs/structural-playback.md) (#29)
+The [local-solid playback backend](../docs/structural-playback.md) (#29)
 connects topology, pressure-dependent gas films and native thermal integration
 with atomic rollback and separate gas/solid observations. Select
 `CellThermalMode::LocalStructure` only at construction/Reset; the Editor default
-remains `Geometry` pending #35. Cavities and energy-preserving Door thermal poses are implemented (#30/#31); see `../docs/door-thermal-poses.md`.
+is LocalStructure; the legacy Geometry backend and Editor selector are removed. Cavities and energy-preserving Door thermal poses are implemented (#30/#31); see `../docs/door-thermal-poses.md`.
 
 [Committed structural observations](../docs/structural-observations.md) (#32)
 provide separate heat-path ledgers/rates, stable side identities, directional
@@ -123,12 +123,12 @@ suppresses all geometry-authored coupling.
 ## Native spatial gas layer and Editor playback
 
 `nsi/systems/CellAtmosphere.h` provides `expandCellAtmosphere` and
-`CellAtmosphereTransport`. Editor playback uses this transport in Geometry mode
-as its sole gas/heat runtime. The standalone transport's default `CellThermalMode::Adiabatic` keeps geometry heat disabled;
-`CellThermalMode::Geometry` enables native Hull/partition conduction and radiation.
-Explicit reservoir references have no definitions in Installation expansion and
-refuse Geometry mode instead of silently losing their coupling. The standalone
-compartment APIs above keep their existing behavior.
+`CellAtmosphereTransport`. Editor playback uses LocalStructure as its sole
+gas/heat runtime. The transport defaults to `CellThermalMode::LocalStructure`;
+`CellThermalMode::Adiabatic` is an explicit gas-only test/benchmark mode, not an
+Editor backend. Explicit reservoir references have no definitions in Installation
+expansion and refuse thermal playback instead of silently losing their coupling.
+The standalone compartment APIs above keep their existing behavior.
 
 Expansion produces one gas Cell per modelled Interior Cell at its authored base
 Level, with volume `12 m³ × Sector height`. All four faces are present; ordinary
@@ -140,13 +140,11 @@ Door actuation changes native face fractions only, never the authored document.
 The aperture flux is the spatial HLLE prototype, not a second application of the
 standalone compartment orifice flow.
 
-Cell thermal contacts localize the **unchanged** `expandThermal` conductance
-budgets to shared Walls, overlapping floors and exterior skin. Side areas retain
-height scaling, roofs/floors retain world-coordinate coverage rules, and absent
-exterior Walls do not acquire a new thermal skin area. Geometry mode solves these
-contacts after gas transport and source updates, using the **current Cell gas
-capacity**, never stale Sector capacity. Cross-Level heat contacts imply no gas
-exchange. Empty/unresolved gas nodes detach without discarding their inventory.
+Local structural assemblies, gas films and diffuse cavities replace the old
+shared-Hull/direct-gas contacts. Heat exchange uses current gas state and finite
+local solid capacity. Cross-Level solid contacts imply no gas exchange.
+Empty/unresolved gas detaches without discarding its inventory or solid state.
+See [local-solid playback](../docs/structural-playback.md).
 
 The transport layer applies configured occupancy, moisture and proportional
 leaks locally by Cell volume. Oxygen availability scales that Cell's CO2 and
@@ -159,11 +157,11 @@ in this layer.
 
 `advance(seconds, heatJ)` accepts optional **per-Cell joules for the whole call**
 from an external thermal source. In Adiabatic mode, omission leaves only the
-configured occupant/latent heat; in Geometry mode, these joules are **additional**
-to native Hull/partition heat. Do not supply the same contact flux twice. The
+configured occupant/latent heat; in LocalStructure mode, these joules are **additional**
+to native local-solid heat. Do not supply the same contact flux twice. The
 caller must commit any external body's opposite energy booking only after
 success. A failed acoustic/thermal budget, invalid heat input or numerical refusal
-restores the entire update's gas, Hull, heat-link/source/phase ledgers, momentum
+restores the entire update's gas, solids, thermal/source/phase ledgers, momentum
 balance and clock, including all already-completed source slices. The default
 whole-call budgets are 4096 acoustic steps, 4096 thermal iterations/analytical
 star solves and 4096 source slices. A refusal never commits partial time.

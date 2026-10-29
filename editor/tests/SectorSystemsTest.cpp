@@ -53,11 +53,11 @@ void projection() {
     const auto before = i.serialize();
     const auto graph = buildSectorSystemsGraph(i, 0, 0);
     require(graph.nodes.size() == 2 && graph.links.size() == 1, "Did not project atmosphere and authored coupling");
-    const auto local=buildSectorSystemsGraph(i,0,0,nullptr,true);
+    const auto local=buildSectorSystemsGraph(i,0,0,nullptr);
     require(local.nodes.size()==graph.nodes.size() && local.links.size()==graph.links.size(),
         "LocalStructure removed authored gas/reservoir configuration");
     Installation hull(1,1);
-    const auto active=buildSectorSystemsGraph(hull,0,0,nullptr,true);
+    const auto active=buildSectorSystemsGraph(hull,0,0,nullptr);
     require(std::none_of(active.nodes.begin(),active.nodes.end(),[](const auto& node){
         return node.type=="Hull" || node.type=="Thermal link";
     }),"LocalStructure configuration invented inactive legacy heat nodes");
@@ -126,7 +126,7 @@ void connectedGraph() {
     const auto graph=buildSectorSystemsGraph(i,0,left);
     require(std::count_if(graph.nodes.begin(),graph.nodes.end(),[](const auto& n){return n.type=="Atmosphere pathway";})==2,"Incident Door pathways absent or recursive");
     require(std::none_of(graph.nodes.begin(),graph.nodes.end(),[&](const auto& n){return n.id==rightId;}),"Graph recursively expanded through neighbour");
-    require(std::any_of(graph.nodes.begin(),graph.nodes.end(),[](const auto& n){return n.type=="Hull" && !n.unresolved;}),"Connected Hull is missing or unresolved");
+    require(std::none_of(graph.nodes.begin(),graph.nodes.end(),[](const auto& n){return n.type=="Hull" || n.type=="Thermal link";}),"Configuration graph invented legacy geometry heat nodes");
     require(std::any_of(graph.nodes.begin(),graph.nodes.end(),[](const auto& n){return n.type=="Exterior";}),"Exterior endpoint absent");
     auto hasPin=[&](const station::StationPinRef& pin) {
         for (const auto& n:graph.nodes) for (const auto& p:n.ports) if (p.reference==pin) return true;
@@ -137,7 +137,7 @@ void connectedGraph() {
         require(link.from.portName!="Gas out","Door incorrectly wired to Gas out instead of Hosted pathways");
     }
     require(std::count_if(graph.links.begin(),graph.links.end(),[](const auto& l){return l.to.nodeType=="Atmosphere pathway";})==4,"Door endpoint links incomplete");
-    require(std::any_of(graph.links.begin(),graph.links.end(),[](const auto& l){return l.from.portName=="Thermal links";}),"Thermal links not projected");
+    require(std::none_of(graph.links.begin(),graph.links.end(),[](const auto& l){return l.from.portName=="Thermal links";}),"Legacy thermal links projected");
     SimulationPlayback p; p.reset(i); p.togglePlaying();
     p.toggleDoor(0,g.verticalWall(2,2)); p.toggleDoor(0,g.verticalWall(0,2)); p.update(0.1);
     const auto snapshot=p.runtime()->snapshot();
@@ -157,7 +157,6 @@ void connectedGraph() {
             if (other!=neighbour.nodes.end())
                 require(std::abs(std::stod(liveField(node,"Nitrogen flow (outward)"))+std::stod(liveField(*other,"Nitrogen flow (outward)")))<1e-8,"Gas flow sign did not follow selected Sector");
         }
-        if (node.type=="Thermal link") require(!liveField(node,"Heat flow (outward)").empty(),"Thermal live heat flow absent");
     }
     // Every projected boundary and canonical connection must actually draw.
     ImGui::CreateContext();

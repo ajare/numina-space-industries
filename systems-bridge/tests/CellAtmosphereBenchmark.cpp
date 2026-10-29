@@ -27,7 +27,7 @@ int main(int argc,char** argv) {
                 a.co2ProductionPerOccupantKgPerS=0.000007;a.moistureAdditionPerOccupantKgPerS=0.000001;a.sensibleHeatPerOccupantKW=0.1;
             }
             if (scenario.ends_with("wave")) e.mesh.cells[32*64+32].initial.q[6]*=1.2;
-            CellAtmosphereTransport gas(std::move(e),thermal ? CellThermalMode::Geometry : CellThermalMode::Adiabatic);
+            CellAtmosphereTransport gas(std::move(e),thermal ? CellThermalMode::LocalStructure : CellThermalMode::Adiabatic);
             if (scenario.find("sustained")!=std::string::npos && !gas.advance(1)) {std::cerr<<gas.diagnostic()<<'\n';return 1;}
             const auto start=std::chrono::steady_clock::now();
             if (!gas.advance(seconds)) {std::cerr<<gas.diagnostic()<<'\n';return 1;}

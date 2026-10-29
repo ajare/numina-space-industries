@@ -234,20 +234,20 @@ void doorInput() {
     ImGui::DestroyContext();
 }
 void evacuatedThermalRendering() {
-    // Minimal replay of S0: decompression cools, the remaining trace gas warms
-    // from the Hull, then its temperature becomes unresolved (not cold again).
+    // LocalStructure decompression: render resolved gas from its own temperature,
+    // and label unresolved gas explicitly rather than as a cold surface.
     I scene(3,4);scene.setHullType(I::HullType::MultiLayerBlanket);
     const auto door=scene.level(0).verticalWall(3,1);scene.setDoor(0,door,true);
     CellPlaybackRuntime runtime(scene);runtime.setDoorOpen(0,door,true);
     InstallationRenderSettings settings;settings.mode=InstallationRenderMode::Thermal;
-    bool cooled=false,rewarmed=false,unresolved=false;
+    bool cooled=false,unresolved=false;
     for (int step=0;step<400;++step) {
         require(runtime.update(0.1),"Thermal decompression replay failed");const auto& snapshot=runtime.snapshot();
         const auto colours=cellRenderColours(scene,0,settings,&snapshot);
         for (const auto& c:snapshot.cellAtmospheres) {
             if (c.resolvedGas) {
                 cooled=cooled || c.temperatureC<0;
-                rewarmed=rewarmed || (cooled && c.temperatureC>18 && colours[c.gridIndex].green>0.99f);
+                require(colours[c.gridIndex]==*thermalColour(c.temperatureC,settings.thermal),"Gas colour did not match local gas temperature");
             } else {
                 unresolved=true;const auto colour=colours[c.gridIndex];
                 require(colour.red==colour.green && colour.green==colour.blue,
@@ -255,7 +255,7 @@ void evacuatedThermalRendering() {
             }
         }
     }
-    require(cooled && rewarmed && unresolved,"Thermal replay did not cover cold/warm/unresolved phases");
+    require(cooled && unresolved,"Thermal replay did not cover cooling/unresolved phases");
     settings.mode=InstallationRenderMode::Default;
     for (const auto& colour:cellRenderColours(scene,0,settings,&runtime.snapshot()))
         require(colour==defaultSectorColour(I::SectorType::Interior),"Unresolved marker changed Default rendering");

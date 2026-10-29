@@ -24,11 +24,10 @@ void inspect(const CellPlaybackRuntime& runtime) {
 }
 void check() {
     I scene(8,8);scene.setHullType(I::HullType::BareSkin);const auto authored=scene.serialize();
-    CellPlaybackRuntime legacy(scene);require(legacy.model().thermalMode()==CellThermalMode::Geometry,"Unapproved default rollout");
-    constexpr auto mode=CellThermalMode::LocalStructure;
+    CellPlaybackRuntime runtime(scene);require(runtime.model().thermalMode()==CellThermalMode::LocalStructure,"LocalStructure is not the default");
     for(double duration:{.1,1.}) {
-        CellPlaybackRuntime ordinary(scene,{true,true},std::nullopt,mode);
-        CellPlaybackRuntime explicitReset(scene,expandCellAtmosphere(scene,true),{true,true},std::nullopt,mode);
+        CellPlaybackRuntime ordinary(scene,{true,true},std::nullopt);
+        CellPlaybackRuntime explicitReset(scene,expandCellAtmosphere(scene,true),{true,true},std::nullopt);
         same(ordinary,explicitReset);
         const auto initial=ordinary.structuralSnapshot().solidEnergyJ;
         for(int i=0;i<3;++i) {
@@ -42,8 +41,8 @@ void check() {
         auto empty=expandCellAtmosphere(scene,true);
         for(auto& c:empty.mesh.cells) c.initial={};
         auto& cold=empty.structure->bodies.front();cold=station::ThermalBody({cold.capacityJPerK(),250});
-        CellPlaybackRuntime unselected(scene,empty,{true,true},std::nullopt,mode);
-        CellPlaybackRuntime selected(scene,std::move(empty),{true,true},std::nullopt,mode);
+        CellPlaybackRuntime unselected(scene,empty,{true,true},std::nullopt);
+        CellPlaybackRuntime selected(scene,std::move(empty),{true,true},std::nullopt);
         inspect(selected);const auto coldEnergy=selected.structuralSnapshot().bodies.front().energyJ();
         require(unselected.update(duration) && selected.update(duration),"Evacuated advance refused");
         same(unselected,selected);

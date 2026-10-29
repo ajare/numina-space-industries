@@ -33,7 +33,7 @@ void sameBodies(const std::vector<station::ThermalBody>& a,const std::vector<sta
 void check() {
     I room(1,1);room.setHullType(I::HullType::BareSkin);
     CellAtmosphereTransport runtime(room,CellThermalMode::LocalStructure);
-    require(!runtime.structure().bodies.empty() && !runtime.thermal().hull && runtime.thermal().linkEnergyJ.empty(),"Legacy and structural backends overlap");
+    require(!runtime.structure().bodies.empty(),"Structural backend missing");
     tracking=true;const bool ok=runtime.advance(0.1);tracking=false;
     require(ok && allocations==0,"Local-solid successful update failed/allocated");audit(runtime);
     require(runtime.structure().exteriorHeatJ<0,"Exterior solid radiation missing");

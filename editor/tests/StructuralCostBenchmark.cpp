@@ -26,8 +26,8 @@ int main(int argc,char** argv) {
         ImGui::CreateContext();ImPlot::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;
         io.DisplaySize={1200,1800};io.DeltaTime=1.0f/60;
         unsigned char* pixels;int width,height;io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
-        std::cout<<std::setprecision(9)<<"# serial; baseline=legacy-native; prototype=P1; material=C1-provisional; schema=4; trials="<<trials<<"; warmups=2\n";
-        std::cout<<"backend,scenario,seconds,build_ms,update_ms,max_update_ms,solver_ms,lifecycle_ms,publication_remainder_ms,gui_cpu_ms,per_0.1s_ms,bodies,panels,links,cavities,bytes,intervals,nonlinear,cg,matvec,residual_J,energy_residual_J,acoustic_steps,legacy_thermal_iterations,through_links,film_links,local_links\n";
+        std::cout<<std::setprecision(9)<<"# serial; baseline=LocalStructure; prototype=P1; material=C1-provisional; schema=4; trials="<<trials<<"; warmups=2\n";
+        std::cout<<"backend,scenario,seconds,build_ms,update_ms,max_update_ms,solver_ms,lifecycle_ms,publication_remainder_ms,gui_cpu_ms,per_0.1s_ms,bodies,panels,links,cavities,bytes,intervals,nonlinear,cg,matvec,residual_J,energy_residual_J,acoustic_steps,thermal_work,through_links,film_links,local_links\n";
         for (const std::string scenario:{"rest","loaded","breaches","sustained-breaches","evacuated","many-sectors","tall-offset","gradient"}) {
             const auto scene=fixture(scenario);
             for (double seconds:{0.1,1.0}) {
@@ -45,9 +45,9 @@ int main(int argc,char** argv) {
                         if (trial>=0) {build+=construction;total+=elapsed;maximum=std::max(maximum,elapsed);
                             solver+=timing.solverMicroseconds/1000;lua+=timing.luaMicroseconds/1000;display+=frame;
                             acoustic=runtime.model().work().substeps;thermal=runtime.model().thermalIterations();
-                            nodes=runtime.model().fluid().states().size()+(runtime.model().thermal().hull ? 1 : 0);contacts=runtime.model().geometry().thermalContacts.size();}
+                            nodes=runtime.model().fluid().states().size()+runtime.structuralSnapshot().bodies.size();contacts=runtime.structuralSnapshot().solidContacts+runtime.structuralSnapshot().gasContacts;}
                     }
-                    std::cout<<"legacy-native,"<<scenario<<','<<seconds<<','<<build/trials<<','<<total/trials<<','<<maximum<<','<<solver/trials<<','<<lua/trials<<','<<(total-solver-lua)/trials<<','<<display/trials<<','<<total/trials*0.1/seconds
+                    std::cout<<"LocalStructure,"<<scenario<<','<<seconds<<','<<build/trials<<','<<total/trials<<','<<maximum<<','<<solver/trials<<','<<lua/trials<<','<<(total-solver-lua)/trials<<','<<display/trials<<','<<total/trials*0.1/seconds
                         <<','<<nodes<<",0,"<<contacts<<",0,NA,NA,NA,NA,NA,NA,NA,"<<acoustic<<','<<thermal<<",NA,NA,NA\n";
                 }
                 for (int mode=0;mode<3;++mode) {

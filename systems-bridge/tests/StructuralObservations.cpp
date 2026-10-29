@@ -23,7 +23,7 @@ void check() {
     I off(1,1);off.setHullType(std::nullopt);
     CellAtmosphereTransport optedOut(off,CellThermalMode::LocalStructure);
     require(optedOut.structuralSectorSummary(0).all.surfaces==0 && optedOut.structuralSurfaces({0,0,0},{}).total==0,"Opt-out published structure");
-    CellAtmosphereTransport legacy(off,CellThermalMode::Geometry);
+    CellAtmosphereTransport legacy(off,CellThermalMode::Adiabatic);
     require(!legacy.structure().enabled && legacy.structuralSummary({0,0,0}).all.surfaces==0,"Legacy advertised structural observations");
     I tall(1,1);tall.setHullType(I::HullType::BareSkin);tall.addLevel(1,1);tall.setSector(0,0,"Tall",2);
     CellAtmosphereTransport height(tall,CellThermalMode::LocalStructure);

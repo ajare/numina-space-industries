@@ -193,7 +193,7 @@ int runEditor() {
     station::editor::EditorSession session;
     // Owner-requested candidate startup for hands-on testing (#35), not a
     // claim that the performance/default rollout gate has passed.
-    station::editor::SimulationPlayback simulation(std::nullopt,nsi::systems::CellThermalMode::LocalStructure);
+    station::editor::SimulationPlayback simulation;
     station::editor::StructuralPanelState structural_view;
     station::editor::SectorSystemsView sector_view;
     station::editor::InstallationRenderSettings render_settings;
@@ -468,13 +468,9 @@ int runEditor() {
         };
         if (const auto* runtime=simulation.runtime()) station::editor::drawSimulationTiming(runtime->stepTimings());
         else station::editor::drawSimulationTiming({});
-        ImGui::BeginDisabled(simulation.playing());
-        int backend=simulation.thermalMode()==nsi::systems::CellThermalMode::LocalStructure ? 1 : 0;
-        if (ImGui::Combo("Thermal backend (resets run)",&backend,"Geometry (legacy)\0LocalStructure (testing startup)\0"))
-            edit([&]{simulation.reset(session.installation(),backend ? nsi::systems::CellThermalMode::LocalStructure : nsi::systems::CellThermalMode::Geometry);});
-        ImGui::EndDisabled();
+        ImGui::TextUnformatted("Thermal backend: LocalStructure");
         ImGui::Text("Gas model: %.*s",static_cast<int>(station::CellFluidModelRevision.size()),station::CellFluidModelRevision.data());
-        ImGui::TextWrapped("LocalStructure starts enabled for testing. Performance gate failed; accelerated updates may refuse. Changing backend performs a full Reset.");
+        ImGui::TextWrapped("LocalStructure performance target is not yet met; accelerated updates may refuse.");
         station::editor::drawThermalRenderControls(render_settings);
         station::editor::drawPressureRenderControls(render_settings);
         if (!session.editingEnabled())
@@ -618,15 +614,13 @@ int runEditor() {
                     // attach telemetry from a preview of a different document.
                     const auto live = simulation.snapshotFor(session.installation());
                     const auto thermal = station::editor::sectorThermal(
-                        session.installation(),active_level,id,live ? &*live : nullptr,
-                        live && simulation.runtime()->structuralSnapshot().enabled);
+                        session.installation(),active_level,id,live ? &*live : nullptr);
                     station::editor::drawSectorThermal(thermal, thermal.atmosphere
                         ? simulation.temperatureHistory(thermal.atmosphere->id)
                         : std::span<const station::editor::TemperatureSample>{}, [&] {
-                            if (thermal.localStructure)
-                                ImGui::TextWrapped("Authored gas/devices; active local thermal edges are in Structure / real thermal topology.");
+                            ImGui::TextWrapped("Authored gas/devices; active local thermal edges are in Structure / real thermal topology.");
                             sector_view.draw(station::editor::buildSectorSystemsGraph(
-                                session.installation(),active_level,id,live ? &*live : nullptr,thermal.localStructure));
+                                session.installation(),active_level,id,live ? &*live : nullptr));
                         }, thermal.atmosphere ? simulation.pressureHistory(thermal.atmosphere->id)
                             : std::span<const station::editor::PressureSample>{},
                             thermal.atmosphere ? simulation.atmosphereHistory(thermal.atmosphere->id)

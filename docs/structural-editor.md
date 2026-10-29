@@ -1,12 +1,12 @@
 # Structural Editor observations (#33)
 
-## Opt-in and render modes
+## Thermal backend and render modes
 
-The left panel's **Thermal backend (resets run)** selects Geometry (unchanged
-default) or LocalStructure (candidate). It is disabled while playing; changing it
-explicitly performs a full Reset, clears history/time and initializes bodies.
-It is Editor state, not YAML. This is not default-rollout approval: physical
-presets and the serial performance review remain gated by #35.
+LocalStructure is the only native thermal backend. The backend ComboBox and
+legacy Geometry heat path have been removed at the owner's request. Reset
+clears history/time and initializes bodies. No backend selection is stored in
+YAML. The measured serial performance target remains unmet; accelerated updates
+may refuse explicitly, without changing solver limits or fidelity.
 
 **Thermal (gas)** retains gas-only temperatures and its grey unresolved state.
 **Pressure** remains gas pressure. **Structure (surfaces)** colours each Cell
@@ -20,8 +20,8 @@ any gas measurement. Evacuation does not turn solid temperatures into air data.
 Tall claims retain their physical source-Cell ownership.
 
 Render/inspection controls do not alter authored geometry, optional wind/force
-settings, gas EOS or save files. Backend changes are explicit Reset operations,
-never in-flight substitution. Standalone compartments remain unchanged.
+settings, gas EOS or save files. Reset reconstructs the initial thermal state;
+there is no in-flight substitution. Standalone compartments remain unchanged.
 
 ## Selection and readouts
 
@@ -43,8 +43,8 @@ committed time, energy residual and cavity closure diagnostics are shown.
 
 LocalStructure does not display legacy U-value gas-to-gas/Hull links, drain
 indicators or their Systems graph as though they were the active network. There
-is no whole-structure cooldown prediction. Geometry playback retains its legacy
-local C/G response diagnostics, explicitly not nonlinear cooling predictions.
+is no whole-structure cooldown prediction. The legacy shared-Hull/direct-gas
+displays have been removed.
 
 ## Bounded topology graph
 

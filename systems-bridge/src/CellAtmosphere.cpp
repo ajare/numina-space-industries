@@ -38,21 +38,6 @@ CellAtmosphereExpansion expandCellAtmosphere(const I& installation,bool localStr
             result.mesh.cells.push_back({volume,l,i,g,station::makeCellFluidState(mass,source.startingTemperatureC+station::StationCelsiusOffset)});
         }
     }
-    std::map<std::pair<std::string,std::string>,std::size_t> thermalLinks;
-    for (std::size_t i=0;i<result.thermal.links.size();++i) {
-        const auto& link=result.thermal.links[i];
-        thermalLinks.emplace(std::minmax(link.aAtmosphereId,link.bAtmosphereId),i);
-    }
-    auto contact=[&](std::size_t a,std::size_t b,double area) {
-        const auto& aid=result.atmospheres[result.mesh.cells[a].atmosphere].id;
-        const auto bid=b==SIZE_MAX ? std::string("hull") : result.atmospheres[result.mesh.cells[b].atmosphere].id;
-        const auto found=thermalLinks.find(std::minmax(aid,bid));if (found==thermalLinks.end() || !(area>0)) return;
-        const auto link=found->second;
-        if (result.thermal.links[link].aAtmosphereId!=aid) std::swap(a,b);
-        if (a==SIZE_MAX) throw std::logic_error("Expanded Hull link has reversed endpoints");
-        result.thermalContacts.push_back({a,b,link,area,0});
-    };
-    std::vector<double> skin(result.mesh.cells.size(),0);
     for (std::size_t l=0;l<installation.levelCount();++l) {
         const auto& grid=installation.level(l);const auto horizontal=std::size_t(grid.width())*(std::size_t(grid.depth())+1);
         struct Endpoint {std::size_t cell{SIZE_MAX};bool exterior{true};};
@@ -83,39 +68,8 @@ CellAtmosphereExpansion expandCellAtmosphere(const I& installation,bool localStr
                 result.doors[door].fullOpenFraction=core::DoorOpeningAreaM2/area;
             }
             result.mesh.faces.push_back(face);
-            const auto& ac=result.mesh.cells[a];
-            const auto ah=installation.level(ac.level).sectorAt(ac.gridIndex%grid.width(),ac.gridIndex/grid.width()).height;
-            if (b==SIZE_MAX && (type==I::WallType::Exterior || (type==I::WallType::Door && exterior))) skin[a]+=area*ah;
-            if (b!=SIZE_MAX && (type==I::WallType::Interior || type==I::WallType::Door)
-                && ac.atmosphere!=result.mesh.cells[b].atmosphere) {
-                const auto& bc=result.mesh.cells[b];
-                const auto bh=grid.sectorAt(bc.gridIndex%grid.width(),bc.gridIndex/grid.width()).height;
-                contact(a,b,area*std::min(ah,bh));
-            }
         }
     }
-    for (std::size_t i=0;i<result.mesh.cells.size();++i) {
-        const auto& c=result.mesh.cells[i];const auto& grid=installation.level(c.level);
-        const auto x=std::int64_t(c.gridIndex%grid.width()),y=std::int64_t(c.gridIndex/grid.width());
-        const auto height=grid.sectorAt(x,y).height;
-        const auto wx=std::int64_t(grid.offsetX())+x,wy=std::int64_t(grid.offsetY())+y;
-        const auto top=c.level+std::size_t(height);const double floorArea=core::CellWidthM*core::CellDepthM;
-        if (!installation.interiorAtWorld(top,wx,wy)) skin[i]+=floorArea;
-        if (c.level==0 || !installation.interiorAtWorld(c.level-1,wx,wy)) skin[i]+=floorArea;
-        if (top<installation.levelCount()) {
-            const auto& upper=installation.level(top);
-            const auto ux=wx-upper.offsetX(),uy=wy-upper.offsetY();
-            if (ux>=0 && uy>=0 && ux<upper.width() && uy<upper.depth()) {
-                const auto b=result.cellIndices[top][std::size_t(uy)*upper.width()+std::size_t(ux)];
-                if (b!=SIZE_MAX) contact(i,b,floorArea);
-            }
-        }
-        contact(i,SIZE_MAX,skin[i]);
-    }
-    std::vector<double> areas(result.thermal.links.size(),0);
-    for (const auto& c:result.thermalContacts) areas[c.link]+=c.areaM2;
-    for (auto& c:result.thermalContacts) c.conductanceKWPerK=result.thermal.links[c.link].conductanceKWPerK*c.areaM2/areas[c.link];
-    for (std::size_t i=0;i<areas.size();++i) if (!(areas[i]>0)) throw std::logic_error("Thermal link has no Cell contacts");
     return result;
 }
 
@@ -252,27 +206,6 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
         for (const auto& state:fluid_.states()) structure_.startingEnergyJ+=state.q[6];
         structure_.currentEnergyJ=structure_.startingEnergyJ;
     }
-    if (mode==CellThermalMode::Geometry) {
-        const auto n=fluid_.states().size();
-        if (const auto& h=geometry_.thermal.hull) {
-            const double capacity=h->heatCapacityKJPerK*1000;
-            const long double t=h->startingTemperatureC+station::StationCelsiusOffset;
-            const double energy=static_cast<double>(capacity*t);
-            if (!std::isfinite(capacity) || !std::isfinite(energy)) throw std::invalid_argument("Spatial Hull energy exceeds finite range");
-            thermal_.hull=CellHullThermalState{t,capacity,energy,0,0,0};
-        }
-        std::vector<station::CellThermalLink> links;links.reserve(geometry_.thermalContacts.size());
-        for (const auto& c:geometry_.thermalContacts) {
-            if (c.a>=n || (c.b!=SIZE_MAX && c.b>=n) || c.link>=geometry_.thermal.links.size()
-                || (c.b==SIZE_MAX && !thermal_.hull)) throw std::invalid_argument("Invalid spatial thermal contact");
-            links.push_back({c.a,c.b==SIZE_MAX ? n : c.b,c.conductanceKWPerK*1000});
-        }
-        if (!links.empty() || thermal_.hull) {
-            thermalCapacity_.resize(n+(thermal_.hull ? 1 : 0));thermalTemperature_.resize(thermalCapacity_.size());
-            thermalSolver_.emplace(thermalCapacity_.size(),std::move(links));
-        }
-        thermal_.linkEnergyJ.resize(geometry_.thermal.links.size());checkpointThermalLinks_.resize(thermal_.linkEnergyJ.size());
-    }
     publish();momentum_.starting=momentum_.current;
 }
 void CellAtmosphereTransport::sources(double seconds) {
@@ -343,7 +276,7 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
     const auto count=std::size_t(slices);
     std::copy(fluid_.states().begin(),fluid_.states().end(),checkpoint_.begin());
     std::copy(ledger_.begin(),ledger_.end(),checkpointLedger_.begin());
-    const auto checkpointMomentum=momentum_;const auto checkpointHull=thermal_.hull;
+    const auto checkpointMomentum=momentum_;
     const auto previousWork=work_;const auto previousIterations=thermalIterations_;const auto previousResidual=thermalFluxResidual_;
     const auto previousReport=structure_.work;
     const auto previousExterior=structure_.exteriorHeatJ;
@@ -352,7 +285,6 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
     std::copy(faceTransfers_.begin(),faceTransfers_.end(),checkpointTransfers_.begin());
     work_={};thermalIterations_=0;thermalFluxResidual_=0;structure_.work={};
     std::fill(faceTransfers_.begin(),faceTransfers_.end(),station::CellFluidState{});
-    std::copy(thermal_.linkEnergyJ.begin(),thermal_.linkEnergyJ.end(),checkpointThermalLinks_.begin());
     try {
         work_.resting=true;double remaining=seconds;
         for (std::size_t slice=0;slice<count;++slice) {
@@ -381,7 +313,6 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
             sources(dt/2);
             if (mode_==CellThermalMode::LocalStructure)
                 structuralStep(dt,elapsed_+seconds-remaining-dt/2,maxThermalIterations-structure_.work.work);
-            else thermalStep(dt,elapsed_+seconds-remaining-dt/2,maxThermalIterations-thermalIterations_);
             for (std::size_t i=0;i<fluid_.states().size();++i) {
                 auto& ledger=ledger_[fluid_.mesh().cells[i].atmosphere];
                 if (!heatJ.empty() && heatJ[i]!=0) {
@@ -406,53 +337,13 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
         elapsed_+=seconds;return true;
     } catch (const std::exception& e) {
         diagnostic_=e.what();fluid_.restore(checkpoint_);std::copy(checkpointLedger_.begin(),checkpointLedger_.end(),ledger_.begin());
-        momentum_=checkpointMomentum;thermal_.hull=checkpointHull;
-        std::copy(checkpointThermalLinks_.begin(),checkpointThermalLinks_.end(),thermal_.linkEnergyJ.begin());
+        momentum_=checkpointMomentum;
         std::copy(checkpointBodies_.begin(),checkpointBodies_.end(),structure_.bodies.begin());
         structure_.exteriorHeatJ=previousExterior;structure_.work=previousReport;structure_.paths=previousPaths;
         work_=previousWork;thermalIterations_=previousIterations;thermalFluxResidual_=previousResidual;
         std::copy(checkpointTransfers_.begin(),checkpointTransfers_.end(),faceTransfers_.begin());
         return false;
     }
-}
-void CellAtmosphereTransport::thermalStep(double seconds,double midpoint,std::size_t maxIterations) {
-    if (!thermalSolver_) return;
-    const auto n=fluid_.states().size();
-    double absorbedKW=0;
-    if (const auto& h=geometry_.thermal.hull) {
-        const station::ProfileSettings defaultProfile{};
-        const auto& profile=geometry_.thermal.solarCycle ? *geometry_.thermal.solarCycle : defaultProfile;
-        const double exposure=station::evaluateStationProfile(profile,midpoint);
-        absorbedKW=h->absorptivity*h->projectedAreaM2*h->fullSunIrradianceKWPerM2*exposure;
-    }
-    auto radiate=[&] {
-        if (!thermal_.hull) return;
-        auto& body=*thermal_.hull;
-        const auto result=station::integrateCellHullRadiation(*geometry_.thermal.hull,body.temperatureK,absorbedKW,seconds/2);
-        if (!result) throw std::runtime_error("Spatial Hull radiation integration failed");
-        body.temperatureK+=result->temperatureChangeK;body.absorbedJ+=result->absorbedJ;body.emittedJ+=result->emittedJ;
-    };
-    radiate();
-    for (std::size_t i=0;i<n;++i) {
-        const auto& p=fluid_.primitives()[i];
-        thermalCapacity_[i]=p.resolvedGas ? p.capacityJPerK : 0;
-        thermalTemperature_[i]=p.resolvedGas ? p.temperatureK : 0;
-    }
-    if (thermal_.hull) {thermalCapacity_[n]=thermal_.hull->capacityJPerK;thermalTemperature_[n]=thermal_.hull->temperatureK;}
-    const bool solved=thermalSolver_->solve(thermalCapacity_,thermalTemperature_,seconds,std::min(std::size_t(256),maxIterations));
-    thermalIterations_+=thermalSolver_->iterations();
-    thermalFluxResidual_=std::max(thermalFluxResidual_,thermalSolver_->maxFluxResidualJ());
-    if (!solved) throw std::runtime_error(thermalSolver_->diagnostic());
-    const auto heat=thermalSolver_->heatJ();
-    for (std::size_t i=0;i<n;++i) if (heat[i]!=0) {
-        fluid_.addHeat(i,heat[i]);ledger_[fluid_.mesh().cells[i].atmosphere].conductedHeatJ+=heat[i];
-    }
-    if (thermal_.hull) {
-        thermal_.hull->temperatureK+=heat[n]/thermal_.hull->capacityJPerK;thermal_.hull->conductedJ+=heat[n];
-    }
-    const auto transfers=thermalSolver_->transferredJ();
-    for (std::size_t i=0;i<transfers.size();++i) thermal_.linkEnergyJ[geometry_.thermalContacts[i].link]+=transfers[i];
-    radiate();
 }
 void CellAtmosphereTransport::structuralStep(double seconds,double midpoint,std::size_t maxWork) {
     if (!structuralSolver_) return;

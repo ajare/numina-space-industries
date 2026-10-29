@@ -1,5 +1,17 @@
 # Local structural thermal state for native playback
 
+**Policy amendment — sole native backend:** The owner explicitly requested
+LocalStructure as the only native thermal backend and removal of Geometry and
+the Editor backend selector. This supersedes the prototype/default-retention
+policy below: native playback and reusable transport now default to
+LocalStructure, with no legacy shared-Hull/direct-gas heat path. The Editor has
+no backend-selection API. Explicit Adiabatic transport remains solely for
+isolated gas tests/benchmarks; standalone compartment behavior and YAML are
+unchanged. This is a deliberate rollout decision despite the unmet measured
+performance target, not a claim that the gate passed. Work budgets, energy
+bounds, fidelity and refusal/rollback contracts are unchanged.
+
+
 **Status: Accepted architecture contract; implementation and physical defaults pending review gates.** Recorded for [#23](https://github.com/ajare/numina-space-industries/issues/23), under the authoritative [#22 specification](https://github.com/ajare/numina-space-industries/issues/22). This amends [ADR-0002](0002-geometry-authored-thermal-coupling.md) and the thermal representation in [ADR-0004](0004-cell-atmosphere-and-horizontal-momentum.md) **for native Editor playback only**. It does not claim the upgraded backend is implemented or approve its default rollout.
 
 The current single Hull temperature and gas-mediated partition links cannot retain local structural thermal history after evacuation. Replace those native geometry heat paths with finite-capacity local solids, pressure-dependent gas contact and diffuse cavity radiation, rather than adding hidden capacity to gas or running two geometry heat models together. The standalone compartment runtime retains its existing behaviour and ADR-0002 representation.
@@ -9,7 +21,7 @@ The current single Hull temperature and gas-mediated partition links cannot reta
 - **Core** owns authored Installation geometry, Hull/Partition choices and versioned intensive material/preset descriptions. It remains independent of simulation and Lua. No temperatures, runtime inventories or numerical solver state belong in core.
 - **systems-bridge** expands geometry/presets into deduplicated assemblies, side ownership, physical contacts, gas contacts, cavities and portals at Reset. Stable assembly/surface identifiers derive from physical geometry and side ownership, not mutable Sector indices. The bridge hosts playback orchestration and snapshot adaptation, not a second numerical implementation.
 - **station-systems** owns native numerical body/contact state, conserved inventories, sparse conduction/contact/radiation integration, energy ledgers, deterministic work budgets and rollback. Its reusable finite-capacity body/contact interface may later serve objects without importing Installation geometry.
-- **Editor** owns authoring, Reset-only prototype backend controls and observations. Separate gas and surface temperatures, capacities, stored energies and heat-path ledgers must be labelled explicitly; structural temperature is not a substitute for unresolved gas temperature. Histories use committed simulation time and unavailable observations are gaps. Topology displays must be bounded rather than recursively drawing every surface.
+- **Editor** owns authoring, Reset and observations. Separate gas and surface temperatures, capacities, stored energies and heat-path ledgers must be labelled explicitly; structural temperature is not a substitute for unresolved gas temperature. Histories use committed simulation time and unavailable observations are gaps. Topology displays must be bounded rather than recursively drawing every surface.
 
 This is a target ownership contract, not a description of completed migration: the existing bridge `CellAtmosphereRuntime` currently holds the shared-Hull thermal state/orchestration. Later implementation tickets move the new numerical state behind station-systems APIs without reversing dependencies. Public names remain `station::`, `StationSystems::StationSystems` and `Promethium::Serialization`.
 
@@ -49,7 +61,7 @@ The diffuse approximation ignores intra-Sector visibility/occlusion and must be 
 
 Diagnostics and benchmark records must identify the selected native thermal backend, **thermal-model revision and material/preset revision**, separately from save-schema version. Report node/link/memory counts, work/refinement counts, residuals and explicit refusals so changed physical defaults can be distinguished from data migrations and numerical failures.
 
-Prototype comparisons may select one backend **at Reset only**. Reset constructs a fresh consistently initialized state; no mid-run swap may create/delete structural energy. The upgraded backend replaces, never supplements, the old shared-Hull/direct-gas geometry path. Retain the existing default until the rollout gate is explicitly approved. Slow hardware must never trigger automatic fidelity reduction, state merging, hidden work-limit increases or backend substitution.
+Prototype comparisons may select one backend **at Reset only**. Reset constructs a fresh consistently initialized state; no mid-run swap may create/delete structural energy. The upgraded backend replaces, never supplements, the old shared-Hull/direct-gas geometry path. The sole-backend policy amendment above supersedes retention of the old default. Slow hardware must never trigger automatic fidelity reduction, state merging, hidden work-limit increases or backend substitution.
 
 ## Calibration and measured-performance gates
 

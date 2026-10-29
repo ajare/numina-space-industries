@@ -54,8 +54,8 @@ I sceneFor(const std::string& name,unsigned size) {
     }
     return scene;
 }
-CellAtmosphereExpansion expansionFor(const I& scene,const std::string& name,CellThermalMode mode) {
-    auto g=expandCellAtmosphere(scene,mode==CellThermalMode::LocalStructure);
+CellAtmosphereExpansion expansionFor(const I& scene,const std::string& name) {
+    auto g=expandCellAtmosphere(scene);
     for(auto& c:g.mesh.cells) {
         if(name=="gradient" && c.gridIndex%scene.level(c.level).width()<scene.level(c.level).width()/2) {
             std::array<double,4> mass{};std::copy_n(c.initial.q.begin(),4,mass.begin());
@@ -81,21 +81,20 @@ void prepare(CellPlaybackRuntime& runtime,const I& scene,const std::string& name
 // Real headless panel/grid colour generation, not GPU rendering. GUI uses the
 // authored preset state, not controlled initial-state injection; see report.
 struct GuiCost {double frameMs{}, presetHostUpdateMs{};};
-GuiCost gui(const I& scene,CellThermalMode mode,double seconds) {
-    SimulationPlayback p(std::nullopt,mode);p.setObservationOptions({true,true});p.reset(scene);
+GuiCost gui(const I& scene,double seconds) {
+    SimulationPlayback p(std::nullopt);p.setObservationOptions({true,true});p.reset(scene);
     p.setSpeedIndex(seconds==1 ? 4 : 2);p.togglePlaying();
     const auto updateStart=Clock::now();p.update(.1);const auto hostMs=ms(updateStart);p.togglePlaying();
     require(std::abs(p.runtime()->snapshot().elapsedSeconds-seconds)<1e-12,"GUI setup duration");
     StructuralPanelState state;state.sector=true;
     const auto& owner=p.runtime()->model().geometry().gasOwners.front();
-    InstallationRenderSettings settings;settings.mode=mode==CellThermalMode::LocalStructure ? InstallationRenderMode::Structure : InstallationRenderMode::Thermal;
+    InstallationRenderSettings settings;settings.mode=InstallationRenderMode::Structure;
     double total=0;
     for(int frame=-2;frame<5;++frame) {
         const auto start=Clock::now();
         const auto colours=cellRenderColours(scene,0,settings,&p.runtime()->snapshot(),&p.runtime()->model());
         ImGui::NewFrame();ImGui::SetNextWindowSize({1200,2200});ImGui::Begin("Integrated gate");
-        if(mode==CellThermalMode::LocalStructure) drawStructuralPanel(p,owner,state);
-        else drawSectorThermal(sectorThermal(scene,0,0,&p.runtime()->snapshot()),{},{},{},{});
+        drawStructuralPanel(p,owner,state);
         drawSimulationTiming(p.runtime()->stepTimings());ImGui::End();ImGui::Render();
         require(colours.size()==scene.level(0).cellCount(),"Grid colour count");
         if(frame>=0) total+=ms(start);
@@ -127,14 +126,14 @@ int main(int argc,char** argv) {
         std::cout<<"backend,model_revision,preset_revision,scenario,seconds,accepted,diagnostic,build_ms,prepare_ms,update_ms,max_update_ms,solver_ms,lifecycle_ms,publication_remainder_ms,gui_cpu_ms,preset_editor_update_ms,per_0.1s_ms,gas_cells,bodies,assemblies,solid_links,film_links,exterior_links,cavities,portals,cpp_live_bytes,cpp_build_peak_bytes,topology_bound_bytes,observation_payload_bytes,acoustic_steps,work,intervals,refinements,nonlinear,linear,nonlinear_residual_J,flux_residual_J,thermal_energy_residual_J,global_residual_J,cumulative_ledger_magnitude_J,solid_delta_J,elapsed_delta_s\n";
         for(const std::string name:{"rest","cooling","loaded","gradient","breaches","sustained-breaches","sustained-vacuum","evacuated","repressurisation","many-sectors","tall-offset"}) {
             const auto scene=sceneFor(name,size);
-            for(double seconds:{.1,1.}) for(auto mode:{CellThermalMode::Geometry,CellThermalMode::LocalStructure}) {
+            for(double seconds:{.1,1.}) {
                 double build=0,prep=0,total=0,maximum=0,solver=0,lifecycle=0;
                 std::size_t bytes=0,peak=0,acoustic=0,cells=0;
                 CellStructuralThermalState state;long double solidDelta=0,heatScale=0;double elapsedDelta=0;
                 std::optional<bool> accepted;std::string diagnostic;
                 for(int trial=-2;trial<trials;++trial) {
                     const auto base=liveBytes;peakBytes=base;const auto start=Clock::now();
-                    CellPlaybackRuntime runtime(scene,expansionFor(scene,name,mode),{true,true},std::nullopt,mode);
+                    CellPlaybackRuntime runtime(scene,expansionFor(scene,name),{true,true},std::nullopt);
                     const double construction=ms(start);const auto resident=liveBytes-base,constructionPeak=peakBytes-base;
                     auto stamp=Clock::now();prepare(runtime,scene,name);const auto preparation=ms(stamp);
                     const auto energy=runtime.structuralSnapshot().solidEnergyJ;const auto time=runtime.model().elapsedSeconds();
@@ -144,7 +143,7 @@ int main(int argc,char** argv) {
                     if(!ok) diagnostic=runtime.model().diagnostic();
                     require(std::abs(runtime.model().elapsedSeconds()-time-(ok ? seconds : 0))<1e-12,"Lost physical time/rollback");
                     if(!ok) require(runtime.structuralSnapshot().solidEnergyJ==energy,"Refusal changed committed solid energy");
-                    if(ok && mode==CellThermalMode::LocalStructure) {
+                    if(ok) {
                         // Numerical thermal closure is enforced by the real solver.
                         // Report cumulative global cancellation separately: the
                         // Sector net ledgers cannot reconstruct sum(abs(node heat)).
@@ -162,8 +161,8 @@ int main(int argc,char** argv) {
                         state=runtime.structuralSnapshot();heatScale=cumulativeLedgerMagnitude(runtime);solidDelta=state.solidEnergyJ-energy;elapsedDelta=runtime.model().elapsedSeconds()-time;
                     }
                 }
-                const auto display=gui(scene,mode,seconds);const auto& w=state.work;
-                std::cout<<(mode==CellThermalMode::LocalStructure ? "LocalStructure" : "Geometry")<<','
+                const auto display=gui(scene,seconds);const auto& w=state.work;
+                std::cout<<"LocalStructure"<<','
                     <<(state.enabled ? state.modelRevision : "legacy-native")<<','<<(state.enabled ? state.presetRevision : "legacy")<<','<<name<<','<<seconds<<','<<*accepted<<','<<diagnostic<<','
                     <<build/trials<<','<<prep/trials<<','<<total/trials<<','<<maximum<<',';
                 if(*accepted) std::cout<<solver/trials<<','<<lifecycle/trials<<','<<(total-solver-lifecycle)/trials;
