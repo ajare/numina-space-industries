@@ -83,6 +83,12 @@ add_test(NAME station-library-configuration COMMAND station-configuration-consum
 set_tests_properties(station-library-configuration PROPERTIES
     LABELS "station;functional;validation-fast" TIMEOUT 30)
 
+add_executable(station-native-thermal-consumer NativeThermalConsumer.cpp)
+target_link_libraries(station-native-thermal-consumer PRIVATE StationSystems::StationSystems)
+add_test(NAME station-native-thermal-consumer COMMAND station-native-thermal-consumer)
+set_tests_properties(station-native-thermal-consumer PROPERTIES
+    LABELS "station;functional;validation-fast" TIMEOUT 30)
+
 add_executable(station-thermal-body-consumer ThermalBodyConsumer.cpp)
 target_link_libraries(station-thermal-body-consumer PRIVATE StationSystems::StationSystems)
 add_test(NAME station-thermal-body-consumer COMMAND station-thermal-body-consumer)

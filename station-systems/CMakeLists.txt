@@ -66,6 +66,7 @@ add_library(StationSystems STATIC
     src/CellAerodynamics.cpp
     src/CellThermal.cpp
     src/ThermalBody.cpp
+    src/NativeThermal.cpp
     src/StationSystemsSnapshot.cpp
     src/StationSystemsTrends.cpp
     src/StationThermalMetrics.cpp

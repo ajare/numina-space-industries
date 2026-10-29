@@ -4,10 +4,11 @@ This is an **opt-in candidate API**, not an enabled playback backend or approval
 of physical defaults. [ADR-0007](adr/0007-native-structural-thermal-contract.md),
 [#22](https://github.com/ajare/numina-space-industries/issues/22),
 [C1 calibration](thermal-calibration.md) and the [P1 cost review](structural-cost-review.md)
-remain authoritative. Geometry expansion (#27), the variable/nonlinear solver
-(#28), playback integration (#29), cavities/portals and rollout (#35) are later
-work. No concurrent second heat model, object inventory, placement, anonymous
-Sector mass or parallelisation is introduced here.
+remain authoritative. Geometry expansion (#27) and the opt-in
+[variable/nonlinear solver (#28)](native-thermal-solver.md) are now available as
+separate components. Playback integration (#29), cavities/portals and rollout
+(#35) remain later work. No concurrent second heat model, object inventory,
+placement, anonymous Sector mass or parallelisation is introduced here.
 
 ## Core intensive descriptions
 
@@ -139,8 +140,9 @@ anchors, and unchanged serialization/standalone/playback suites. Tests check
 passivity/refusals, frozen values, enum compatibility, physical capacity budgets,
 carried-energy restoration, same-temperature addition, isolated gas + two-body
 conservation/equilibrium, gas EOS independence and pressure/mixture sweeps.
-The consumer uses the existing constant-link solver as a fixture only; it does
-not stand in for #28's required variable-contact/nonlinear solver.
+This API consumer uses the existing constant-link solver as a fixture only;
+#28's separate `station-native-thermal-consumer` exercises the new opt-in
+variable-contact/nonlinear numerical layer.
 
 Validation for this change: full incremental Release build succeeded; all **133**
 CTest tests passed with `ctest --test-dir build-linux -C Release -j 16
