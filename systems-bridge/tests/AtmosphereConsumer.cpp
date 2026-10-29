@@ -48,6 +48,16 @@ void thermalExpansion() {
         require(station::validateStationSystemsSettings(settings,diagnostic),diagnostic.c_str());
         return settings;
     };
+    // Authoring a Door changes neither closed-wall conduction nor Hull area.
+    Installation doors(5,5); const auto grid=doors.level(0);
+    for (unsigned x=0;x<5;++x) doors.toggleWall(0,grid.horizontalWall(x,2));
+    const auto solid=expandThermal(doors);
+    doors.setDoor(0,grid.horizontalWall(2,2),true);
+    doors.setDoor(0,grid.horizontalWall(2,0),true);
+    const auto withDoors=expandThermal(doors);
+    require(withDoors.links==solid.links,"Door lost closed-wall thermal coupling");
+    require(withDoors.hull==solid.hull,"Exterior Door changed Hull");
+    require(expandInstallation(doors).size()==2,"Door merged atmosphere compartments");
     Installation single(1,1);
     auto settings=scene(single);
     require(settings.hull && settings.thermalLinks.size()==1,"One hull and drain");

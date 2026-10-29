@@ -28,12 +28,13 @@ enum class DeckPointerPhase {
 
 // The pointer event for this frame. `cell` is the Cell under the pointer,
 // empty when the pointer is off the Level — a drag may wander outside it.
-enum class EditMode { Cell, Wall, Sector };
+enum class EditMode { Cell, Wall, Sector, Door };
 
 struct DeckPointerEvent {
     DeckPointerPhase phase = DeckPointerPhase::None;
     std::optional<DeckCellCoord> cell;
     std::optional<std::size_t> wall;
+    bool erase = false; // Right-click in Door mode.
 };
 
 DeckPointerEvent drawDeckGrid(const char* id, const station::editor::Level& level,

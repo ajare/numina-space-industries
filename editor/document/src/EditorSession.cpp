@@ -157,6 +157,9 @@ void EditorSession::toggleWall(std::size_t l,std::size_t w) {
     paintWallStroke(w);
     endStroke();
 }
+void EditorSession::setDoor(std::size_t l,std::size_t w,bool present) {
+    edit([&](auto& i){ i.setDoor(l,w,present); });
+}
 void EditorSession::beginWallStroke(std::size_t l,std::size_t w) {
     if (!mEditingEnabled) return;
     endStroke();

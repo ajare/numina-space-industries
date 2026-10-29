@@ -34,6 +34,7 @@ public:
     void paintStroke(std::uint32_t x, std::uint32_t y);
     void endStroke();
     void toggleWall(std::size_t level, std::size_t wall);
+    void setDoor(std::size_t level, std::size_t wall, bool present);
     // Starting on None paints present Walls; starting on a Wall erases.
     // Each visited edge chooses Interior/Exterior from its adjacent Cells.
     void beginWallStroke(std::size_t level, std::size_t wall);

@@ -7,7 +7,7 @@ They do not provide support for old document formats.
 
 ## Authoring
 
-The toolbar ComboBox or plain C/W/S keys select Cell/Wall/Sector mode.
+The toolbar ComboBox or plain C/W/S/D keys select Cell/Wall/Sector/Door mode.
 Shortcuts are disabled while entering text, using modifiers, or interacting
 with a popup. Switching mode finishes any current paint stroke.
 
@@ -23,6 +23,12 @@ Modes:
   Each visited edge uses Interior/Exterior classification from its adjacent Cells,
   and revisiting an edge never toggles it again. Sectors rebuild live and the
   whole drag is one undo step. Ineligible Void/Void edges are skipped.
+- **Door**: left-click the nearest edge to place a Door; right-click clears the
+  edge to None. Doors appear cyan, with green/red placement previews. Each click
+  is one undo step. A Door needs solid collinear Walls at both ends and cannot
+  share an endpoint with another Door. Edits removing its supports are rejected;
+  remove the Door first. Doors remain Sector boundaries and retain wall thermal
+  coupling; opening/closing and gas pathways are not yet authored.
 - **Sector**: click a Cell to select its Sector. The left collapsible inspector
   edits its name and Interior height and displays type, cached area and Level index.
 

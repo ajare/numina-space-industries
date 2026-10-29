@@ -17,7 +17,7 @@ public:
     struct WiringLayer { bool operator==(const WiringLayer&) const = default; };
     struct PipingLayer { bool operator==(const PipingLayer&) const = default; };
     enum class SectorType { Void, Interior };
-    enum class WallType { None, Interior, Exterior };
+    enum class WallType { None, Interior, Exterior, Door };
     enum class HullType { BareSkin, StandardInsulated, MultiLayerBlanket };
     // Jointly calibrated provisional engineering assumptions; see ADR-0002.
     struct HullSpec {
@@ -129,6 +129,8 @@ public:
         // Horizontal edges first (width * (depth+1)), then vertical edges.
         std::size_t horizontalWall(std::uint32_t x, std::uint32_t y) const;
         std::size_t verticalWall(std::uint32_t x, std::uint32_t y) const;
+        // Doors need solid collinear supports and cannot share an endpoint.
+        bool canPlaceDoor(std::size_t wall) const;
         // Standalone Level editing; Installation editing also checks occupancy.
         void setCell(std::uint32_t x, std::uint32_t y, SectorType type);
         bool operator==(const Level&) const = default;
@@ -144,6 +146,7 @@ public:
         WallType eligibleWall(std::size_t wall) const;
         void rebuild(const std::vector<SectorType>& types);
         void toggleWall(std::size_t wall);
+        void validateDoors() const;
     };
 
     explicit Installation(std::uint32_t width = 16, std::uint32_t depth = 16);
@@ -173,6 +176,7 @@ public:
     void setCell(std::size_t level, std::uint32_t x, std::uint32_t y, SectorType type);
     void toggleCell(std::size_t level, std::uint32_t x, std::uint32_t y);
     void toggleWall(std::size_t level, std::size_t wall);
+    void setDoor(std::size_t level, std::size_t wall, bool present);
     void setSector(std::size_t level, std::size_t sector, std::string name, int height);
     void setOffset(std::size_t level, int x, int y);
     void addLevel(std::uint32_t width, std::uint32_t depth, int x = 0, int y = 0);

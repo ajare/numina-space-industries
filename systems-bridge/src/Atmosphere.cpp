@@ -115,7 +115,8 @@ ThermalExpansion expandThermal(const core::Installation& installation) {
             const auto& grid = installation.level(l);
             auto shared = [&](std::uint32_t ax, std::uint32_t ay,
                               std::uint32_t bx, std::uint32_t by, std::size_t wall, double edge) {
-                if (grid.walls()[wall].type != core::Installation::WallType::Interior) return;
+                const auto type=grid.walls()[wall].type;
+                if (type != core::Installation::WallType::Interior && type != core::Installation::WallType::Door) return;
                 const auto& a = grid.sectorAt(ax, ay);
                 const auto& b = grid.sectorAt(bx, by);
                 if (a.uid == b.uid || a.type != core::Installation::SectorType::Interior

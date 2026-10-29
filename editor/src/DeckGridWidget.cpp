@@ -55,7 +55,8 @@ DeckPointerEvent drawDeckGrid(const char* id,
     const ImVec2 grid_size(cell * static_cast<float>(level.width()),
                           cell * static_cast<float>(level.depth()));
 
-    ImGui::InvisibleButton(id, grid_size);
+    ImGui::InvisibleButton(id, grid_size, ImGuiButtonFlags_MouseButtonLeft |
+        (mode==EditMode::Door ? ImGuiButtonFlags_MouseButtonRight : 0));
 
     const ImVec2 origin = ImGui::GetItemRectMin();
     ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -115,14 +116,18 @@ DeckPointerEvent drawDeckGrid(const char* id,
     for (std::size_t i=0;i<level.walls().size();++i) {
         auto type=level.walls()[i].type;
         if (type!=WallType::None)
-            drawWall(i,type==WallType::Exterior ? IM_COL32(245,180,95,255) : IM_COL32(215,225,235,255),3.0f);
+            drawWall(i,type==WallType::Door ? IM_COL32(70,210,225,255) :
+                type==WallType::Exterior ? IM_COL32(245,180,95,255) : IM_COL32(215,225,235,255),
+                type==WallType::Door ? 6.0f : 3.0f);
     }
-    if (mode==EditMode::Wall && ImGui::IsItemHovered() && wall)
-        drawWall(*wall,IM_COL32(100,255,140,255),5.0f);
+    if ((mode==EditMode::Wall || mode==EditMode::Door) && ImGui::IsItemHovered() && wall) {
+        const bool valid=mode!=EditMode::Door || level.canPlaceDoor(*wall);
+        drawWall(*wall,valid ? IM_COL32(100,255,140,255) : IM_COL32(255,100,100,255),5.0f);
+    }
     const std::optional<DeckCellCoord> under =
         cellAt(origin, cell, level, io.MousePos);
 
-    if (mode!=EditMode::Wall && ImGui::IsItemHovered() && under.has_value()) {
+    if (mode!=EditMode::Wall && mode!=EditMode::Door && ImGui::IsItemHovered() && under.has_value()) {
         const ImVec2 a(origin.x + cell * static_cast<float>(under->x),
                       origin.y + cell * static_cast<float>(under->y));
         if (thermalColours.empty())
@@ -136,6 +141,7 @@ DeckPointerEvent drawDeckGrid(const char* id,
     if (ImGui::IsItemActivated()) {
         event.phase = DeckPointerPhase::Press;
         event.cell = under;
+        event.erase = mode==EditMode::Door && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
     } else if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         event.phase = DeckPointerPhase::Drag;
         event.cell = under;
@@ -144,6 +150,8 @@ DeckPointerEvent drawDeckGrid(const char* id,
         event.cell = under;
     }
 
+    if (mode==EditMode::Door && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+        event.phase=DeckPointerPhase::Release;
     event.wall=wall;
     const std::optional<DeckCellCoord> readout =
         ImGui::IsItemHovered() ? under : std::nullopt;

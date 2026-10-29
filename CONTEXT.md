@@ -29,7 +29,10 @@ The Sector type indicating empty space with no floor, distinct from the Void atm
 A Sector's starting atmosphere condition, independent of its size: Earth-like specifies gas composition, pressure, temperature and humidity, while Void means no atmosphere compartment, not a zero-pressure compartment. Unlike the Void Sector type, the Void atmosphere preset can describe an Interior Sector with a floor but no compartment.
 
 **Wall**:
-A shared edge between neighbouring Cells, or an edge at a Level's boundary. A present Wall is Interior between two Interior Cells and Exterior between Interior and Void or outside the grid; an absent Wall is None.
+A shared edge between neighbouring Cells, or an edge at a Level's boundary. An ordinary present Wall is Interior between two Interior Cells and Exterior between Interior and Void or outside the grid; an absent Wall is None. A Door is a special present Wall.
+
+**Door**:
+A special Wall occupying one edge, supported by solid collinear Walls at both ends. Doors cannot share an endpoint and remain Sector boundaries.
 
 **Hull type**:
 An Installation-wide choice of exterior thermal assembly, characterised by thermal transmittance and radiative properties. The Hull is the physical skin enclosing the Installation, not the empty space outside or an individual geometric edge.

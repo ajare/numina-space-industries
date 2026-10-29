@@ -391,6 +391,7 @@ int runEditor() {
             if (ImGui::IsKeyPressed(ImGuiKey_C, false)) requested_mode = static_cast<int>(EditMode::Cell);
             else if (ImGui::IsKeyPressed(ImGuiKey_W, false)) requested_mode = static_cast<int>(EditMode::Wall);
             else if (ImGui::IsKeyPressed(ImGuiKey_S, false)) requested_mode = static_cast<int>(EditMode::Sector);
+            else if (ImGui::IsKeyPressed(ImGuiKey_D, false)) requested_mode = static_cast<int>(EditMode::Door);
             if (requested_mode != mode_index) {
                 session.endStroke();
                 mode_index = requested_mode;
@@ -398,7 +399,7 @@ int runEditor() {
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(140);
-        if (ImGui::Combo("Mode", &mode_index, "Cell (C)\0Wall (W)\0Sector (S)\0")) session.endStroke();
+        if (ImGui::Combo("Mode", &mode_index, "Cell (C)\0Wall (W)\0Sector (S)\0Door (D)\0")) session.endStroke();
         const auto mode=static_cast<EditMode>(mode_index);
         ImGui::SameLine();
         station::editor::drawInstallationRenderModeCombo(render_settings);
@@ -560,6 +561,8 @@ int runEditor() {
                     session.beginWallStroke(active_level,*pointer.wall);
                     session.paintWallStroke(*pointer.wall);
                 }
+                else if (mode==EditMode::Door && pointer.wall)
+                    session.setDoor(active_level,*pointer.wall,!pointer.erase);
                 else if (mode==EditMode::Sector) selected_cell=pointer.cell;
                 else if (mode==EditMode::Cell && pointer.cell) {
                     session.beginStroke(active_level,pointer.cell->x,pointer.cell->y);

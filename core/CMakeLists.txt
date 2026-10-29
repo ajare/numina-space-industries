@@ -35,6 +35,12 @@ target_include_directories(nsi-core PUBLIC
 )
 
 if(BUILD_TESTING)
+    add_executable(nsi-core-doors tests/Doors.cpp)
+    target_link_libraries(nsi-core-doors PRIVATE nsi::core)
+    add_test(NAME nsi-core-doors COMMAND nsi-core-doors)
+    set_tests_properties(nsi-core-doors PROPERTIES
+        LABELS "core;persistence;functional;validation-fast" TIMEOUT 30)
+
     add_executable(nsi-core-serialization tests/InstallationSerialization.cpp)
     target_link_libraries(nsi-core-serialization PRIVATE nsi::core)
     add_test(NAME nsi-core-serialization COMMAND nsi-core-serialization)

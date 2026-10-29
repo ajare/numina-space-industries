@@ -34,6 +34,7 @@ const char* typeName(Installation::WallType t) {
     switch (t) {
         case Installation::WallType::Interior: return "Interior";
         case Installation::WallType::Exterior: return "Exterior";
+        case Installation::WallType::Door: return "Door";
         default: return "None";
     }
 }
@@ -111,6 +112,37 @@ Installation::WallType Installation::Level::eligibleWall(std::size_t wall) const
     auto inside=[&](int i) { return i>=0 && sectors_[cells_[i].sector].type==SectorType::Interior; };
     const bool ia=inside(a), ib=inside(b);
     return ia && ib ? WallType::Interior : ia || ib ? WallType::Exterior : WallType::None;
+}
+bool Installation::Level::canPlaceDoor(std::size_t wall) const {
+    if (wall>=walls_.size() || eligibleWall(wall)==WallType::None) return false;
+    auto solid=[&](std::size_t w) {
+        return walls_[w].type==WallType::Interior || walls_[w].type==WallType::Exterior;
+    };
+    const auto horizontal=std::size_t(width_)*(std::size_t(depth_)+1);
+    std::uint32_t x,y;
+    bool alongX=wall<horizontal;
+    if (alongX) {
+        x=static_cast<std::uint32_t>(wall%width_); y=static_cast<std::uint32_t>(wall/width_);
+        if (x==0 || x+1>=width_ || !solid(horizontalWall(x-1,y)) || !solid(horizontalWall(x+1,y))) return false;
+    } else {
+        const auto i=wall-horizontal;
+        x=static_cast<std::uint32_t>(i%(std::size_t(width_)+1));
+        y=static_cast<std::uint32_t>(i/(std::size_t(width_)+1));
+        if (y==0 || y+1>=depth_ || !solid(verticalWall(x,y-1)) || !solid(verticalWall(x,y+1))) return false;
+    }
+    auto clearEndpoint=[&](std::uint32_t px,std::uint32_t py) {
+        auto otherDoor=[&](std::size_t w) { return w!=wall && walls_[w].type==WallType::Door; };
+        return !( (px>0 && otherDoor(horizontalWall(px-1,py)))
+            || (px<width_ && otherDoor(horizontalWall(px,py)))
+            || (py>0 && otherDoor(verticalWall(px,py-1)))
+            || (py<depth_ && otherDoor(verticalWall(px,py))) );
+    };
+    return clearEndpoint(x,y) && clearEndpoint(x+(alongX ? 1 : 0),y+(alongX ? 0 : 1));
+}
+void Installation::Level::validateDoors() const {
+    for (std::size_t w=0;w<walls_.size();++w)
+        if (walls_[w].type==WallType::Door)
+            require(canPlaceDoor(w),"Door requires solid Walls at both ends and no adjacent Door");
 }
 // Flood-fill same-type Cells across absent Walls. Preserve metadata by overlap:
 // each old Sector gives its name only to its largest surviving fragment.
@@ -204,6 +236,7 @@ void Installation::Level::setCell(std::uint32_t x,std::uint32_t y,SectorType typ
     auto i=index(x,y);
     require(type==SectorType::Void || type==SectorType::Interior,"Invalid Cell type");
     if (cell(x,y)==type) return;
+    auto before=*this;
     std::vector<SectorType> types;
     for (const auto& c:cells_) types.push_back(sectors_[c.sector].type);
     types[i]=type;
@@ -215,11 +248,13 @@ void Installation::Level::setCell(std::uint32_t x,std::uint32_t y,SectorType typ
         const auto [a,b]=wallCells(w);
         const bool ia=a>=0 && types[a]==SectorType::Interior;
         const bool ib=b>=0 && types[b]==SectorType::Interior;
+        if (walls_[w].type==WallType::Door) continue;
         if (ia != ib) walls_[w].type=WallType::Exterior;
         else if (!ia || walls_[w].type==WallType::Exterior) walls_[w].type=WallType::None;
         // A still-valid authored Interior Wall remains Interior.
     }
-    rebuild(types);
+    try { rebuild(types); validateDoors(); }
+    catch (...) { *this=std::move(before); throw; }
 }
 void Installation::Level::toggleWall(std::size_t wall) {
     auto& w=walls_.at(wall);
@@ -242,6 +277,19 @@ void Installation::toggleCell(std::size_t l,std::uint32_t x,std::uint32_t y) {
 }
 void Installation::toggleWall(std::size_t l,std::size_t wall) {
     Installation next=*this; next.levels_.at(l).toggleWall(wall); next.validate(); *this=std::move(next);
+}
+void Installation::setDoor(std::size_t l,std::size_t wall,bool present) {
+    Installation next=*this;
+    auto& grid=next.levels_.at(l);
+    auto& edge=grid.walls_.at(wall);
+    if (present) {
+        require(grid.canPlaceDoor(wall),"Door requires solid Walls at both ends and no adjacent Door");
+        edge.type=WallType::Door;
+        std::vector<SectorType> types;
+        for (const auto& c:grid.cells_) types.push_back(grid.sectors_[c.sector].type);
+        grid.rebuild(types);
+    } else if (edge.type!=WallType::None) grid.toggleWall(wall);
+    next.validate(); *this=std::move(next);
 }
 void Installation::setSector(std::size_t l,std::size_t sector,std::string name,int height) {
     Installation next=*this; auto& s=next.levels_.at(l).sectors_.at(sector);
@@ -273,6 +321,7 @@ void Installation::validate() const {
     std::size_t compartments=0;
     for (std::size_t l=0;l<levels_.size();++l) {
         const auto& grid=levels_[l];
+        grid.validateDoors();
         for (const auto& s:grid.sectors_) {
             if (s.type==SectorType::Interior && s.atmosphere!=AtmospherePreset::Void)
                 ++compartments;
@@ -366,7 +415,8 @@ double Installation::sideExteriorAreaM2(std::size_t l, std::size_t sector) const
     if (s.type == SectorType::Void) return 0.0;
     double area = 0.0;
     for (std::size_t w = 0; w < grid.walls_.size(); ++w) {
-        if (grid.walls_[w].type != WallType::Exterior) continue;
+        if (grid.walls_[w].type != WallType::Exterior
+            && !(grid.walls_[w].type==WallType::Door && grid.eligibleWall(w)==WallType::Exterior)) continue;
         const auto [a, b] = grid.wallCells(w);
         if ((a >= 0 && grid.cells_[a].sector == int(sector))
             || (b >= 0 && grid.cells_[b].sector == int(sector))) {
@@ -523,9 +573,10 @@ void Installation::deserialize(const std::string& text) {
             for (const auto& s:grid.sectors_) require(s.area>0,"Empty Sector");
             auto ws=n["walls"]; require(ws.IsSequence() && ws.size()==grid.walls_.size(),"Invalid Wall count");
             for (std::size_t i=0;i<ws.size();++i) {
-                auto t=ws[i].as<std::string>(); require(t=="None" || t=="Interior" || t=="Exterior","Invalid Wall type");
-                auto type=t=="None" ? WallType::None : t=="Interior" ? WallType::Interior : WallType::Exterior;
-                require(type==WallType::None || type==grid.eligibleWall(i),"Wall classification conflicts with Cells");
+                auto t=ws[i].as<std::string>(); require(t=="None" || t=="Interior" || t=="Exterior" || t=="Door","Invalid Wall type");
+                auto type=t=="None" ? WallType::None : t=="Interior" ? WallType::Interior : t=="Door" ? WallType::Door : WallType::Exterior;
+                require(type==WallType::None || type==grid.eligibleWall(i)
+                    || (type==WallType::Door && grid.eligibleWall(i)!=WallType::None),"Wall classification conflicts with Cells");
                 grid.walls_[i].type=type;
             }
             // Verify topology without altering serialized Sector ordering/metadata.

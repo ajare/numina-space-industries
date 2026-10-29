@@ -116,6 +116,37 @@ void runtimeColours() {
     require(sectorRenderColours(session.installation(),0,render,&cooled)[0]==
         defaultSectorColour(I::SectorType::Interior),"Switching back failed to restore Default");
 }
+void doorInput() {
+    ImGui::CreateContext();
+    auto& io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize={1024,768}; io.DeltaTime=1/60.0f;
+    unsigned char* pixels; int width,height; io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
+    I installation(5,5); const auto door=installation.level(0).horizontalWall(2,2);
+    installation.toggleWall(0,installation.level(0).horizontalWall(1,2));
+    installation.toggleWall(0,installation.level(0).horizontalWall(3,2));
+    ImVec2 origin;
+    auto frame=[&]() {
+        ImGui::NewFrame(); ImGui::SetNextWindowPos({40,40}); ImGui::SetNextWindowSize({700,600});
+        ImGui::Begin("Door input"); origin=ImGui::GetCursorScreenPos();
+        const auto event=drawDeckGrid("Doors",installation.level(0),EditMode::Door);
+        ImGui::End(); ImGui::Render(); return event;
+    };
+    frame(); frame();
+    io.AddMousePosEvent(origin.x+2.5f*34,origin.y+2*34); frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);
+    auto event=frame();
+    require(event.phase==DeckPointerPhase::Press && event.wall==door && !event.erase,
+        "Door left-click did not request placement on nearest Wall");
+    installation.setDoor(0,*event.wall,!event.erase);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Right,true);
+    event=frame();
+    require(event.phase==DeckPointerPhase::Press && event.wall==door && event.erase,
+        "Door right-click did not request erasure");
+    installation.setDoor(0,*event.wall,!event.erase);
+    require(installation.level(0).walls()[door].type==I::WallType::None,"Right-click did not clear Door");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Right,false); frame();
+    ImGui::DestroyContext();
+}
 void gridRendering() {
     ImGui::CreateContext();
     auto& io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize={1024,768}; io.DeltaTime=1/60.0f;
@@ -148,6 +179,6 @@ void gridRendering() {
 }
 }
 int main() {
-    try { scaleMapping(); runtimeColours(); gridRendering(); }
+    try { scaleMapping(); runtimeColours(); doorInput(); gridRendering(); }
     catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

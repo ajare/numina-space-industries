@@ -22,7 +22,7 @@ metres, including internal Void boundaries. `exteriorSkin` additionally reports
 roof and exposed floor underside area using world-coordinate volume coverage.
 
 Levels expose read-only Cells, Sectors, Walls and bounds. Use Installation
-commands (`setCell`, `toggleWall`, `setSector`, `setOffset`, `addLevel`,
+commands (`setCell`, `toggleWall`, `setDoor`, `setSector`, `setOffset`, `addLevel`,
 `removeTopLevel`) for validated edits. A Cell references its Sector by integer
 index; a Sector carries its containing Level index. Areas are cached Cell
 counts, not calculated by scanning Cells on access.
@@ -41,6 +41,15 @@ carry Exterior Walls. Void/Void edges cannot carry Walls. Cell painting updates
 its four adjoining edges: Interior/Void and Interior/outside boundaries receive
 Exterior Walls; obsolete Exterior Walls and Void/Void Walls are removed.
 Still-valid authored Interior Walls are preserved. Unrelated Walls are unchanged.
+
+`WallType::Door` is a special present Wall on an Interior or Exterior edge.
+`setDoor(level, wall, true)` places one, including in a supported gap;
+`setDoor(level, wall, false)` clears the edge to None. `Level::canPlaceDoor`
+checks for solid collinear Walls at both ends and no Door sharing either
+endpoint. Doors block Sector flood fill and retain ordinary wall thermal
+coupling. Edits that invalidate existing Doors are rejected transactionally,
+including Cell edits that remove their supports. YAML stores the `Door` Wall
+value; loading validates its placement. There is no open/closed state yet.
 
 Sectors are flood-filled connected components of same-type Cells across None
 Walls. Changes rebuild components and cached areas. The largest surviving

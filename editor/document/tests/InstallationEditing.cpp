@@ -55,6 +55,30 @@ void automaticWalls() {
         check(wall.type == W::None, "Erasing floor removes all now-invalid Walls");
     session.undo(); check(session.installation() == partitioned, "Undo erasure restores authored and automatic Walls");
 }
+void doorEditing() {
+    EditorSession session; session.newDocument(5,5);
+    const auto grid=session.installation().level(0);
+    const auto door=grid.horizontalWall(2,2);
+    for (unsigned x:{0,1,3,4}) session.toggleWall(0,grid.horizontalWall(x,2));
+    const auto before=session.installation();
+    session.setDoor(0,door,true);
+    const auto placed=session.installation();
+    check(placed.level(0).walls()[door].type==I::WallType::Door,"Session failed to place Door");
+    session.undo(); check(session.installation()==before,"Undo Door failed");
+    session.redo(); check(session.installation()==placed,"Redo Door failed");
+    refused([&]{session.toggleWall(0,grid.horizontalWall(1,2));});
+    check(session.installation()==placed,"Rejected support removal changed document");
+    session.setEditingEnabled(false);
+    session.setDoor(0,door,false);
+    check(session.installation()==placed,"Door edit bypassed playback lock");
+    session.setEditingEnabled(true);
+    session.setDoor(0,door,false);
+    check(session.installation()==before,"Door erasure failed");
+    session.undo(); check(session.installation()==placed,"Undo Door erasure failed");
+    session.redo(); check(session.installation()==before,"Redo Door erasure failed");
+    session.setDoor(0,door,false); // No-op must not add history.
+    session.undo(); check(session.installation()==placed,"No-op Door erasure added history");
+}
 void wallStrokes() {
     using W = I::WallType;
     EditorSession session;
@@ -254,6 +278,6 @@ void replay() {
 }
 }
 int main() {
-    try {automaticWalls(); wallStrokes(); rejectedWallStroke(); history(); hullHistory(); partitionHistory(); picking(); replay();}
+    try {automaticWalls(); doorEditing(); wallStrokes(); rejectedWallStroke(); history(); hullHistory(); partitionHistory(); picking(); replay();}
     catch (const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
