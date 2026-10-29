@@ -34,5 +34,22 @@ the executable, not the working directory. Font licenses are recorded in
 `resources/FontAwesome-LICENSE.txt`; the icon header's license is alongside it
 under `editor/include/imgui/`.
 
+## Sector thermal inspection
+
+In the Editor, choose Sector mode and select a Cell. The **Sector** panel's
+**Thermal** tab shows side, roof and exposed floor-underside skin areas,
+conductance and signed heat flow for every attached neighbour/Hull link.
+The **Systems graph** tab draws those connections; arrows follow the last
+simulation step's heat flow. Inspection remains available during playback.
+
+Timescales use the selected compartment's geometry-derived air capacity:
+`diffusion = C / G_neighbour`, `drain = C / G_hull`, in seconds. Each neighbour's
+ratio is `diffusion / drain`. These are local response times with the other
+endpoint held fixed, not two-body equilibration or nonlinear radiative cooling
+predictions. No Hull link means an infinite drain time (ratio zero for existing
+neighbour links); no links means thermally isolated. Void atmosphere presets
+have no compartment and no connections. Flow is unavailable without a runtime,
+and zero until the first simulation step.
+
 The Station Systems library needs no runtime asset installation and embeds its
 own default Lua. World-specific code, documents and assets remain in Promethium.

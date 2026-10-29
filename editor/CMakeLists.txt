@@ -62,7 +62,7 @@ else()
 endif()
 
 # Headless playback adapter keeps simulation dependencies out of the document model.
-add_library(editor-simulation STATIC src/SimulationPlayback.cpp)
+add_library(editor-simulation STATIC src/SimulationPlayback.cpp src/SectorThermal.cpp)
 target_include_directories(editor-simulation PUBLIC src)
 target_link_libraries(editor-simulation PUBLIC nsi::systemsBridge)
 
@@ -71,6 +71,7 @@ add_executable(editor
     src/NativeFileDialogs.cpp
     src/EditorFonts.cpp
     src/DeckGridWidget.cpp
+    src/SectorThermalPanel.cpp
 )
 target_compile_features(editor PRIVATE cxx_std_20)
 target_include_directories(editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -107,6 +108,12 @@ add_custom_target(editor-font-assets
 add_dependencies(editor editor-font-assets)
 
 if(BUILD_TESTING)
+    add_executable(editor-sector-systems-test tests/SectorThermalTest.cpp)
+    target_link_libraries(editor-sector-systems-test PRIVATE editor-simulation)
+    add_test(NAME editor-sector-systems COMMAND editor-sector-systems-test)
+    set_tests_properties(editor-sector-systems PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
     add_executable(editor-simulation-test tests/SimulationPlaybackTest.cpp)
     target_link_libraries(editor-simulation-test PRIVATE editor-simulation editor::document)
     add_test(NAME editor-simulation-playback COMMAND editor-simulation-test)

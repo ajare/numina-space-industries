@@ -19,6 +19,7 @@
 #include "DeckGridWidget.h"
 #include "NativeFileDialogs.h"
 #include "SimulationPlayback.h"
+#include "SectorThermalPanel.h"
 
 #include "station/editor/EditorSession.h"
 #include "station/editor/Installation.h"
@@ -550,6 +551,16 @@ int runEditor() {
                 session.paintWallStroke(*pointer.wall);
             else if (pointer.phase==DeckPointerPhase::Release) session.endStroke();
         });
+        ImGui::End();
+
+        ImGui::Begin("Sector");
+        if (selected_sector) {
+            const auto snapshot = simulation.runtime()
+                ? std::optional{simulation.runtime()->snapshot()} : std::nullopt;
+            station::editor::drawSectorThermal(station::editor::sectorThermal(
+                session.installation(), active_level, *selected_sector,
+                snapshot ? &*snapshot : nullptr));
+        } else ImGui::TextUnformatted("Select a Sector in Sector mode to inspect its systems.");
         ImGui::End();
 
         ImGui::Render();
