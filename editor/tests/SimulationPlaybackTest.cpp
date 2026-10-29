@@ -443,13 +443,38 @@ void nativeSnapshots() {
     require(refused.snapshot().worldTick==0 && refused.snapshot().cellAtmospheres==before.cellAtmospheres,"Failed native update committed snapshot state");
     require(refused.update(0.1) && refused.snapshot().healthy && refused.diagnostics().empty(),"Native retry failed");
 }
+void localStructuralPlayback() {
+    using namespace station::editor;using I=nsi::core::Installation;
+    constexpr auto mode=nsi::systems::CellThermalMode::LocalStructure;
+    I scene(1,1);scene.setHullType(I::HullType::BareSkin);const auto authored=scene;
+    SimulationPlayback playback(std::nullopt,mode);playback.reset(scene);
+    require(playback.editingAllowed() && !playback.runtime()->structuralSnapshot().bodies.empty(),"Local-solid Reset failed");
+    const auto energy=playback.runtime()->structuralSnapshot().solidEnergyJ;
+    playback.togglePlaying();playback.setSpeedIndex(4);playback.update(0.1);
+    require(playback.runtime()->snapshot().elapsedSeconds==1 && !playback.editingAllowed(),"Accelerated local playback/lockout failed");
+    require(playback.runtime()->snapshot().thermalLinks.empty() && !playback.runtime()->snapshot().thermal.hull,"Local playback published legacy topology");
+    require(playback.runtime()->structuralSnapshot().solidEnergyJ<energy && scene==authored,"Local playback lost solids or mutated authoring");
+    playback.togglePlaying();require(!playback.editingAllowed(),"Paused local playback unlocked edits");
+    playback.reset(scene);require(playback.editingAllowed() && playback.runtime()->structuralSnapshot().solidEnergyJ==energy,"Local Reset retained cooled energy");
+    for (const double duration:{0.1,1.0}) {
+        CellPlaybackRuntime runtime(scene,{},std::nullopt,mode);require(runtime.update(0.1),"Local publication setup failed");
+        const auto before=runtime.snapshot();const auto bodies=runtime.structuralSnapshot().bodies;
+        require(!runtime.update(duration,4096,0),"Local facade ignored thermal refusal");
+        require(runtime.snapshot().elapsedSeconds==before.elapsedSeconds && runtime.snapshot().worldTick==before.worldTick
+            && runtime.snapshot().completedTicks==before.completedTicks && runtime.snapshot().cellAtmospheres==before.cellAtmospheres,"Refusal changed committed gas/Lua publication");
+        for (std::size_t i=0;i<bodies.size();++i) require(bodies[i].energyJ()==runtime.structuralSnapshot().bodies[i].energyJ(),"Refusal changed solid publication");
+        require(runtime.update(duration) && runtime.snapshot().elapsedSeconds==before.elapsedSeconds+duration,"Local facade retry failed");
+    }
+}
 void failedPlaybackDebt() {
     using namespace station::editor;using I=nsi::core::Installation;
     I scene(5,5);scene.setHullType(std::nullopt);const auto g=scene.level(0);const auto door=g.horizontalWall(2,2);
     for (unsigned x=0;x<5;++x) scene.toggleWall(0,g.horizontalWall(x,2));scene.setDoor(0,door,true);
     auto yaml=scene.serialize();const auto preset=yaml.find("atmosphere: Earth-like");const auto line=yaml.rfind('\n',preset)+1;
     yaml.insert(yaml.find('\n',preset),"\n"+std::string(preset-line,' ')+"atmosphereLoads: {occupants: 1, sensibleHeatPerOccupantKW: 1e11}");
-    scene.deserialize(yaml);SimulationPlayback p;p.reset(scene);p.togglePlaying();p.toggleDoor(0,door);
+    scene.deserialize(yaml);
+    for (const auto mode:{nsi::systems::CellThermalMode::Geometry,nsi::systems::CellThermalMode::LocalStructure}) {
+    SimulationPlayback p(std::nullopt,mode);p.reset(scene);p.togglePlaying();p.toggleDoor(0,door);
     bool failed=false;try {p.update(0.1);} catch (const std::runtime_error&) {failed=true;}
     require(failed && !p.playing() && p.runtime()->snapshot().elapsedSeconds==0,"Work refusal did not pause/roll back playback");
     require(p.temperatureHistory(p.runtime()->snapshot().atmospheres[0].id).size()==1,"Refused update added history");
@@ -458,6 +483,7 @@ void failedPlaybackDebt() {
     p.setSpeedIndex(0);p.togglePlaying();failed=false;
     try {p.update(0);} catch (const std::runtime_error&) {failed=true;}
     require(failed && !p.playing() && p.runtime()->snapshot().worldTick==0,"Failed simulation-time debt was dropped or rescaled");
+    }
 }
 void documentAvailability() {
     using namespace station::editor;
@@ -526,6 +552,7 @@ int main() {
         editingLockout();
         observationControls();
         nativeSnapshots();
+        localStructuralPlayback();
         failedPlaybackDebt();
         doorControls();
         documentAvailability();

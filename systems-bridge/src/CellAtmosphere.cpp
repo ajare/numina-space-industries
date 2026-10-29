@@ -13,8 +13,9 @@ std::string atmosphereId(std::size_t level,std::int64_t uid) {
     return "sector-"+std::to_string(level)+"-"+std::to_string(uid);
 }
 }
-CellAtmosphereExpansion expandCellAtmosphere(const I& installation) {
+CellAtmosphereExpansion expandCellAtmosphere(const I& installation,bool localStructure) {
     installation.validate();CellAtmosphereExpansion result;
+    if (localStructure) result.structure=expandStructuralTopology(installation);
     result.atmospheres=expandInstallation(installation);result.thermal=expandThermal(installation);
     std::map<std::string,std::size_t> groups;
     for (std::size_t i=0;i<result.atmospheres.size();++i) groups.emplace(result.atmospheres[i].id,i);
@@ -32,6 +33,7 @@ CellAtmosphereExpansion expandCellAtmosphere(const I& installation) {
             const double fraction=volume/source.volumeM3;
             std::array<double,4> mass{source.startingOxygenKg*fraction,source.startingNitrogenKg*fraction,
                 source.startingCarbonDioxideKg*fraction,source.startingWaterVapourKg*fraction};
+            result.gasOwners.push_back({l,std::int64_t(grid.offsetX())+std::int64_t(i%grid.width()),std::int64_t(grid.offsetY())+std::int64_t(i/grid.width())});
             indices[i]=result.mesh.cells.size();
             result.mesh.cells.push_back({volume,l,i,g,station::makeCellFluidState(mass,source.startingTemperatureC+station::StationCelsiusOffset)});
         }
@@ -118,7 +120,7 @@ CellAtmosphereExpansion expandCellAtmosphere(const I& installation) {
 
 CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometry,CellThermalMode mode)
     :geometry_(std::move(geometry)),fluid_(geometry_.mesh),checkpoint_(fluid_.states().size()),faceTransfers_(fluid_.mesh().faces.size()),
-      ledger_(geometry_.atmospheres.size()),checkpointLedger_(ledger_.size()),sectors_(ledger_.size()) {
+      checkpointTransfers_(faceTransfers_.size()),ledger_(geometry_.atmospheres.size()),checkpointLedger_(ledger_.size()),sectors_(ledger_.size()),mode_(mode) {
     std::vector<double> volumes(ledger_.size(),0);
     for (const auto& c:fluid_.mesh().cells) {
         if (c.atmosphere>=volumes.size()) throw std::invalid_argument("Fluid Cell has no atmosphere group");
@@ -139,13 +141,43 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
         if (a.leakRateKgPerS>0 || (a.occupants>0 && (a.oxygenUsePerOccupantKgPerS>0 || a.co2ProductionPerOccupantKgPerS>0
             || a.moistureAdditionPerOccupantKgPerS>0 || a.sensibleHeatPerOccupantKW>0))) sourceCells_.push_back(i);
     }
-    if (mode==CellThermalMode::Geometry) {
+    if (mode!=CellThermalMode::Adiabatic) {
         for (const auto& a:geometry_.atmospheres) if (!a.reservoirId.empty())
             throw std::invalid_argument("Unresolved spatial thermal reservoir: "+a.reservoirId);
         station::StationSystemsSettings validation;validation.enabled=true;
         validation.hull=geometry_.thermal.hull;validation.solarCycle=geometry_.thermal.solarCycle;
         std::string diagnostic;
         if (!station::validateStationSystemsSettings(validation,diagnostic)) throw std::invalid_argument(diagnostic);
+    }
+    if (mode==CellThermalMode::LocalStructure) {
+        if (!geometry_.structure) throw std::invalid_argument("Local structural topology missing at construction");
+        const auto& topology=*geometry_.structure;
+        structure_.bodies=topology.bodies;checkpointBodies_=structure_.bodies;
+        structuralGas_.resize(fluid_.states().size());
+        std::vector<station::ThermalGasContact> gasContacts;
+        std::vector<station::ThermalRadiationContact> radiation;
+        std::map<StructuralOwner,std::size_t> ownerCells;
+        if (geometry_.gasOwners.size()!=fluid_.states().size()) throw std::invalid_argument("Structural gas owner map missing");
+        for (std::size_t i=0;i<geometry_.gasOwners.size();++i) ownerCells.emplace(geometry_.gasOwners[i],i);
+        for (const auto& assembly:topology.assemblies) for (unsigned side=0;side<2;++side) {
+            const auto body=assembly.bodies[side];
+            if (const auto& owner=assembly.owners[side]) {
+                const auto found=ownerCells.find(*owner);
+                if (found!=ownerCells.end()) gasContacts.push_back({body,found->second,assembly.areaM2,
+                    {assembly.material.gasFilm.continuumWPerM2K,assembly.material.gasFilm.accommodation}});
+            } else {
+                const auto material=assembly.surfaceMaterial(side);
+                radiation.push_back({body,station::ThermalRadiationBoundary::Exterior,0,assembly.areaM2,material.emissivity,material.absorptivity});
+            }
+        }
+        structuralExterior_.resize(radiation.size());solarWeights_.reserve(radiation.size());
+        for (const auto& face:radiation) solarWeights_.push_back(face.absorptivity*face.areaM2/4.0);
+        if (!structure_.bodies.empty()) structuralSolver_.emplace(structure_.bodies.size(),structuralGas_.size(),topology.contacts,std::move(gasContacts),std::move(radiation));
+        for (const auto& body:structure_.bodies) structure_.startingEnergyJ+=body.energyJ();
+        for (const auto& state:fluid_.states()) structure_.startingEnergyJ+=state.q[6];
+        structure_.currentEnergyJ=structure_.startingEnergyJ;
+    }
+    if (mode==CellThermalMode::Geometry) {
         const auto n=fluid_.states().size();
         if (const auto& h=geometry_.thermal.hull) {
             const double capacity=h->heatCapacityKJPerK*1000;
@@ -203,7 +235,7 @@ bool CellAtmosphereTransport::setDoorOpen(std::size_t level,std::size_t wall,boo
     return true;
 }
 bool CellAtmosphereTransport::advance(double seconds,std::span<const double> heatJ,std::size_t maxSubsteps,std::size_t maxThermalIterations) {
-    diagnostic_.clear();work_={};thermalIterations_=0;thermalFluxResidual_=0;std::fill(faceTransfers_.begin(),faceTransfers_.end(),station::CellFluidState{});
+    diagnostic_.clear();
     if (!std::isfinite(seconds) || seconds<0 || !std::isfinite(elapsed_+seconds)
         || (!heatJ.empty() && heatJ.size()!=fluid_.states().size())) {diagnostic_="Invalid Cell atmosphere update";return false;}
     for (const double heat:heatJ) if (!std::isfinite(heat) || (seconds==0 && heat!=0)) {diagnostic_="Invalid Cell atmosphere heat input";return false;}
@@ -215,6 +247,13 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
     std::copy(fluid_.states().begin(),fluid_.states().end(),checkpoint_.begin());
     std::copy(ledger_.begin(),ledger_.end(),checkpointLedger_.begin());
     const auto checkpointMomentum=momentum_;const auto checkpointHull=thermal_.hull;
+    const auto previousWork=work_;const auto previousIterations=thermalIterations_;const auto previousResidual=thermalFluxResidual_;
+    const auto previousReport=structure_.work;
+    const auto previousExterior=structure_.exteriorHeatJ;
+    std::copy(structure_.bodies.begin(),structure_.bodies.end(),checkpointBodies_.begin());
+    std::copy(faceTransfers_.begin(),faceTransfers_.end(),checkpointTransfers_.begin());
+    work_={};thermalIterations_=0;thermalFluxResidual_=0;structure_.work={};
+    std::fill(faceTransfers_.begin(),faceTransfers_.end(),station::CellFluidState{});
     std::copy(thermal_.linkEnergyJ.begin(),thermal_.linkEnergyJ.end(),checkpointThermalLinks_.begin());
     try {
         work_.resting=true;double remaining=seconds;
@@ -242,7 +281,9 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
                 else for (int axis=0;axis<2;++axis) momentum_.exteriorLost[axis]+=transfers[f].q[4+axis];
             }
             sources(dt/2);
-            thermalStep(dt,elapsed_+seconds-remaining-dt/2,maxThermalIterations-thermalIterations_);
+            if (mode_==CellThermalMode::LocalStructure)
+                structuralStep(dt,elapsed_+seconds-remaining-dt/2,maxThermalIterations-structure_.work.work);
+            else thermalStep(dt,elapsed_+seconds-remaining-dt/2,maxThermalIterations-thermalIterations_);
             for (std::size_t i=0;i<fluid_.states().size();++i) {
                 auto& ledger=ledger_[fluid_.mesh().cells[i].atmosphere];
                 if (!heatJ.empty() && heatJ[i]!=0) {
@@ -260,8 +301,11 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
         diagnostic_=e.what();fluid_.restore(checkpoint_);std::copy(checkpointLedger_.begin(),checkpointLedger_.end(),ledger_.begin());
         momentum_=checkpointMomentum;thermal_.hull=checkpointHull;
         std::copy(checkpointThermalLinks_.begin(),checkpointThermalLinks_.end(),thermal_.linkEnergyJ.begin());
-        std::fill(faceTransfers_.begin(),faceTransfers_.end(),station::CellFluidState{});
-        publish();return false;
+        std::copy(checkpointBodies_.begin(),checkpointBodies_.end(),structure_.bodies.begin());
+        structure_.exteriorHeatJ=previousExterior;structure_.work=previousReport;
+        work_=previousWork;thermalIterations_=previousIterations;thermalFluxResidual_=previousResidual;
+        std::copy(checkpointTransfers_.begin(),checkpointTransfers_.end(),faceTransfers_.begin());
+        return false;
     }
 }
 void CellAtmosphereTransport::thermalStep(double seconds,double midpoint,std::size_t maxIterations) {
@@ -303,6 +347,49 @@ void CellAtmosphereTransport::thermalStep(double seconds,double midpoint,std::si
     for (std::size_t i=0;i<transfers.size();++i) thermal_.linkEnergyJ[geometry_.thermalContacts[i].link]+=transfers[i];
     radiate();
 }
+void CellAtmosphereTransport::structuralStep(double seconds,double midpoint,std::size_t maxWork) {
+    if (!structuralSolver_) return;
+    constexpr std::array<double,4> molarMass{station::StationMolarMassOxygenKgPerMol,station::StationMolarMassNitrogenKgPerMol,
+        station::StationMolarMassCarbonDioxideKgPerMol,station::StationMolarMassWaterKgPerMol};
+    for (std::size_t i=0;i<structuralGas_.size();++i) {
+        const auto& p=fluid_.primitives()[i];auto& gas=structuralGas_[i];gas={};
+        gas.resolved=p.resolvedGas;gas.capacityJPerK=p.capacityJPerK;
+        const auto& q=fluid_.states()[i].q;
+        gas.energyJ=q[6]-(p.massKg>0 ? (q[4]*q[4]+q[5]*q[5])/(2*p.massKg) : 0);
+        if (!p.resolvedGas) continue;
+        gas.pressurePaPerK=p.pressurePa/p.temperatureK;
+        double moles=0;
+        for (int g=0;g<4;++g) {gas.wetMoleFractions[g]=q[g]/molarMass[g];moles+=gas.wetMoleFractions[g];}
+        for (auto& fraction:gas.wetMoleFractions) fraction/=moles;
+    }
+    const station::ProfileSettings dark{0.0};
+    const auto& profile=geometry_.thermal.solarCycle ? *geometry_.thermal.solarCycle : dark;
+    const double exposure=station::evaluateStationProfile(profile,midpoint);
+    const auto& hull=geometry_.thermal.hull;
+    const double irradiance=hull ? hull->fullSunIrradianceKWPerM2*1000 : station::HullSettings{}.fullSunIrradianceKWPerM2*1000;
+    for (std::size_t i=0;i<structuralExterior_.size();++i) {
+        auto& exterior=structuralExterior_[i];
+        exterior.spaceTemperatureK=hull ? hull->sinkTemperatureC+station::StationCelsiusOffset : 3;
+        exterior.absorbedSolarW=solarWeights_[i]*irradiance*exposure;
+    }
+    station::NativeThermalBudget budget;budget.maxWork=maxWork;
+    if (!structuralSolver_->solve(structure_.bodies,structuralGas_,structuralExterior_,seconds,budget))
+        throw std::runtime_error(std::string(structuralSolver_->diagnostic()));
+    const auto& report=structuralSolver_->report();auto& work=structure_.work;
+    work.work+=report.work;work.intervals+=report.intervals;work.refinements+=report.refinements;
+    work.nonlinearIterations+=report.nonlinearIterations;work.linearIterations+=report.linearIterations;
+    work.nonlinearResidualJ=std::max(work.nonlinearResidualJ,report.nonlinearResidualJ);
+    work.lastTrialNonlinearResidualJ=report.lastTrialNonlinearResidualJ;
+    work.fluxResidualJ=std::max(work.fluxResidualJ,report.fluxResidualJ);
+    work.energyResidualJ+=report.energyResidualJ;work.exteriorHeatJ+=report.exteriorHeatJ;
+    structure_.exteriorHeatJ+=report.exteriorHeatJ;
+    thermalIterations_=work.work;thermalFluxResidual_=work.fluxResidualJ;
+    const auto heat=structuralSolver_->heatJ();const auto n=structure_.bodies.size();
+    for (std::size_t i=0;i<n;++i) structure_.bodies[i].addHeat(heat[i]);
+    for (std::size_t i=0;i<structuralGas_.size();++i) if (heat[n+i]!=0) {
+        fluid_.addHeat(i,heat[n+i]);ledger_[fluid_.mesh().cells[i].atmosphere].conductedHeatJ+=heat[n+i];
+    }
+}
 void CellAtmosphereTransport::publish() {
     momentum_.current={};momentum_.sources={};
     for (auto& s:sectors_) {s={};s.minPressurePa=std::numeric_limits<double>::max();}
@@ -315,6 +402,20 @@ void CellAtmosphereTransport::publish() {
         for (int axis=0;axis<2;++axis) momentum_.current[axis]+=q[4+axis];
         if (p.massKg>0) s.kineticEnergyJ+=(q[4]*q[4]+q[5]*q[5])/(2*p.massKg);
         s.resolvedGas=s.resolvedGas || p.resolvedGas;
+    }
+    if (mode_==CellThermalMode::LocalStructure) {
+        long double current=0,external=structure_.exteriorHeatJ;
+        for (const auto& body:structure_.bodies) current+=body.energyJ();
+        structure_.solidEnergyJ=current;structure_.gasInternalEnergyJ=0;structure_.gasKineticEnergyJ=0;
+        for (const auto& sector:sectors_) {
+            structure_.gasInternalEnergyJ+=static_cast<long double>(sector.totalEnergyJ)-sector.kineticEnergyJ;
+            structure_.gasKineticEnergyJ+=sector.kineticEnergyJ;
+        }
+        for (const auto& state:fluid_.states()) current+=state.q[6];
+        for (const auto& ledger:ledger_) external+=static_cast<long double>(ledger.inventoryEnergyJ)+ledger.transportedEnergyJ
+            +ledger.externalHeatJ+ledger.occupantHeatJ+ledger.latentHeatJ;
+        structure_.currentEnergyJ=current;
+        structure_.residualJ=structure_.startingEnergyJ+external-current;
     }
     for (std::size_t i=0;i<sectors_.size();++i) {
         auto& s=sectors_[i];s.ledger=ledger_[i];

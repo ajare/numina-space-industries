@@ -14,8 +14,8 @@ StationSystemsSettings lifecycleSettings(const nsi::systems::CellAtmosphereExpan
     settings.solarCycle=geometry.thermal.solarCycle;return settings;
 }
 }
-CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,CellObservationOptions options,StationSystemsSource source)
-    :model_(installation,nsi::systems::CellThermalMode::Geometry),lifecycle_(lifecycleSettings(model_.geometry()),std::move(source)),
+CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,CellObservationOptions options,StationSystemsSource source,nsi::systems::CellThermalMode mode)
+    :model_(installation,mode),lifecycle_(lifecycleSettings(model_.geometry()),std::move(source)),
     aerodynamics_(model_.fluid().states().size()),options_(options),previous_(model_.sectors().size()) {
     diagnostics_.reserve(1);snapshot_.enabled=true;snapshot_.variableTimestep=true;snapshot_.systemsStepWorldTicks=0;
     const auto& geometry=model_.geometry();snapshot_.atmospheres.resize(geometry.atmospheres.size());
@@ -34,7 +34,7 @@ CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installa
         const auto& c=model_.fluid().mesh().cells[i];const auto& grid=installation.level(c.level);auto& s=snapshot_.cellAtmospheres[i];
         s.level=c.level;s.gridIndex=c.gridIndex;s.sectorUid=grid.sectorAt(c.gridIndex%grid.width(),c.gridIndex/grid.width()).uid;
     }
-    for (const auto& link:geometry.thermal.links) {
+    if (mode==nsi::systems::CellThermalMode::Geometry) for (const auto& link:geometry.thermal.links) {
         StationThermalLinkSnapshot s;s.id=link.id;s.aAtmosphereId=link.aAtmosphereId;s.bAtmosphereId=link.bAtmosphereId;
         s.aKind=link.aKind;s.bKind=link.bKind;s.conductanceKWPerK=link.conductanceKWPerK;snapshot_.thermalLinks.push_back(std::move(s));
     }

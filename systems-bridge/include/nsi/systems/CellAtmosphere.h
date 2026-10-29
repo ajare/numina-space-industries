@@ -2,6 +2,8 @@
 #include <nsi/systems/Atmosphere.h>
 #include <station/CellFluid.h>
 #include <station/CellThermal.h>
+#include <station/NativeThermal.h>
+#include <nsi/systems/StructuralTopology.h>
 #include <span>
 #include <string>
 
@@ -19,13 +21,15 @@ struct CellAtmosphereExpansion {
     std::vector<station::AtmosphereSettings> atmospheres;
     std::vector<CellFluidDoor> doors;
     ThermalExpansion thermal;
+    std::optional<StructuralTopology> structure; // constructed only for the Reset-selected candidate
+    std::vector<StructuralOwner> gasOwners; // fluid index -> physical source Cell
     std::vector<CellThermalContact> thermalContacts;
     // Level-local, row-major geometry -> active fluid Cell; missing is SIZE_MAX.
     std::vector<std::vector<std::size_t>> cellIndices;
 };
 // Authored geometry only; no simulation, no document mutations. Missing Walls
 // facing geometric Void/outside breach; unmodelled Interior never becomes vacuum.
-CellAtmosphereExpansion expandCellAtmosphere(const core::Installation&);
+CellAtmosphereExpansion expandCellAtmosphere(const core::Installation&,bool localStructure=false);
 
 struct CellAtmosphereLedger {
     std::array<double,4> sourceKg{},transportedKg{},exteriorLostKg{},leakedKg{};
@@ -45,7 +49,17 @@ struct CellSectorAtmosphere {
     bool resolvedGas{};
     CellAtmosphereLedger ledger;
 };
-enum class CellThermalMode { Adiabatic, Geometry };
+enum class CellThermalMode { Adiabatic, Geometry, LocalStructure };
+struct CellStructuralThermalState {
+    std::string_view modelRevision{station::NativeThermalModelRevision};
+    std::string_view presetRevision{core::NativeThermalPresetRevision};
+    std::vector<station::ThermalBody> bodies; // same order/stable IDs as geometry.structure
+    // Global audit: unique solids + gas internal/kinetic. Internal heat cancels;
+    // inventory includes condensate carried energy; phase latent heat is separate.
+    long double startingEnergyJ{},exteriorHeatJ{},currentEnergyJ{},residualJ{};
+    long double solidEnergyJ{},gasInternalEnergyJ{},gasKineticEnergyJ{};
+    station::NativeThermalReport work;
+};
 struct CellHullThermalState {
     long double temperatureK{};
     double capacityJPerK{},startingEnergyJ{},absorbedJ{},emittedJ{},conductedJ{};
@@ -56,14 +70,14 @@ struct CellAtmosphereThermalState {
     std::optional<CellHullThermalState> hull;
     std::vector<double> linkEnergyJ;
 };
-// Native gas/load layer, optionally coupled to the geometry Hull/partition mesh.
+// Native gas/load layer, optionally coupled to exactly one geometry heat backend.
 // Explicit reservoir references have no definitions in Installation expansion
 // and refuse Geometry mode. No StationSystemsRuntime runs alongside this layer.
 class CellAtmosphereTransport {
 public:
     explicit CellAtmosphereTransport(CellAtmosphereExpansion,CellThermalMode=CellThermalMode::Adiabatic);
     explicit CellAtmosphereTransport(const core::Installation& installation,CellThermalMode mode=CellThermalMode::Adiabatic)
-        :CellAtmosphereTransport(expandCellAtmosphere(installation),mode) {}
+        :CellAtmosphereTransport(expandCellAtmosphere(installation,mode==CellThermalMode::LocalStructure),mode) {}
     // Source/phase splitting is bounded to 0.1 s, including accelerated updates.
     // At most 4096 source slices and maxSubsteps acoustic steps per whole call.
     bool advance(double seconds,std::span<const double> heatJ={},std::size_t maxSubsteps=4096,std::size_t maxThermalIterations=4096);
@@ -77,6 +91,8 @@ public:
     const CellAtmosphereMomentum& momentum() const {return momentum_;}
     const CellAtmosphereThermalState& thermal() const {return thermal_;}
     std::size_t thermalIterations() const {return thermalIterations_;}
+    CellThermalMode thermalMode() const {return mode_;}
+    const CellStructuralThermalState& structure() const {return structure_;}
     double thermalFluxResidualJ() const {return thermalFluxResidual_;}
     // Whole transport call, not just the final acoustic/source slice.
     std::span<const station::CellFluidState> faceTransfers() const {return faceTransfers_;}
@@ -84,9 +100,10 @@ private:
     void sources(double seconds);
     void thermalStep(double seconds,double midpoint,std::size_t maxIterations);
     void publish();
+    void structuralStep(double seconds,double midpoint,std::size_t maxWork);
     CellAtmosphereExpansion geometry_;
     station::CellFluidSolver fluid_;
-    std::vector<station::CellFluidState> checkpoint_,faceTransfers_;
+    std::vector<station::CellFluidState> checkpoint_,faceTransfers_,checkpointTransfers_;
     std::vector<CellAtmosphereLedger> ledger_,checkpointLedger_;
     std::vector<CellSectorAtmosphere> sectors_;
     std::vector<std::size_t> sourceCells_;
@@ -100,6 +117,13 @@ private:
     std::vector<double> checkpointThermalLinks_;
     std::size_t thermalIterations_{};
     double thermalFluxResidual_{};
+    CellThermalMode mode_;
+    CellStructuralThermalState structure_;
+    std::optional<station::NativeThermalSolver> structuralSolver_;
+    std::vector<station::ThermalBody> checkpointBodies_;
+    std::vector<station::NativeThermalGas> structuralGas_;
+    std::vector<station::NativeThermalExterior> structuralExterior_;
+    std::vector<double> solarWeights_;
     std::string diagnostic_;
 };
 } // namespace nsi::systems

@@ -29,7 +29,7 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     atmosphereHistory_.clear();
     source_ = installation;
     remainder_ = 0;pendingStepSeconds_.reset();
-    runtime_=std::make_unique<CellPlaybackRuntime>(installation,observationOptions_,lifecycleSource_);
+    runtime_=std::make_unique<CellPlaybackRuntime>(installation,observationOptions_,lifecycleSource_,thermalMode_);
     for (const auto& door:runtime_->model().geometry().doors)
         doors_.emplace(std::pair{door.level,door.wall},DoorState{});
     recordAtmosphereHistory();

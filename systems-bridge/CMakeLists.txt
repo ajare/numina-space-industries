@@ -24,6 +24,10 @@ target_include_directories(nsi-systems-bridge PUBLIC
 set_target_properties(nsi-systems-bridge PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(BUILD_TESTING)
+    add_executable(nsi-structural-playback-test tests/StructuralPlayback.cpp)
+    target_link_libraries(nsi-structural-playback-test PRIVATE nsi::systemsBridge)
+    add_test(NAME nsi-structural-playback COMMAND nsi-structural-playback-test)
+    set_tests_properties(nsi-structural-playback PROPERTIES LABELS "systems;functional;validation-fast" TIMEOUT 30)
     add_executable(nsi-structural-topology-test tests/StructuralTopology.cpp)
     target_link_libraries(nsi-structural-topology-test PRIVATE nsi::systemsBridge)
     add_test(NAME nsi-structural-topology COMMAND nsi-structural-topology-test)

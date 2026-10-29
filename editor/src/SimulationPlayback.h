@@ -19,7 +19,9 @@ namespace station::editor {
 // Runtime preview only: simulation never writes into the authored document.
 class SimulationPlayback {
 public:
-    explicit SimulationPlayback(StationSystemsSource lifecycleSource=std::nullopt):lifecycleSource_(std::move(lifecycleSource)) {}
+    explicit SimulationPlayback(StationSystemsSource lifecycleSource=std::nullopt,
+        nsi::systems::CellThermalMode mode=nsi::systems::CellThermalMode::Geometry)
+        :lifecycleSource_(std::move(lifecycleSource)),thermalMode_(mode) {}
     static constexpr std::array<double, 5> speeds{0.1, 0.5, 1.0, 2.0, 10.0};
     // nullptr means no active Installation: retire the preview and pause.
     void synchronize(const nsi::core::Installation* installation);
@@ -69,5 +71,6 @@ private:
     bool playing_ = false;
     CellObservationOptions observationOptions_{};
     const StationSystemsSource lifecycleSource_;
+    const nsi::systems::CellThermalMode thermalMode_; // Reset-only; never swapped in-flight
 };
 } // namespace station::editor

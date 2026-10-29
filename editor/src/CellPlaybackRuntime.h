@@ -11,7 +11,8 @@ namespace station::editor {
 // Four lifecycle sandboxes gate each host update; no standalone C++ ledger runs.
 class CellPlaybackRuntime {
 public:
-    explicit CellPlaybackRuntime(const nsi::core::Installation&,CellObservationOptions = {},StationSystemsSource = std::nullopt);
+    explicit CellPlaybackRuntime(const nsi::core::Installation&,CellObservationOptions = {},StationSystemsSource = std::nullopt,
+        nsi::systems::CellThermalMode = nsi::systems::CellThermalMode::Geometry);
     void setObservationOptions(CellObservationOptions);
     CellObservationOptions observationOptions() const {return options_;}
     // Cell-centre one-way load, not rigid-body movement. Disabled, absent or
@@ -20,6 +21,8 @@ public:
     bool update(double seconds,std::size_t acousticBudget=4096,std::size_t thermalBudget=4096);
     bool setDoorOpen(std::size_t level,std::size_t wall,bool open);
     const StationSystemsSnapshot& snapshot() const {return snapshot_;}
+    // Committed solid observations, separate from gas and legacy Hull snapshots.
+    const nsi::systems::CellStructuralThermalState& structuralSnapshot() const {return model_.structure();}
     const std::vector<StationSystemsDiagnostic>& diagnostics() const {return diagnostics_;}
     double averageStepMicroseconds() const {return timing_.averageMicroseconds();}
     const SimulationStepTiming& stepTimings() const {return timing_;}
