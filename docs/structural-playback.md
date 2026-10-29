@@ -101,6 +101,10 @@ thermal model or a performance-approved production default.
 
 ## Validation
 
+The consolidated [#34 acceptance matrix](structural-acceptance.md) maps every
+parent acceptance item to component/end-to-end tests or explicit #35 review gates,
+including the portable original S0 fixture and expanded observation rollback checks.
+
 `nsi-structural-playback` tests gas/solid energy pairing and the full audit,
 static/dynamic evacuation, retained unresolved inventory, chilled-structure
 repressurisation through a finite neighbouring Cell, tall/offset contact owners,

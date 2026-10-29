@@ -24,6 +24,11 @@ target_include_directories(nsi-systems-bridge PUBLIC
 set_target_properties(nsi-systems-bridge PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(BUILD_TESTING)
+    add_executable(nsi-structural-s0-test tests/StructuralS0.cpp)
+    target_link_libraries(nsi-structural-s0-test PRIVATE nsi::systemsBridge)
+    add_test(NAME nsi-structural-s0 COMMAND nsi-structural-s0-test
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/owner-station-s0.yaml")
+    set_tests_properties(nsi-structural-s0 PROPERTIES LABELS "systems;functional;validation-fast" TIMEOUT 60)
     add_executable(nsi-structural-observations-test tests/StructuralObservations.cpp)
     target_link_libraries(nsi-structural-observations-test PRIVATE nsi::systemsBridge)
     add_test(NAME nsi-structural-observations COMMAND nsi-structural-observations-test)

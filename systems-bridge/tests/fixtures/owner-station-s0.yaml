@@ -1,0 +1,2478 @@
+"version": 4
+"name": ""
+"hull": MultiLayerBlanket
+"partition": InsulatedPartition
+levels:
+  - "width": 16
+    "depth": 16
+    "offset_x": 0
+    "offset_y": 0
+    sectors:
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 2
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 28
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 4
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 16
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 17
+        "atmosphere": Earth-like
+      - "name": S1
+        "type": Interior
+        "height": 1
+        "uid": 3
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 5
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 6
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 22
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 21
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 18
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 7
+        "atmosphere": Earth-like
+      - "name": S0
+        "type": Interior
+        "height": 1
+        "uid": 19
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 8
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 25
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 1
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 9
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 24
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 20
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 26
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 27
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 10
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 11
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 14
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 12
+        "atmosphere": Earth-like
+      - "name": ""
+        "type": Interior
+        "height": 1
+        "uid": 13
+        "atmosphere": Earth-like
+    cells:
+      - "sector": 0
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 0
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 2
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 2
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 2
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 2
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 3
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 3
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 3
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 4
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 4
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 0
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 0
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 1
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 2
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 2
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 2
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 2
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 3
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 3
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 3
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 4
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 4
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 0
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 0
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 4
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 4
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 6
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 6
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 8
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 8
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 9
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 9
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 10
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 10
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 6
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 6
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 8
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 8
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 9
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 9
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 10
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 10
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 6
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 6
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 7
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 8
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 8
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 9
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 9
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 10
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 10
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 11
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 11
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 8
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 8
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 11
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 11
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 11
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 11
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 16
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 16
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 12
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 16
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 16
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 13
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 15
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 17
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 17
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 18
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 18
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 16
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 16
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 5
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 19
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 19
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 20
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 20
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 17
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 17
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 18
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 18
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 22
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 22
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 22
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 22
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 19
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 19
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 20
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 20
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 17
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 17
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 22
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 22
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 22
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 22
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 14
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 17
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 17
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 24
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 24
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 24
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 24
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 25
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 25
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 25
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 25
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 21
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 24
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 24
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 24
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 24
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 25
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 25
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 25
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 25
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+      - "sector": 23
+        floor:
+          {}
+        wiring:
+          {}
+        piping:
+          {}
+    walls:
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "Door"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Door"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Door"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Door"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Door"
+      - "None"
+      - "Interior"
+      - "Door"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Door"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Door"
+      - "None"
+      - "None"
+      - "Door"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Door"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Door"
+      - "Door"
+      - "None"
+      - "None"
+      - "None"
+      - "Door"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Door"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "Door"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Interior"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Exterior"
+      - "Exterior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Interior"
+      - "None"
+      - "None"
+      - "None"
+      - "Exterior"

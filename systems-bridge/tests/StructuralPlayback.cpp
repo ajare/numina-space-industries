@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <new>
 #include <stdexcept>
 using namespace nsi::systems;
@@ -230,8 +231,42 @@ void check() {
         const auto bodies=trial.structure().bodies;const auto ledgers=std::vector<CellSectorAtmosphere>(trial.sectors().begin(),trial.sectors().end());
         const auto observations=std::vector<station::CellFluidState>(trial.faceTransfers().begin(),trial.faceTransfers().end());
         const auto time=trial.elapsedSeconds();const auto boundary=trial.structure().exteriorHeatJ;const auto energy=trial.structure().currentEnergyJ;
+        const auto committed=trial.structure();
         const auto work=trial.structure().work.work;const auto momentum=trial.momentum();
+        std::vector<StructuralSurfaceObservation> surfaces;
+        for(const auto& a:trial.geometry().structure->assemblies) for(unsigned side=0;side<2;++side)
+            surfaces.push_back(*trial.structuralSurface(a.surfaceId(side)));
+        std::vector<StructuralPortalObservation> portals(trial.structure().portals);
+        const auto portalCount=trial.structuralPortals(0,portals).written;
         auto restored=[&] {
+            const auto& current=trial.structure();
+            require(current.paths==committed.paths && current.rates==committed.rates
+                && current.observedSeconds==committed.observedSeconds && current.residualJ==committed.residualJ
+                && current.solidEnergyJ==committed.solidEnergyJ && current.gasInternalEnergyJ==committed.gasInternalEnergyJ
+                && current.gasKineticEnergyJ==committed.gasKineticEnergyJ,"Refusal changed committed heat paths/energy publication");
+            require(current.work.paths==committed.work.paths && current.work.cavityClosureW==committed.work.cavityClosureW
+                && current.work.nonlinearResidualJ==committed.work.nonlinearResidualJ
+                && current.work.fluxResidualJ==committed.work.fluxResidualJ
+                && current.work.energyResidualJ==committed.work.energyResidualJ,"Refusal changed solver observations");
+            for(const auto& saved:surfaces) {
+                const auto now=*trial.structuralSurface(saved.id);
+                require(now.owner==saved.owner && now.cavity==saved.cavity && now.gasCell==saved.gasCell,"Refusal changed surface ownership");
+                require(now.temperatureK==saved.temperatureK && now.storedEnergyJ==saved.storedEnergyJ,"Refusal changed solid observation");
+                // Restore recomputes primitives from exactly retained conserved
+                // quantities; cached addHeat arithmetic can differ by a few ulps.
+                auto roundoffEqual=[](double a,double b) {
+                    return std::abs(a-b)<=8*std::numeric_limits<double>::epsilon()*std::max({1.,std::abs(a),std::abs(b)});
+                };
+                require(now.gasTemperatureK.has_value()==saved.gasTemperatureK.has_value(),"Refusal changed gas availability");
+                if(saved.gasTemperatureK) require(roundoffEqual(*now.gasTemperatureK,*saved.gasTemperatureK),"Refusal changed surface gas temperature");
+                require(roundoffEqual(now.gasContactWPerK,saved.gasContactWPerK),"Refusal changed surface gas film");
+            }
+            std::vector<StructuralPortalObservation> now(portals.size());
+            require(trial.structuralPortals(0,now).written==portalCount,"Refusal changed portal count");
+            for(std::size_t i=0;i<portalCount;++i)
+                require(now[i].areaM2==portals[i].areaM2 && now[i].irradianceA==portals[i].irradianceA
+                    && now[i].irradianceB==portals[i].irradianceB && now[i].outwardPowerW==portals[i].outwardPowerW,
+                    "Refusal changed committed cavity/portal field");
             require(trial.elapsedSeconds()==time && trial.structure().exteriorHeatJ==boundary && trial.structure().currentEnergyJ==energy && trial.structure().work.work==work,"Refusal committed time/ledger/observations");
             sameBodies(trial.structure().bodies,bodies);
             for (std::size_t i=0;i<states.size();++i) require(trial.fluid().states()[i].q==states[i].q,"Gas rollback failed");
