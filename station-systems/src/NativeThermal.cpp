@@ -157,12 +157,26 @@ bool NativeThermalSolver::interval(double dt,ThermalAlgebraicOperator* op) {
                 if(const auto p=op->boundaryPowerW()) boundary+=dt*(*p);
                 else for(std::size_t i=0;i<capacity_.size();++i) boundary+=dt*(opSource_[i]-scratch_[i]);
             }
+            NativeThermalPaths paths;
+            std::size_t k=0;
+            for(const auto& c:solid_) {
+                paths.solidConductionMagnitudeJ+=dt*std::abs(conductance_[k++]*(guess_[c.a]-guess_[c.b]));
+            }
+            for(const auto& c:gas_) {
+                paths.gasIntoSolidJ+=dt*conductance_[k++]*(guess_[bodies_+c.gasCell]-guess_[c.body]);
+            }
+            if(op) {
+                paths.interiorRadiationMagnitudeJ=dt*op->interiorRadiationMagnitudeW();
+                paths.portalEscapeJ=-dt*op->boundaryPowerW().value_or(0);
+            }
             std::size_t e=0;
             for(std::size_t j=0;j<radiation_.size();++j) {
                 const auto& r=radiation_[j];
                 if(r.boundary!=ThermalRadiationBoundary::Exterior) continue;
                 const auto& b=exterior_[e++];
                 boundary+=dt*(b.absorbedSolarW+radiationG_[j]*(b.spaceTemperatureK-guess_[r.body]));
+                paths.absorbedSolarJ+=dt*b.absorbedSolarW;
+                paths.exteriorRadiationJ+=dt*radiationG_[j]*(guess_[r.body]-b.spaceTemperatureK);
             }
             for(std::size_t i=0;i<capacity_.size();++i) {
                 const auto heat=dt*power_[i];
@@ -170,6 +184,8 @@ bool NativeThermalSolver::interval(double dt,ThermalAlgebraicOperator* op) {
                 if(!valid(current_[i])) return false;
             }
             for(std::size_t i=0;i<capacity_.size();++i) totalHeat_[i]+=dt*power_[i];
+            report_.paths+=paths;
+            if(op) report_.cavityClosureW=std::max(report_.cavityClosureW,op->cavityClosureW());
             boundaryHeat_+=boundary;
             report_.exteriorHeatJ=static_cast<double>(boundaryHeat_);
             report_.nonlinearResidualJ=std::max(report_.nonlinearResidualJ,static_cast<double>(error));

@@ -22,7 +22,21 @@ struct NativeThermalBudget {
     std::size_t maxWork{100000}, maxNonlinearIterations{32}, maxLinearIterations{256}, maxRefinements{12};
     double maxIntervalSeconds{0.1};
 };
+// Integrated accepted-interval paths. Internal magnitudes are sum(abs(edge heat))
+// (cavity: sum(abs(surface heat))), not net boundary heat. SI joules.
+struct NativeThermalPaths {
+    long double gasIntoSolidJ{}, solidConductionMagnitudeJ{}, interiorRadiationMagnitudeJ{};
+    long double portalEscapeJ{}, exteriorRadiationJ{}, absorbedSolarJ{}; // outward radiation, inward solar
+    NativeThermalPaths& operator+=(const NativeThermalPaths& p) {
+        gasIntoSolidJ+=p.gasIntoSolidJ;solidConductionMagnitudeJ+=p.solidConductionMagnitudeJ;
+        interiorRadiationMagnitudeJ+=p.interiorRadiationMagnitudeJ;portalEscapeJ+=p.portalEscapeJ;
+        exteriorRadiationJ+=p.exteriorRadiationJ;absorbedSolarJ+=p.absorbedSolarJ;return *this;
+    }
+    bool operator==(const NativeThermalPaths&) const = default;
+};
 struct NativeThermalReport {
+    NativeThermalPaths paths;
+    double cavityClosureW{};
     std::size_t work{}, intervals{}, refinements{}, nonlinearIterations{}, linearIterations{};
     // Max accepted residuals, plus the last nonlinear trial (also on refusal).
     double nonlinearResidualJ{}, lastTrialNonlinearResidualJ{}, fluxResidualJ{}, energyResidualJ{}, exteriorHeatJ{};
@@ -43,6 +57,8 @@ public:
     virtual bool healthy() const { return true; }
     // Optional independent boundary audit at the last frozen physical trial.
     virtual std::optional<long double> boundaryPowerW() const { return std::nullopt; }
+    virtual long double interiorRadiationMagnitudeW() const { return 0; }
+    virtual double cavityClosureW() const { return 0; }
     virtual bool freeze(std::span<const long double> temperatureK,
         std::span<long double> diagonal, std::span<long double> sourceW) = 0;
     virtual void apply(std::span<const long double> x, std::span<long double> Lx) const = 0;

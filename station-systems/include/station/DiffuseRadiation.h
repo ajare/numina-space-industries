@@ -23,6 +23,8 @@ public:
     bool healthy() const override { return healthy_; }
     std::optional<long double> boundaryPowerW() const override;
     long double trialPortalPowerW(std::size_t portal) const;
+    long double interiorRadiationMagnitudeW() const override { return interiorMagnitudeW_; }
+    double cavityClosureW() const override { return closureW_; }
     bool freeze(std::span<const long double>, std::span<long double>, std::span<long double>) override;
     void apply(std::span<const long double>, std::span<long double>) const override;
     // Trial diagnostics only, not committed playback observations. Nullopt means
@@ -40,7 +42,8 @@ private:
     std::vector<std::size_t> parent_;
     mutable std::vector<long double> rhs_, field_, residual_, direction_, product_, z_;
     std::vector<long double> trial_;
-    long double slope_{};
+    long double slope_{}, interiorMagnitudeW_{};
+    double closureW_{};
     std::size_t* work_{};
     std::size_t limit_{};
     mutable bool healthy_{true};

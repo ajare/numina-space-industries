@@ -120,6 +120,12 @@ bool DiffuseRadiation::freeze(std::span<const long double> t,std::span<long doub
     for(const auto& s:surfaces_) {const auto v=t[s.body];rhs_[s.cavity]+=s.areaM2*s.emissivity*sigma*v*v*v*v;}
     if(!solveField()) return false;
     trial_=field_;
+    interiorMagnitudeW_=0;closureW_=0;
+    for(const auto r:residual_) closureW_=std::max(closureW_,static_cast<double>(std::abs(r)));
+    for(const auto& s:surfaces_) {
+        const auto v=t[s.body];
+        interiorMagnitudeW_+=std::abs(s.areaM2*s.emissivity*(sigma*v*v*v*v-trial_[s.cavity]));
+    }
     trialValid_=std::isfinite(slope_);
     return trialValid_;
 }

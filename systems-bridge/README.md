@@ -6,6 +6,12 @@ with atomic rollback and separate gas/solid observations. Select
 `CellThermalMode::LocalStructure` only at construction/Reset; the Editor default
 remains `Geometry` pending #35. Cavities and energy-preserving Door thermal poses are implemented (#30/#31); see `../docs/door-thermal-poses.md`.
 
+[Committed structural observations](../docs/structural-observations.md) (#32)
+provide separate heat-path ledgers/rates, stable side identities, directional
+Cell/Sector summaries and caller-bounded local contact/portal queries. Detail is
+pull-based; successful publication and queries allocate nothing. Unresolved gas
+remains unavailable even when nearby structure is warm.
+
 The opt-in [reset-time structural topology builder](../docs/structural-topology.md)
 (#27), `<nsi/systems/StructuralTopology.h>`, expands geometry into deduplicated,
 gas-independent two-sided bodies, local solid contacts and opening metadata.

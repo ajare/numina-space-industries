@@ -23,6 +23,12 @@ public:
     const StationSystemsSnapshot& snapshot() const {return snapshot_;}
     // Committed solid observations, separate from gas and legacy Hull snapshots.
     const nsi::systems::CellStructuralThermalState& structuralSnapshot() const {return model_.structure();}
+    // Local inspection is pull-based and caller bounded, never a recursive copy
+    // into StationSystemsSnapshot. Geometric cavity indices include absent gas.
+    nsi::systems::StructuralSelectionSummary structuralCell(nsi::systems::StructuralOwner owner) const {return model_.structuralSummary(owner);}
+    nsi::systems::StructuralSelectionSummary structuralSector(std::size_t cavity) const {return model_.structuralSectorSummary(cavity);}
+    nsi::systems::StructuralQueryResult structuralSurfaces(nsi::systems::StructuralOwner owner,
+        std::span<nsi::systems::StructuralSurfaceObservation> out,std::size_t offset=0) const {return model_.structuralSurfaces(owner,out,offset);}
     const std::vector<StationSystemsDiagnostic>& diagnostics() const {return diagnostics_;}
     double averageStepMicroseconds() const {return timing_.averageMicroseconds();}
     const SimulationStepTiming& stepTimings() const {return timing_;}

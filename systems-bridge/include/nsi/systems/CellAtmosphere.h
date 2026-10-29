@@ -5,6 +5,8 @@
 #include <station/CellThermal.h>
 #include <station/NativeThermal.h>
 #include <nsi/systems/StructuralTopology.h>
+#include <nsi/systems/StructuralObservations.h>
+#include <map>
 #include <span>
 #include <string>
 
@@ -52,7 +54,13 @@ struct CellSectorAtmosphere {
     CellAtmosphereLedger ledger;
 };
 enum class CellThermalMode { Adiabatic, Geometry, LocalStructure };
+struct StructuralHeatRates {
+    long double gasIntoSolidW{}, solidConductionMagnitudeW{}, interiorRadiationMagnitudeW{};
+    long double portalEscapeW{}, exteriorRadiationW{}, absorbedSolarW{};
+    bool operator==(const StructuralHeatRates&) const = default;
+};
 struct CellStructuralThermalState {
+    bool enabled{};
     std::string_view modelRevision{station::NativeThermalModelRevision};
     std::string_view presetRevision{core::NativeThermalPresetRevision};
     std::vector<station::ThermalBody> bodies; // same order/stable IDs as geometry.structure
@@ -61,6 +69,11 @@ struct CellStructuralThermalState {
     long double startingEnergyJ{},exteriorHeatJ{},currentEnergyJ{},residualJ{};
     long double solidEnergyJ{},gasInternalEnergyJ{},gasKineticEnergyJ{};
     station::NativeThermalReport work;
+    station::NativeThermalPaths paths; // cumulative J
+    StructuralHeatRates rates; // last committed whole-call mean W, zero at Reset
+    double observedSeconds{};
+    std::size_t assemblies{}, solidContacts{}, gasContacts{}, exteriorContacts{}, cavities{}, portals{}, topologyStorageBytes{};
+    std::size_t observationIndexPayloadBytes{}; // vector capacities + map value payloads; excludes allocator/tree overhead
 };
 struct CellHullThermalState {
     long double temperatureK{};
@@ -95,10 +108,32 @@ public:
     std::size_t thermalIterations() const {return thermalIterations_;}
     CellThermalMode thermalMode() const {return mode_;}
     const CellStructuralThermalState& structure() const {return structure_;}
+    // Caller-bounded, nonrecursive, allocation-free local queries. Cavity index
+    // identifies a geometric Interior Sector, including missing-gas presets.
+    std::optional<StructuralSurfaceObservation> structuralSurface(StructuralSurfaceId) const;
+    StructuralQueryResult structuralSurfaces(StructuralOwner, std::span<StructuralSurfaceObservation>, std::size_t offset=0) const;
+    StructuralQueryResult structuralSectorSurfaces(std::size_t cavity, std::span<StructuralSurfaceObservation>, std::size_t offset=0) const;
+    StructuralSelectionSummary structuralSummary(StructuralOwner) const;
+    StructuralSelectionSummary structuralSectorSummary(std::size_t cavity) const;
+    StructuralQueryResult structuralPortals(std::size_t cavity, std::span<StructuralPortalObservation>, std::size_t offset=0) const;
+    StructuralQueryResult structuralContacts(StructuralSurfaceId, std::span<StructuralContactObservation>, std::size_t offset=0) const;
     double thermalFluxResidualJ() const {return thermalFluxResidual_;}
     // Whole transport call, not just the final acoustic/source slice.
     std::span<const station::CellFluidState> faceTransfers() const {return faceTransfers_;}
 private:
+    void buildStructuralObservations();
+    StructuralSurfaceObservation surfaceObservation(std::size_t, bool gasDetail=true) const;
+    StructuralQueryResult querySurfaces(std::span<const std::size_t>, std::optional<StructuralOwner>, std::optional<std::size_t>, std::span<StructuralSurfaceObservation>, std::size_t) const;
+    StructuralSelectionSummary summarizeSurfaces(std::span<const std::size_t>, std::optional<StructuralOwner>, std::optional<std::size_t>) const;
+    std::vector<station::ThermalRadiationPortal> observedPortals_;
+    std::vector<std::vector<std::size_t>> cavityPortals_;
+    std::vector<std::optional<long double>> committedIrradiance_;
+    std::vector<std::optional<StructuralOwner>> surfaceOwners_;
+    std::map<StructuralOwner,std::vector<std::size_t>> ownerSurfaces_;
+    std::map<StructuralOwner,std::size_t> ownerCavities_, ownerGas_;
+    std::vector<std::vector<std::size_t>> cavitySurfaces_, bodyContacts_;
+    std::map<StructuralSurfaceId,std::size_t> surfaceBodies_;
+    std::vector<std::pair<std::size_t,unsigned>> surfaceSlots_; // assembly/side in body order
     void sources(double seconds);
     void thermalStep(double seconds,double midpoint,std::size_t maxIterations);
     void publish();
@@ -129,6 +164,9 @@ private:
     std::vector<double> solarWeights_;
     struct DoorPose {
         std::size_t door{},portal{},parkCavity{};
+        StructuralOwner parkOwner{};
+        std::array<std::size_t,2> bodies{SIZE_MAX,SIZE_MAX};
+        std::array<std::optional<StructuralOwner>,2> closedOwners;
         std::optional<std::size_t> parkGas;
         std::array<std::size_t,2> surface{SIZE_MAX,SIZE_MAX},exterior{SIZE_MAX,SIZE_MAX},gas{SIZE_MAX,SIZE_MAX};
         std::array<std::optional<std::size_t>,2> closedCavity,closedGas;

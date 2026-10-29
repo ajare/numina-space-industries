@@ -153,6 +153,7 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
     if (mode==CellThermalMode::LocalStructure) {
         if (!geometry_.structure) throw std::invalid_argument("Local structural topology missing at construction");
         const auto& topology=*geometry_.structure;
+        structure_.enabled=true;
         structure_.bodies=topology.bodies;checkpointBodies_=structure_.bodies;
         structuralGas_.resize(fluid_.states().size());
         std::vector<station::ThermalGasContact> gasContacts;
@@ -171,6 +172,7 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
                 pose.door=std::size_t(door-geometry_.doors.begin());
                 // Canonical negative-side Interior endpoint wins; no gas required.
                 const auto park=*assembly.owners[assembly.owners[0] ? 0 : 1];
+                pose.parkOwner=park;pose.bodies=assembly.bodies;pose.closedOwners=assembly.owners;
                 pose.parkCavity=ownerCavities.at(park);
                 if(const auto cell=ownerCells.find(park);cell!=ownerCells.end()) pose.parkGas=cell->second;
                 pose.portal=portals.size();
@@ -233,6 +235,12 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
             const auto space=geometry_.thermal.hull ? geometry_.thermal.hull->sinkTemperatureC+station::StationCelsiusOffset : 3;
             portals.push_back({first,second,opening.door ? 0 : opening.areaM2,space});
         }
+        structure_.assemblies=topology.assemblies.size();structure_.solidContacts=topology.contacts.size();
+        structure_.gasContacts=gasContacts.size();structure_.exteriorContacts=radiation.size();
+        structure_.cavities=topology.cavityCount;structure_.portals=portals.size();
+        structure_.topologyStorageBytes=topology.predictedStorageBytes;
+        observedPortals_=portals;
+        buildStructuralObservations();
         if (!structure_.bodies.empty()) {
             structuralRadiation_.emplace(structure_.bodies.size()+structuralGas_.size(),topology.cavityCount,
                 cavitySurfaces,std::move(portals));
@@ -304,6 +312,7 @@ bool CellAtmosphereTransport::setDoorOpen(std::size_t level,std::size_t wall,boo
         if(!structuralRadiation_) continue;
         for(unsigned side=0;side<2;++side) {
             if(pose.surface[side]==SIZE_MAX) continue;
+            surfaceOwners_[pose.bodies[side]]=open ? std::optional(pose.parkOwner) : pose.closedOwners[side];
             structuralRadiation_->setSurface(pose.surface[side],open ? pose.parkCavity : pose.closedCavity[side].value_or(pose.parkCavity),
                 open || pose.closedCavity[side] ? core::DoorOpeningAreaM2 : 0);
             if(pose.exterior[side]!=SIZE_MAX) {
@@ -315,6 +324,8 @@ bool CellAtmosphereTransport::setDoorOpen(std::size_t level,std::size_t wall,boo
                 structuralSolver_->setGasContact(pose.gas[side],gas.value_or(0),gas ? core::DoorOpeningAreaM2 : 0);
             }
         }
+        observedPortals_[pose.portal].areaM2=open ? core::DoorOpeningAreaM2 : 0;
+        std::fill(committedIrradiance_.begin(),committedIrradiance_.end(),std::nullopt);
         structuralRadiation_->setPortalArea(pose.portal,open ? core::DoorOpeningAreaM2 : 0);
         structuralRadiation_->updateCoefficients();
     }
@@ -336,6 +347,7 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
     const auto previousWork=work_;const auto previousIterations=thermalIterations_;const auto previousResidual=thermalFluxResidual_;
     const auto previousReport=structure_.work;
     const auto previousExterior=structure_.exteriorHeatJ;
+    const auto previousPaths=structure_.paths;
     std::copy(structure_.bodies.begin(),structure_.bodies.end(),checkpointBodies_.begin());
     std::copy(faceTransfers_.begin(),faceTransfers_.end(),checkpointTransfers_.begin());
     work_={};thermalIterations_=0;thermalFluxResidual_=0;structure_.work={};
@@ -382,13 +394,22 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
                 ledger.condensateEnergyJ+=phase.carriedEnergyJ;ledger.inventoryEnergyJ-=phase.carriedEnergyJ;
             }
         }
-        publish();elapsed_+=seconds;return true;
+        publish();
+        if(mode_==CellThermalMode::LocalStructure) {
+            const auto& p=structure_.work.paths;
+            structure_.rates={p.gasIntoSolidJ/seconds,p.solidConductionMagnitudeJ/seconds,p.interiorRadiationMagnitudeJ/seconds,
+                p.portalEscapeJ/seconds,p.exteriorRadiationJ/seconds,p.absorbedSolarJ/seconds};
+            structure_.observedSeconds=elapsed_+seconds;
+            if(structuralRadiation_) for(std::size_t c=0;c<committedIrradiance_.size();++c)
+                committedIrradiance_[c]=structuralRadiation_->trialIrradiance(c);
+        }
+        elapsed_+=seconds;return true;
     } catch (const std::exception& e) {
         diagnostic_=e.what();fluid_.restore(checkpoint_);std::copy(checkpointLedger_.begin(),checkpointLedger_.end(),ledger_.begin());
         momentum_=checkpointMomentum;thermal_.hull=checkpointHull;
         std::copy(checkpointThermalLinks_.begin(),checkpointThermalLinks_.end(),thermal_.linkEnergyJ.begin());
         std::copy(checkpointBodies_.begin(),checkpointBodies_.end(),structure_.bodies.begin());
-        structure_.exteriorHeatJ=previousExterior;structure_.work=previousReport;
+        structure_.exteriorHeatJ=previousExterior;structure_.work=previousReport;structure_.paths=previousPaths;
         work_=previousWork;thermalIterations_=previousIterations;thermalFluxResidual_=previousResidual;
         std::copy(checkpointTransfers_.begin(),checkpointTransfers_.end(),faceTransfers_.begin());
         return false;
@@ -468,6 +489,8 @@ void CellAtmosphereTransport::structuralStep(double seconds,double midpoint,std:
     work.lastTrialNonlinearResidualJ=report.lastTrialNonlinearResidualJ;
     work.fluxResidualJ=std::max(work.fluxResidualJ,report.fluxResidualJ);
     work.energyResidualJ+=report.energyResidualJ;work.exteriorHeatJ+=report.exteriorHeatJ;
+    work.paths+=report.paths;structure_.paths+=report.paths;
+    work.cavityClosureW=std::max(work.cavityClosureW,report.cavityClosureW);
     structure_.exteriorHeatJ+=report.exteriorHeatJ;
     thermalIterations_=work.work;thermalFluxResidual_=work.fluxResidualJ;
     const auto heat=structuralSolver_->heatJ();const auto n=structure_.bodies.size();

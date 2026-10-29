@@ -454,14 +454,23 @@ void localStructuralPlayback() {
     require(playback.runtime()->snapshot().elapsedSeconds==1 && !playback.editingAllowed(),"Accelerated local playback/lockout failed");
     require(playback.runtime()->snapshot().thermalLinks.empty() && !playback.runtime()->snapshot().thermal.hull,"Local playback published legacy topology");
     require(playback.runtime()->structuralSnapshot().solidEnergyJ<energy && scene==authored,"Local playback lost solids or mutated authoring");
+    const auto paths=playback.runtime()->structuralSnapshot().paths;
+    const auto rates=playback.runtime()->structuralSnapshot().rates;
+    const auto surfaces=playback.runtime()->structuralCell({0,0,0});
+    require(surfaces.floor.surfaces==1 && surfaces.ceiling.surfaces==1 && surfaces.sides.surfaces==4,"Editor directional structural contract missing");
+    require(paths.exteriorRadiationJ>0 && rates.exteriorRadiationW>0,"Editor path publication missing");
     playback.togglePlaying();require(!playback.editingAllowed(),"Paused local playback unlocked edits");
-    playback.reset(scene);require(playback.editingAllowed() && playback.runtime()->structuralSnapshot().solidEnergyJ==energy,"Local Reset retained cooled energy");
+    playback.update(.5);
+    require(playback.runtime()->structuralSnapshot().paths==paths && playback.runtime()->structuralSnapshot().rates==rates,"Pause changed structural observations");
+    playback.reset(scene);require(playback.runtime()->structuralSnapshot().paths==station::NativeThermalPaths{},"Reset retained heat paths");require(playback.editingAllowed() && playback.runtime()->structuralSnapshot().solidEnergyJ==energy,"Local Reset retained cooled energy");
     for (const double duration:{0.1,1.0}) {
         CellPlaybackRuntime runtime(scene,{},std::nullopt,mode);require(runtime.update(0.1),"Local publication setup failed");
         const auto before=runtime.snapshot();const auto bodies=runtime.structuralSnapshot().bodies;
+        const auto paths=runtime.structuralSnapshot().paths;const auto rates=runtime.structuralSnapshot().rates;
         require(!runtime.update(duration,4096,0),"Local facade ignored thermal refusal");
         require(runtime.snapshot().elapsedSeconds==before.elapsedSeconds && runtime.snapshot().worldTick==before.worldTick
             && runtime.snapshot().completedTicks==before.completedTicks && runtime.snapshot().cellAtmospheres==before.cellAtmospheres,"Refusal changed committed gas/Lua publication");
+        require(runtime.structuralSnapshot().paths==paths && runtime.structuralSnapshot().rates==rates,"Facade published refused paths");
         for (std::size_t i=0;i<bodies.size();++i) require(bodies[i].energyJ()==runtime.structuralSnapshot().bodies[i].energyJ(),"Refusal changed solid publication");
         require(runtime.update(duration) && runtime.snapshot().elapsedSeconds==before.elapsedSeconds+duration,"Local facade retry failed");
     }
