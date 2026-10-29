@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 
 namespace {
@@ -376,6 +377,30 @@ void hullPlayback() {
     const auto blanket=temperature(I::HullType::MultiLayerBlanket);
     require(bare<blanket-1.0 && blanket<20.0,"Playback did not wire Hull drain links");
 }
+void orbitPlayback() {
+    using I=nsi::core::Installation;
+    auto run=[](const std::optional<I::Orbit>& orbit) {
+        station::editor::EditorSession session;
+        session.newDocument(1,1);
+        session.setHullType(I::HullType::BareSkin);
+        session.setOrbit(orbit);
+        require(session.installation().orbit()==orbit,"Session dropped the authored orbit");
+        station::editor::SimulationPlayback playback;
+        playback.synchronize(session.installation());
+        playback.setSpeedIndex(4);
+        playback.togglePlaying();
+        for (int frame=0;frame<600;++frame) playback.update(0.1);
+        const auto state=playback.runtime()->snapshot();
+        const auto& structure=playback.runtime()->structuralSnapshot();
+        require(state.healthy && !structure.bodies.empty(),"Orbit playback omitted local Hull panels");
+        return std::pair{structure.paths.absorbedSolarJ,structure.paths.exteriorRadiationJ};
+    };
+    const auto dark=run(std::nullopt);
+    require(dark.first==0.0L,"Dark control of the orbit playback fixture absorbed starlight");
+    const auto lit=run(I::Orbit{1361.0,5570.0,6791000.0});
+    require(lit.first>0.0L,"Authored orbit did not heat the playback hull");
+    require(lit.second>0.0L,"Playback Hull did not radiate");
+}
 void observationControls() {
     using namespace station::editor;using I=nsi::core::Installation;
     I scene(4,4);scene.setHullType(std::nullopt);scene.toggleWall(0,scene.level(0).horizontalWall(1,0));
@@ -630,6 +655,7 @@ int main() {
         doorControls();
         documentAvailability();
         hullPlayback();
+        orbitPlayback();
         temperatureHistory();
         EditorSession session;
         // A real load makes it impossible for a clock-only mock to pass.

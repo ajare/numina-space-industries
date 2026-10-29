@@ -1,6 +1,7 @@
 #include <nsi/core/Installation.h>
 #include <serialization/SerializationException.h>
 #include <yaml-cpp/yaml.h>
+#include <array>
 #include <iostream>
 #include <stdexcept>
 #include <limits>
@@ -256,8 +257,59 @@ void persistence() {
     n=YAML::Load(separated.serialize()); n["levels"][0]["walls"][separated.level(0).verticalWall(1,0)]="None";
     YAML::Emitter merged; merged<<n; refused([&]{separated.deserialize(merged.c_str());});
 }
+void orbitPersistence() {
+    using O=I::Orbit;
+    // A missing Orbit means no orbit, never a default one.
+    check(!I(1,1).orbit(),"New Installation must not author an orbit");
+    const O iss{1361.0,5570.0,6791000.0};
+    I i(1,1); i.setOrbit(iss);
+    check(i.orbit()==iss,"Authored orbit retained");
+    roundTrip(i);
+    const auto node=YAML::Load(i.serialize());
+    check(node["orbit"]["stellarIrradianceWPerM2"].as<double>()==1361.0,"Irradiance persisted");
+    check(node["orbit"]["orbitalPeriodS"].as<double>()==5570.0,"Orbital period persisted");
+    check(node["orbit"]["radiusFromPlanetCentreM"].as<double>()==6791000.0,"Orbital radius persisted");
+    // A geostationary author is just another set of numbers, not a mode.
+    I geo(1,1); geo.setOrbit(O{1361.0,86164.0,42164000.0}); roundTrip(geo);
+    // Absent key loads as no orbit rather than a substituted default.
+    auto bare=YAML::Load(i.serialize()); bare.remove("orbit");
+    YAML::Emitter bareOut; bareOut<<bare;
+    I loaded; loaded.deserialize(bareOut.c_str());
+    check(!loaded.orbit(),"Absent orbit key never applies a default");
+    // setOrbit refuses what the loader must refuse.
+    const double nan=std::numeric_limits<double>::quiet_NaN();
+    const double inf=std::numeric_limits<double>::infinity();
+    const std::array<O,8> invalid{
+        O{nan,5570.0,6791000.0},O{inf,5570.0,6791000.0},
+        O{0.0,5570.0,6791000.0},O{-1361.0,5570.0,6791000.0},
+        O{1361.0,0.0,6791000.0},O{1361.0,-5570.0,6791000.0},
+        O{1361.0,5570.0,nsi::core::PlanetRadiusM},
+        O{1361.0,5570.0,1000.0}};
+    for (const auto& orbit:invalid) refused([&]{ i.setOrbit(orbit); });
+    check(i.orbit()==iss,"Rejected setOrbit left the authored orbit intact");
+    auto badOrbit=[&](auto change) {
+        auto n=YAML::Load(i.serialize()); change(n); YAML::Emitter out; out<<n;
+        I target=I(1,1); target.setOrbit(iss);
+        bool threw=false;
+        try { target.deserialize(out.c_str()); } catch (const serialization::SerializationException&) { threw=true; }
+        check(threw && target.orbit()==iss,"Invalid orbit rejected transactionally");
+    };
+    badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=0.0;});
+    badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=-1.0;});
+    badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]=0.0;});
+    badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]=-5570.0;});
+    badOrbit([](auto n){n["orbit"]["radiusFromPlanetCentreM"]=nsi::core::PlanetRadiusM;});
+    badOrbit([](auto n){n["orbit"]["radiusFromPlanetCentreM"]=1000.0;});
+    badOrbit([](auto n){n["orbit"].remove("stellarIrradianceWPerM2");});
+    badOrbit([](auto n){n["orbit"].remove("orbitalPeriodS");});
+    badOrbit([](auto n){n["orbit"].remove("radiusFromPlanetCentreM");});
+    badOrbit([](auto n){n["orbit"]="ISS";});
+    badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]="92 minutes";});
+    badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::quiet_NaN();});
+}
 }
 int main() {
-    try { topology(); volumes(); persistence(); hullPersistence(); partitionPersistence(); compartmentLimit(); }
+    try { topology(); volumes(); persistence(); hullPersistence(); partitionPersistence(); orbitPersistence(); compartmentLimit(); }
     catch (const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

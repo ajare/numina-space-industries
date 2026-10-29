@@ -119,6 +119,9 @@ std::vector<station::AtmosphereSettings> expandInstallation(const core::Installa
 }
 ThermalExpansion expandThermal(const core::Installation& installation) {
     ThermalExpansion result;
+    // The authored sky travels with the document whether or not there is a
+    // Hull to heat; the bridge never substitutes a default for a missing one.
+    result.orbit = installation.orbit();
     if (!installation.hullType()) return result;
     const auto spec = core::Installation::hullSpec(*installation.hullType());
     double totalArea = 0.0;

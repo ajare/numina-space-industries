@@ -494,6 +494,31 @@ int runEditor() {
         if (ImGui::Combo("Partition type", &partitionIndex, partitionNames, 4))
             edit([&]{ session.setPartitionType(partitionIndex == 0 ? std::nullopt
                 : std::optional(static_cast<PartitionType>(partitionIndex - 1))); });
+        // The authored sky. No Orbit means no orbit: a dark sky and zero
+        // stellar gain, never a substituted default.
+        using Orbit = nsi::core::Installation::Orbit;
+        const auto orbit = session.installation().orbit();
+        bool authorOrbit = orbit.has_value();
+        if (ImGui::Checkbox("Author an orbit", &authorOrbit))
+            edit([&]{ session.setOrbit(authorOrbit
+                ? std::optional<Orbit>{orbit.value_or(Orbit{})}
+                : std::optional<Orbit>{}); });
+        ImGui::BeginDisabled(!authorOrbit);
+        if (orbit) {
+            double irradiance = orbit->stellarIrradianceWPerM2;
+            if (ImGui::InputDouble("Stellar irradiance W/m^2", &irradiance, 0, 0, "%.1f"))
+                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
+                         next.stellarIrradianceWPerM2 = irradiance; session.setOrbit(next); });
+            double period = orbit->orbitalPeriodS;
+            if (ImGui::InputDouble("Orbital period s", &period, 0, 0, "%.1f"))
+                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
+                         next.orbitalPeriodS = period; session.setOrbit(next); });
+            double radius = orbit->radiusFromPlanetCentreM;
+            if (ImGui::InputDouble("Orbit radius from planet centre m", &radius, 0, 0, "%.0f"))
+                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
+                         next.radiusFromPlanetCentreM = radius; session.setOrbit(next); });
+        }
+        ImGui::EndDisabled();
         ImGui::EndDisabled();
         const auto level_label="Level "+std::to_string(active_level);
         if (ImGui::BeginCombo("Level",level_label.c_str())) {

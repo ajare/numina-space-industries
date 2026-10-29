@@ -46,6 +46,9 @@ public:
     void setName(std::string name);
     void setHullType(std::optional<Installation::HullType> type);
     void setPartitionType(std::optional<Installation::PartitionType> type);
+    // The authored sky. Clearing it means no orbit: a dark sky and no
+    // stellar gain, never a substituted default.
+    void setOrbit(std::optional<Installation::Orbit> orbit);
     void undo();
     void redo();
     bool canUndo() const noexcept { return mEditingEnabled && !mUndoHistory.empty(); }

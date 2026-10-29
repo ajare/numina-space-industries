@@ -30,6 +30,20 @@ public:
     enum class PartitionType { BarePartition, ThermalBreak, InsulatedPartition };
     struct PartitionSpec { double transmittanceWPerM2K; };
     static PartitionSpec partitionSpec(PartitionType type);
+    // The authored sky. Pure intensive authored data - irradiance, a period
+    // and a radius - with no temperatures, no runtime inventories and no
+    // solver state, exactly as the Hull's radiative properties already are.
+    // The planet's rotation is deliberately absent: it drives neither
+    // eclipse nor exposure (ADR-0008). Beta angle, phase offset and Planet
+    // shine arrive with their own slices; until then Beta is zero.
+    struct Orbit {
+        double stellarIrradianceWPerM2{1361.0}; // Full Sun at Earth
+        double orbitalPeriodS{5570.0};          // Inertial period about the planet
+        double radiusFromPlanetCentreM{6791000.0}; // ISS-like altitude
+        // Throws std::invalid_argument for numbers no sky can be built from.
+        void validate() const;
+        bool operator==(const Orbit&) const = default;
+    };
     // The starting condition of a Sector's air, referenced rather than stored.
     // A preset carries only intensive constants - composition fractions,
     // pressure, temperature - so Sectors of any volume share one definition and
@@ -158,6 +172,10 @@ public:
     void setHullType(std::optional<HullType> type);
     std::optional<PartitionType> partitionType() const noexcept { return partitionType_; }
     void setPartitionType(std::optional<PartitionType> type);
+    // No authored Orbit means no orbit, never a default one: the sky stays
+    // dark and the Installation absorbs no stellar energy.
+    std::optional<Orbit> orbit() const noexcept { return orbit_; }
+    void setOrbit(std::optional<Orbit> orbit);
     struct ExteriorSkin {
         double sideM2 = 0.0;
         double roofM2 = 0.0;
@@ -191,6 +209,7 @@ private:
     std::string name_;
     std::optional<HullType> hullType_ = HullType::MultiLayerBlanket;
     std::optional<PartitionType> partitionType_ = PartitionType::InsulatedPartition;
+    std::optional<Orbit> orbit_{};
     std::vector<Level> levels_;
     void reindex();
 };

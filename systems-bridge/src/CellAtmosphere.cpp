@@ -12,6 +12,17 @@ using I=core::Installation;
 std::string atmosphereId(std::size_t level,std::int64_t uid) {
     return "sector-"+std::to_string(level)+"-"+std::to_string(uid);
 }
+// The outward unit normal of one Structural surface, read straight off the
+// assembly axis and side the structural topology already records. World axes
+// are the Nadir-lock body axes, so no rotation is applied here.
+ExteriorSolarFace exteriorSolarFace(const StructuralAssembly& assembly,unsigned side) {
+    ExteriorSolarFace face;
+    face.outwardNormal[std::size_t(assembly.id.axis)]=side==1 ? 1.0 : -1.0;
+    face.absorptivity=assembly.surfaceMaterial(side).absorptivity;
+    face.areaM2=assembly.areaM2;
+    face.body=assembly.bodies[side];
+    return face;
+}
 }
 CellAtmosphereExpansion expandCellAtmosphere(const I& installation,bool localStructure) {
     installation.validate();CellAtmosphereExpansion result;
@@ -141,8 +152,8 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
                         if(const auto cell=ownerCells.find(*owner);cell!=ownerCells.end()) pose.closedGas[side]=cell->second;
                     } else {
                         pose.exterior[side]=radiation.size();
-                        pose.solar[side]=material.absorptivity*assembly.areaM2/4;
                         radiation.push_back({body,station::ThermalRadiationBoundary::Exterior,0,assembly.areaM2,material.emissivity,material.absorptivity});
+                        exteriorSolar_.push_back(exteriorSolarFace(assembly,side));
                     }
                     pose.surface[side]=cavitySurfaces.size();
                     cavitySurfaces.push_back({body,station::ThermalRadiationBoundary::Cavity,pose.closedCavity[side].value_or(pose.parkCavity),
@@ -169,11 +180,16 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
                 } else {
                     const auto material=assembly.surfaceMaterial(side);
                     radiation.push_back({body,station::ThermalRadiationBoundary::Exterior,0,assembly.areaM2,material.emissivity,material.absorptivity});
+                    exteriorSolar_.push_back(exteriorSolarFace(assembly,side));
                 }
             }
         }
-        structuralExterior_.resize(radiation.size());solarWeights_.reserve(radiation.size());
-        for (const auto& face:radiation) solarWeights_.push_back(face.absorptivity*face.areaM2/4.0);
+        structuralExterior_.resize(radiation.size());
+        if(exteriorSolar_.size()!=structuralExterior_.size())
+            throw std::logic_error("Exterior solar faces do not match exterior radiation contacts");
+        // No authored Orbit leaves the evaluator dark: a dark sky is zero
+        // stellar gain, never a substituted default.
+        if(geometry_.thermal.orbit) exposure_=StellarExposureEvaluator(*geometry_.thermal.orbit);
         for (const auto& opening:topology.openings) {
             if(opening.door) {
                 const auto door=std::find_if(geometry_.doors.begin(),geometry_.doors.end(),[&](const auto& d){return d.structuralId==opening.face;});
@@ -276,7 +292,7 @@ bool CellAtmosphereTransport::setDoorOpen(std::size_t level,std::size_t wall,boo
                 open || pose.closedCavity[side] ? core::DoorOpeningAreaM2 : 0);
             if(pose.exterior[side]!=SIZE_MAX) {
                 structuralSolver_->setRadiationArea(pose.exterior[side],open ? 0 : core::DoorOpeningAreaM2);
-                solarWeights_[pose.exterior[side]]=open ? 0 : pose.solar[side];
+                exteriorSolar_[pose.exterior[side]].directScale=open ? 0.0 : 1.0;
             }
             if(pose.gas[side]!=SIZE_MAX) {
                 const auto gas=open ? pose.parkGas : pose.closedGas[side];
@@ -390,15 +406,16 @@ void CellAtmosphereTransport::structuralStep(double seconds,double midpoint,std:
         for (int g=0;g<4;++g) {gas.wetMoleFractions[g]=q[g]/molarMass[g];moles+=gas.wetMoleFractions[g];}
         for (auto& fraction:gas.wetMoleFractions) fraction/=moles;
     }
-    const station::ProfileSettings dark{0.0};
-    const auto& profile=geometry_.thermal.solarCycle ? *geometry_.thermal.solarCycle : dark;
-    const double exposure=station::evaluateStationProfile(profile,midpoint);
     const auto& hull=geometry_.thermal.hull;
-    const double irradiance=hull ? hull->fullSunIrradianceKWPerM2*1000 : station::HullSettings{}.fullSunIrradianceKWPerM2*1000;
+    // One exposure evaluation per thermal step, then per-surface direct flux
+    // from each surface's own Reset-time outward normal. The old lumped
+    // absorptivity * area / 4 weight is gone: there is now a lit side and a
+    // dark side, and each surface gets its own sunrise and sunset.
+    const auto exposure=exposure_.evaluate(midpoint);
     for (std::size_t i=0;i<structuralExterior_.size();++i) {
         auto& exterior=structuralExterior_[i];
         exterior.spaceTemperatureK=hull ? hull->sinkTemperatureC+station::StationCelsiusOffset : 3;
-        exterior.absorbedSolarW=solarWeights_[i]*irradiance*exposure;
+        exterior.absorbedSolarW=exteriorSolar_[i].directW(exposure_,exposure);
     }
     station::NativeThermalBudget budget;budget.maxWork=maxWork;
     if (!structuralSolver_->solve(structure_.bodies,structuralGas_,structuralExterior_,seconds,budget,&*structuralRadiation_))

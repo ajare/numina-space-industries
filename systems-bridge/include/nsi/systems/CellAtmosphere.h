@@ -5,6 +5,8 @@
 #include <station/NativeThermal.h>
 #include <nsi/systems/StructuralTopology.h>
 #include <nsi/systems/StructuralObservations.h>
+#include <nsi/systems/StellarExposure.h>
+#include <array>
 #include <map>
 #include <span>
 #include <string>
@@ -60,6 +62,27 @@ struct StructuralHeatRates {
     long double portalEscapeW{}, exteriorRadiationW{}, absorbedSolarW{};
     bool operator==(const StructuralHeatRates&) const = default;
 };
+// One exterior Structural surface as the stellar model sees it. Precomputed
+// once at Reset from the outward normal the structural topology already
+// records as an assembly axis and side; never re-derived per step. World
+// axes are the Nadir-lock body axes, so this is already the evaluator's
+// frame: side 0 faces the negative axis, side 1 the positive.
+struct ExteriorSolarFace {
+    std::array<double, 3> outwardNormal{};
+    double absorptivity{};
+    double areaM2{};
+    // The Structural surface body this face radiates to, so a caller can tie
+    // a face back to its temperature.
+    std::size_t body{SIZE_MAX};
+    // Zeroed while a Door leaf is swung off this face, so an open Door
+    // admits no direct stellar flux through it.
+    double directScale{1.0};
+    // Absorbed direct stellar power, W.
+    double directW(const StellarExposureEvaluator& evaluator,
+                  const StellarExposure& exposure) const noexcept {
+        return evaluator.directFluxWPerM2(outwardNormal, absorptivity, exposure) * areaM2 * directScale;
+    }
+};
 struct CellStructuralThermalState {
     bool enabled{};
     std::string_view modelRevision{station::NativeThermalModelRevision};
@@ -101,6 +124,12 @@ public:
     std::size_t thermalIterations() const {return thermalIterations_;}
     CellThermalMode thermalMode() const {return mode_;}
     const CellStructuralThermalState& structure() const {return structure_;}
+    // Exterior Structural surfaces with their Reset-time outward normals, in
+    // the same order as the solver's exterior contacts. Read-only view so
+    // callers can assert lit-area geometry directly.
+    std::span<const ExteriorSolarFace> exteriorSolarFaces() const noexcept {return exteriorSolar_;}
+    // The sky this transport is under; dark when no Orbit was authored.
+    const StellarExposureEvaluator& exposureEvaluator() const noexcept {return exposure_;}
     // Caller-bounded, nonrecursive, allocation-free local queries. Cavity index
     // identifies a geometric Interior Sector, including missing-gas presets.
     std::optional<StructuralSurfaceObservation> structuralSurface(StructuralSurfaceId) const;
@@ -151,7 +180,8 @@ private:
     std::vector<station::ThermalBody> checkpointBodies_;
     std::vector<station::NativeThermalGas> structuralGas_;
     std::vector<station::NativeThermalExterior> structuralExterior_;
-    std::vector<double> solarWeights_;
+    std::vector<ExteriorSolarFace> exteriorSolar_;
+    StellarExposureEvaluator exposure_;
     struct DoorPose {
         std::size_t door{},portal{},parkCavity{};
         StructuralOwner parkOwner{};
@@ -160,7 +190,6 @@ private:
         std::optional<std::size_t> parkGas;
         std::array<std::size_t,2> surface{SIZE_MAX,SIZE_MAX},exterior{SIZE_MAX,SIZE_MAX},gas{SIZE_MAX,SIZE_MAX};
         std::array<std::optional<std::size_t>,2> closedCavity,closedGas;
-        std::array<double,2> solar{};
     };
     std::vector<DoorPose> doorPoses_;
     std::string diagnostic_;

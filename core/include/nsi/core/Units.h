@@ -21,4 +21,9 @@ inline constexpr double DoorOpeningAreaM2{DoorWidthM * DoorHeightM};
 inline constexpr double CellAreaM2{CellWidthM * CellDepthM};
 inline constexpr double CellVolumeM3{CellAreaM2 * LevelHeightM};
 
+// Every Installation orbits one world; there is no planet catalogue. The
+// radius bounds the authored orbital radius (a Hull cannot sit inside the
+// ground) and sets how much of the sky the planet fills. Earth-like.
+inline constexpr double PlanetRadiusM{6371000.0};
+
 } // namespace nsi::core

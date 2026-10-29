@@ -3,6 +3,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cmath>
 #include <climits>
 #include <limits>
 #include <map>
@@ -317,6 +318,9 @@ bool Installation::removeTopLevel() {
 }
 void Installation::validate() const {
     require(!levels_.empty(),"Installation must contain a Level");
+    // An authored Orbit is validated wherever it is read, so a document that
+    // serializes has a sky the bridge can actually build.
+    if (orbit_) orbit_->validate();
     std::set<std::tuple<std::size_t,std::int64_t,std::int64_t>> claims;
     std::size_t compartments=0;
     for (std::size_t l=0;l<levels_.size();++l) {
@@ -375,6 +379,18 @@ void Installation::setPartitionType(std::optional<PartitionType> type) {
 void Installation::setHullType(std::optional<HullType> type) {
     if (type) (void)hullSpec(*type);
     hullType_ = type;
+}
+void Installation::Orbit::validate() const {
+    require(std::isfinite(stellarIrradianceWPerM2) && stellarIrradianceWPerM2 > 0.0,
+            "Orbit Stellar irradiance must be finite and positive");
+    require(std::isfinite(orbitalPeriodS) && orbitalPeriodS > 0.0,
+            "Orbit Orbital period must be finite and positive");
+    require(std::isfinite(radiusFromPlanetCentreM) && radiusFromPlanetCentreM > PlanetRadiusM,
+            "Orbit radius must be finite and greater than the planet radius");
+}
+void Installation::setOrbit(std::optional<Orbit> orbit) {
+    if (orbit) orbit->validate();
+    orbit_ = orbit;
 }
 const Installation::Sector* Installation::interiorAtWorld(
     std::size_t l, std::int64_t x, std::int64_t y) const {
@@ -444,6 +460,13 @@ std::string Installation::serialize() const {
     case PartitionType::InsulatedPartition: partition = "InsulatedPartition"; break;
     }
     root["partition"] = partition;
+    if (orbit_) {
+        YAML::Node o;
+        o["stellarIrradianceWPerM2"] = orbit_->stellarIrradianceWPerM2;
+        o["orbitalPeriodS"] = orbit_->orbitalPeriodS;
+        o["radiusFromPlanetCentreM"] = orbit_->radiusFromPlanetCentreM;
+        root["orbit"] = o;
+    }
     root["levels"]=YAML::Node(YAML::NodeType::Sequence);
     for (const auto& grid:levels_) {
         YAML::Node l; l["width"]=grid.width_; l["depth"]=grid.depth_;
@@ -513,6 +536,23 @@ void Installation::deserialize(const std::string& text) {
             else if (value == "ThermalBreak") partition = PartitionType::ThermalBreak;
             else if (value == "InsulatedPartition") partition = PartitionType::InsulatedPartition;
             else require(value == "none", "Invalid Partition type");
+        }
+        // Absent means no orbit, never a default one. An authored Orbit is a
+        // complete record: a partial one is refused rather than padded.
+        std::optional<Orbit> orbit;
+        if (root["orbit"]) {
+            auto on = root["orbit"]; mapNode(on, "orbit");
+            auto number = [](const YAML::Node& n, const char* key) {
+                require(n[key].IsDefined() && n[key].IsScalar(),
+                       std::string("Orbit ") + key + " is required");
+                return n[key].as<double>();
+            };
+            Orbit o;
+            o.stellarIrradianceWPerM2 = number(on, "stellarIrradianceWPerM2");
+            o.orbitalPeriodS = number(on, "orbitalPeriodS");
+            o.radiusFromPlanetCentreM = number(on, "radiusFromPlanetCentreM");
+            o.validate();
+            orbit = o;
         }
         auto ls=root["levels"]; require(ls.IsSequence() && ls.size()>0,"Expected Levels");
         std::vector<Level> loaded;
@@ -594,6 +634,7 @@ void Installation::deserialize(const std::string& text) {
         next.name_=root["name"].as<std::string>();
         next.hullType_ = hull; // Never apply creation-time defaults when loading.
         next.partitionType_ = partition;
+        next.orbit_ = orbit; // Never apply creation-time defaults when loading.
         *this=std::move(next);
     } catch (const std::exception& e) { throw serialization::SerializationException(e.what()); }
 }

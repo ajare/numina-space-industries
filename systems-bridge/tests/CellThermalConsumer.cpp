@@ -60,7 +60,9 @@ void thermalDefaults() {
     require(runtime.structure().solidEnergyJ<initial && runtime.structure().paths.exteriorRadiationJ>0,"Local surfaces did not radiate");
     require(room.serialize()==authored,"Thermal playback mutated authoring");
 
-    expansion.thermal.solarCycle=station::ProfileSettings{1.0};
+    // The native sky is driven by the authored Orbit, not by a hand-authored
+    // solar profile: an authored Orbit number reaches a hull temperature.
+    expansion.thermal.orbit=I::Orbit{1361.0,5570.0,6791000.0};
     CellAtmosphereTransport solar(expansion);
     require(solar.advance(.1) && solar.structure().paths.absorbedSolarJ>0,"Stellar input did not enter structural ledger");audit(solar);
 

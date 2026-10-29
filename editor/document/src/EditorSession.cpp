@@ -200,6 +200,9 @@ void EditorSession::setHullType(std::optional<Installation::HullType> type) {
 void EditorSession::setPartitionType(std::optional<Installation::PartitionType> type) {
     edit([&](auto& i){ i.setPartitionType(type); });
 }
+void EditorSession::setOrbit(std::optional<Installation::Orbit> orbit) {
+    edit([&](auto& i){ i.setOrbit(orbit); });
+}
 void EditorSession::undo() {
     if (!mEditingEnabled) return;
     endStroke(); if (mUndoHistory.empty()) return;
