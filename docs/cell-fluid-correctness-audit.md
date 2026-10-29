@@ -1,5 +1,12 @@
 # Cell-fluid correctness audit: two-Door S0 corner loads
 
+**Historical HLLE baseline audit (`45d170b`).** The owner subsequently requested
+plausible flow at the existing Cell scale; [shear restoration v2](cell-fluid-shear-restoration.md)
+now changes the production native gas flux and substantially improves this replay.
+The findings and raw baseline data below are retained, not presented as results
+from the revised solver. Reproduce these historical numbers from `45d170b`; the
+current study executable uses v2.
+
 ## Verdict
 
 **The coarse load/pressure predictions are not validated by the previous

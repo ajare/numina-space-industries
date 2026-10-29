@@ -473,6 +473,7 @@ int runEditor() {
         if (ImGui::Combo("Thermal backend (resets run)",&backend,"Geometry (legacy)\0LocalStructure (testing startup)\0"))
             edit([&]{simulation.reset(session.installation(),backend ? nsi::systems::CellThermalMode::LocalStructure : nsi::systems::CellThermalMode::Geometry);});
         ImGui::EndDisabled();
+        ImGui::Text("Gas model: %.*s",static_cast<int>(station::CellFluidModelRevision.size()),station::CellFluidModelRevision.data());
         ImGui::TextWrapped("LocalStructure starts enabled for testing. Performance gate failed; accelerated updates may refuse. Changing backend performs a full Reset.");
         station::editor::drawThermalRenderControls(render_settings);
         station::editor::drawPressureRenderControls(render_settings);

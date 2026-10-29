@@ -10,7 +10,33 @@ The breach rule explicitly revises ADR-0002/0003's Door-only exterior exchange r
 
 The Cell atmosphere is authoritative in playback. Sector readouts and histories aggregate it, while temperature/pressure maps and hover inspection show Cell values, with optional airflow-load arrows (ADR-0005) and Sector pressure mean/min/max. Initial physics retains the four existing ideal gases and local humidity/condensation, without turbulence, buoyancy, sub-Cell detail or vertical flow. [ADR-0005](0005-passive-aerodynamic-loads.md) extends the original no-object-forces scope with passive load estimates, not rigid-body motion or two-way gas coupling. Sector loads distribute by Cell volume; Door flow uses actual adjacent Cells. Existing height-dependent Hull/partition thermal areas remain unchanged, with heat applied at the corresponding boundary Cells. Explicit occupant/equipment placement is deferred.
 
-The kernel, authored Cell topology, per-Cell loads/condensation, localized Hull/partition conduction and radiation, whole-update rollback and Sector aggregation are implemented. Editor playback owns the Geometry-mode transport through `CellPlaybackRuntime`, which publishes shared snapshot views for existing panels without constructing a compartment runtime. Keeping this facade distinct from `StationSystemsRuntime` avoids accidentally running both gas/heat models. Explicit reservoir names still have no definitions in Installation expansion and refuse Geometry mode rather than becoming implicit sinks. The kernel uses conservative finite volumes with HLLE fluxes and acoustic CFL substeps. Momentum accounting includes pressure stress and fixed-Wall reaction impulse; fixed Walls transfer no energy. HLLE supplies local conservative numerical mixing, not a calibrated molecular diffusion or turbulence model. Its restricted-face flux is a prototype aperture treatment, not a claim of matching the standalone analytic Door orifice relation. Integration checks actual aperture geometry, adjacent-Cell transport, Door controls and transfer accounting, but does not assert analytic nozzle calibration. Displayed flow regimes are pressure-based estimates; equal local pressures do not exclude momentum-driven flow.
+The kernel, authored Cell topology, per-Cell loads/condensation, localized Hull/partition conduction and radiation, whole-update rollback and Sector aggregation are implemented. Editor playback owns the Geometry-mode transport through `CellPlaybackRuntime`, which publishes shared snapshot views for existing panels without constructing a compartment runtime. Keeping this facade distinct from `StationSystemsRuntime` avoids accidentally running both gas/heat models. Explicit reservoir names still have no definitions in Installation expansion and refuse Geometry mode rather than becoming implicit sinks. The kernel uses conservative finite volumes with HLLE bulk fluxes, contact-speed shear restoration and acoustic CFL substeps. Momentum accounting includes pressure stress and fixed-Wall reaction impulse; fixed Walls transfer no energy. HLLE supplies local conservative species/contact mixing, not a calibrated molecular diffusion or turbulence model. Its restricted-face flux is a prototype aperture treatment, not a claim of matching the standalone analytic Door orifice relation. Integration checks actual aperture geometry, adjacent-Cell transport, Door controls and transfer accounting, but does not assert analytic nozzle calibration. Displayed flow regimes are pressure-based estimates; equal local pressures do not exclude momentum-driven flow.
+
+## Numerical amendment: Cell-scale shear restoration
+
+The owner requested plausible flow at the existing Cell resolution after the
+[two-Door audit](../cell-fluid-correctness-audit.md) found acoustic-speed
+sideways momentum mixing dominating physical advection. Revision
+`cell-fluid-v2-shear` adds an HLLEM-style shear-wave correction to open faces:
+tangential momentum and its associated kinetic-energy flux follow the contact
+speed, instead of being diffused at the sound-speed scale. The normal acoustic
+flux, actual sound speed/CFL, species/contact mixing, aperture areas/Cd and
+reflecting-Wall policy remain unchanged. Full HLLC was not selected because it
+would also remove existing equal-pressure composition mixing and broaden the
+change beyond the observed problem.
+
+The correction is conservative and accepted only when both modified HLL fan
+states retain finite nonnegative internal energy. Otherwise that face retains
+its original HLLE flux. Exterior/unresolved states use the existing treatment.
+Whole-Cell positivity refinement, deterministic budgets, rollback and native
+no-allocation stepping remain. This is a numerical admissibility guard, not a
+hardware-dependent fidelity fallback, state clamp or force-to-breach rule.
+
+This amends the original all-wave-HLLE numerical choice only. No finer production
+mesh, turbulence model, inventory/object motion or standalone-compartment change
+is introduced. See [derivation, regressions and measured tradeoffs](../cell-fluid-shear-restoration.md).
+Quantitative engineering/nozzle/force calibration and the failed rollout gate
+are not approved by this visual-fidelity improvement.
 
 The native heat graph uses passive sparse backward Euler, bounded to 0.1 s source/thermal intervals, rather than extending the compartment solver's quadratic dense matrix to thousands of Cells. Common Hull stars have an exact elimination; general graphs use preconditioned CG with preallocated linear storage. Actual Cell gas capacities control the solve, unresolved gas detaches without losing its inventory, and bounded energy-constraint/flux residuals are exposed. Radiation reuses the existing nonlinear Hull integration in half-steps. This is first-order temporal conduction, independently tested for refinement and stiff trace capacities, not a replacement of the standalone compartment solver's second-order extrapolation.
 

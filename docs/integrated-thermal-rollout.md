@@ -291,9 +291,16 @@ The owner's two-Door S0 investigation found a separate spatial-fidelity concern:
 flux, conservation, symmetry and activity checks pass, but numerical momentum
 diffusion dominates local advection and corner pressure/load estimates are
 strongly resolution-dependent. This is not a validated physical stagnation result
-or a passed force-prediction accuracy gate. No production solver change was made;
-142/142 Release tests pass with the added audit test. The existing rollout
-measurements above remain historical evidence, not accuracy approval.
+or a passed force-prediction accuracy gate. The audit itself made no production
+solver change. The owner subsequently requested plausible behaviour at the same
+Cell granularity: [gas revision v2](cell-fluid-shear-restoration.md) now restores
+the contact-speed shear wave, improving the actual S0 replay without changing
+force formulas, acoustic speed, geometry or work budgets. All 142 Release tests
+pass, including expanded shear and two-Door regressions. Paired serial runs record
+the cost: sustained 4096-Cell LocalStructure updates rise from 36.47 to 42.23 ms
+per 0.1 simulated seconds, and the accelerated cold-repressurisation refusal
+remains. This is personal-test enablement, not a passed rollout/force-calibration
+gate. The measurements above remain historical evidence for the older gas flux.
 
 ## Requested rollout decision
 

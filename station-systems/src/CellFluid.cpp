@@ -28,6 +28,44 @@ bool finitePrimitive(const CellFluidPrimitive& p) {
         && std::isfinite(p.temperatureK) && std::isfinite(p.pressurePa)
         && std::isfinite(p.velocityX) && std::isfinite(p.velocityY) && std::isfinite(p.soundSpeed);
 }
+struct ShearFlux {double momentum{},energy{};};
+// Restore only the linearly-degenerate shear wave of HLLE (HLLEM-style).
+// Species/contact mixing and normal acoustic dissipation are unchanged. The
+// correction eigenvector is (delta m_t, delta E) = (1, Roe v_t), so restoring
+// momentum never creates or discards total energy at an internal face.
+ShearFlux contactShearFlux(const CellFluidPrimitive& a,const CellFluidPrimitive& b,
+    double ea,double eb,double ra,double rb,int axis,double ua,double ub,double left,double right) {
+    if(!a.resolvedGas || !b.resolvedGas || !(left<0 && right>0)) return {};
+    const double ta=axis==0?a.velocityY:a.velocityX,tb=axis==0?b.velocityY:b.velocityX;
+    if(ta==tb) return {};
+    const double sum=ra+rb;
+    if(!(sum>0) || !std::isfinite(sum)) return {};
+    const double weightA=ra/sum,weightB=rb/sum;
+    const double u=weightA*ua+weightB*ub,t=weightA*ta+weightB*tb;
+    const double inv=1/(right-left),invLeft=1/left,invRight=1/right;
+    // This factor reduces the shear-wave HLL viscosity to contact-speed
+    // upwinding. It is not a tuned gas speed or an attraction to an opening.
+    const double restore=std::max(0.,1-std::max(u,0.)*invRight-std::min(u,0.)*invLeft);
+    const double correction=-left*right*inv*restore*ra*rb*(tb-ta);
+    const double energyCorrection=t*correction;
+    if(!std::isfinite(correction) || !std::isfinite(energyCorrection)) return {};
+    const double wa=(ua-left)*inv,wb=(right-ub)*inv;
+    const double rho=wa*a.density+wb*b.density;
+    const double mn=wa*a.density*ua+wb*b.density*ub+(a.pressurePa-b.pressurePa)*inv;
+    const double mt=wa*a.density*ta+wb*b.density*tb;
+    const double e=wa*ea+wb*eb+(a.pressurePa*ua-b.pressurePa*ub)*inv;
+    if(!(rho>0) || !std::isfinite(rho)) return {};
+    const double inverseTwiceRho=.5/rho;
+    auto admissible=[&](double inverseSpeed) {
+        const double m=mt+correction*inverseSpeed,energy=e+energyCorrection*inverseSpeed;
+        return std::isfinite(m) && std::isfinite(energy) && energy>=(mn*mn+m*m)*inverseTwiceRho;
+    };
+    // Reject the anti-diffusive part if either reconstructed HLL fan state
+    // would have negative internal energy. Keep the original conservative HLLE
+    // flux at that face; the whole-Cell positivity/refusal checks still apply.
+    if(!admissible(invLeft) || !admissible(invRight)) return {};
+    return {correction,energyCorrection};
+}
 bool valid(const CellFluidState& s) {
     double m=0;
     for (int g=0;g<4;++g) { if (!std::isfinite(s.q[g]) || s.q[g]<0) return false;m+=s.q[g]; }
@@ -71,7 +109,7 @@ CellFluidSolver::CellFluidSolver(CellFluidMesh mesh):mesh_(std::move(mesh)) {
         if (!(c.volumeM3>0) || !std::isfinite(c.volumeM3) || !valid(c.initial)) throw std::invalid_argument("Invalid fluid Cell");
         state_.push_back(c.initial);inverseVolume_.push_back(1/c.volumeM3);
     }
-    backup_=candidate_=delta_=state_;primitive_.resize(n);active_.resize(n);initialContacts_.resize(n);
+    backup_=candidate_=delta_=state_;primitive_.resize(n);active_.resize(n);initialContacts_.resize(n);sqrtDensity_.resize(n);
     rate_.resize(mesh_.faces.size());transferred_.resize(mesh_.faces.size());
     for (const auto& f:mesh_.faces)
         if (f.a>=n || (f.b!=SIZE_MAX && f.b>=n) || f.a==f.b || f.axis<0 || f.axis>1
@@ -121,7 +159,7 @@ void CellFluidSolver::rebaseReference() {
 }
 void CellFluidSolver::refresh() {
     for (std::size_t i=0;i<state_.size();++i) {
-        primitive_[i]=primitive(state_[i],inverseVolume_[i]);
+        primitive_[i]=primitive(state_[i],inverseVolume_[i]);sqrtDensity_[i]=std::sqrt(primitive_[i].density);
         const auto& p=primitive_[i];const auto reference=referencePressure_;
         bool disturbed=std::abs(p.pressurePa-reference)>1e-11*std::max(1.0,reference)
             || std::abs(p.velocityX)+std::abs(p.velocityY)>1e-9;
@@ -154,7 +192,7 @@ double CellFluidSolver::addSpecies(std::size_t cell,std::size_t gas,double kg,do
     if (!valid(next)) throw std::invalid_argument("Fluid gas addition exceeds finite range");
     const auto p=cellFluidPrimitive(next,mesh_.cells[cell].volumeM3);
     if (!finitePrimitive(p)) throw std::invalid_argument("Fluid gas properties exceed finite range");
-    s=next;primitive_[cell]=p;active_[cell]=1;
+    s=next;primitive_[cell]=p;sqrtDensity_[cell]=std::sqrt(p.density);active_[cell]=1;
     return added;
 }
 CellFluidSolver::Removal CellFluidSolver::removeSpecies(std::size_t cell,std::size_t gas,double requested) {
@@ -174,7 +212,7 @@ CellFluidSolver::Removal CellFluidSolver::removeSpecies(std::size_t cell,std::si
     if (!valid(next)) throw std::runtime_error("Fluid gas removal failed positivity check");
     const auto p=cellFluidPrimitive(next,mesh_.cells[cell].volumeM3);
     if (!finitePrimitive(p)) throw std::runtime_error("Fluid gas removal exceeds finite range");
-    s=next;primitive_[cell]=p;active_[cell]=1;
+    s=next;primitive_[cell]=p;sqrtDensity_[cell]=std::sqrt(p.density);active_[cell]=1;
     return {kg,beforeEnergy-s.q[6]};
 }
 void CellFluidSolver::addHeat(std::size_t cell,double joules) {
@@ -212,7 +250,7 @@ CellFluidSolver::Condensation CellFluidSolver::condenseVapour(std::size_t cell) 
         const auto liquid=removeSpecies(cell,3,phase.condensedKg);
         return {liquid.kg,latentJ,liquid.energyJ};
     } catch (...) {
-        state_[cell]=before;primitive_[cell]=p;active_[cell]=1;throw;
+        state_[cell]=before;primitive_[cell]=p;sqrtDensity_[cell]=std::sqrt(p.density);active_[cell]=1;throw;
     }
 }
 bool CellFluidSolver::advance(double seconds,std::size_t maxSubsteps) {
@@ -294,6 +332,10 @@ bool CellFluidSolver::advance(double seconds,std::size_t maxSubsteps) {
             if (left>=0) wl=1;
             else if (right<=0) wr=1;
             else {wl=right/(right-left);wr=-left/(right-left);wd=left*right/(right-left);}
+            const auto shear=exterior ? ShearFlux{} : contactShearFlux(a,b,
+                state_[f.a].q[6]*inverseVolume_[f.a],state_[f.b].q[6]*inverseVolume_[f.b],
+                sqrtDensity_[f.a],sqrtDensity_[f.b],f.axis,ua,ub,left,right);
+            const int tangent=5-f.axis;
             for (int k=0;k<7;++k) {
                 const double qa=state_[f.a].q[k]*inverseVolume_[f.a];
                 const double qb=exterior ? 0 : state_[f.b].q[k]*inverseVolume_[f.b];
@@ -301,6 +343,9 @@ bool CellFluidSolver::advance(double seconds,std::size_t maxSubsteps) {
                 if (k==momentum) {fa+=normal*a.pressurePa;fb+=normal*b.pressurePa;}
                 if (k==6) {fa+=a.pressurePa*ua;fb+=b.pressurePa*ub;}
                 rate.q[k]=openArea*(wl*fa+wr*fb+wd*(qb-qa));
+            }
+            rate.q[tangent]+=openArea*shear.momentum;rate.q[6]+=openArea*shear.energy;
+            for (int k=0;k<7;++k) {
                 delta_[f.a].q[k]-=rate.q[k]-(k==momentum ? normal*a.pressurePa*openArea : 0);
                 if (!exterior) delta_[f.b].q[k]+=rate.q[k]-(k==momentum ? normal*b.pressurePa*openArea : 0);
             }

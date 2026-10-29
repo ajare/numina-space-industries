@@ -1,0 +1,10 @@
+4096 Cells, four gases, single native thread; construction excluded; 2 warmups + 10 measured trials
+rest, 0.100 simulated s: 0.120 ms mean, 0.120 ms max; steps=0, faces=0, retries=0
+wave, 0.100 simulated s: 5.273 ms mean, 5.295 ms max; steps=44, faces=112398, retries=0
+breaches, 0.010 simulated s: 0.572 ms mean, 0.590 ms max; steps=5, faces=244, retries=0
+breaches, 0.050 simulated s: 2.870 ms mean, 2.898 ms max; steps=27, faces=28932, retries=0
+breaches, 0.100 simulated s: 6.823 ms mean, 6.880 ms max; steps=54, faces=183448, retries=0
+breaches, 0.200 simulated s: 16.219 ms mean, 16.291 ms max; steps=110, faces=645244, retries=0
+breaches, 1.000 simulated s: 91.745 ms mean, 92.181 ms max; steps=560, faces=4389244, retries=0
+sustained-breaches, 0.100 simulated s: 9.687 ms mean, 9.768 ms max; steps=57, faces=474240, retries=0
+fully-disturbed, 0.100 simulated s: 7.469 ms mean, 7.568 ms max; steps=44, faces=366078, retries=0

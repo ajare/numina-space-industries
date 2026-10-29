@@ -123,7 +123,7 @@ int main(int argc,char** argv) {
         ImGui::CreateContext();ImPlot::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;
         io.DisplaySize={1400,2400};io.DeltaTime=1.f/60;
         unsigned char* pixels;int width,height;io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
-        std::cout<<std::setprecision(10)<<"# serial integrated gate; trials="<<trials<<"; warmups=2; size="<<size<<"; schema=4; wind=true; forces=true; acoustic_budget=4096; thermal_budget=4096\n";
+        std::cout<<std::setprecision(10)<<"# serial integrated gate; gas_model="<<station::CellFluidModelRevision<<"; trials="<<trials<<"; warmups=2; size="<<size<<"; schema=4; wind=true; forces=true; acoustic_budget=4096; thermal_budget=4096\n";
         std::cout<<"backend,model_revision,preset_revision,scenario,seconds,accepted,diagnostic,build_ms,prepare_ms,update_ms,max_update_ms,solver_ms,lifecycle_ms,publication_remainder_ms,gui_cpu_ms,preset_editor_update_ms,per_0.1s_ms,gas_cells,bodies,assemblies,solid_links,film_links,exterior_links,cavities,portals,cpp_live_bytes,cpp_build_peak_bytes,topology_bound_bytes,observation_payload_bytes,acoustic_steps,work,intervals,refinements,nonlinear,linear,nonlinear_residual_J,flux_residual_J,thermal_energy_residual_J,global_residual_J,cumulative_ledger_magnitude_J,solid_delta_J,elapsed_delta_s\n";
         for(const std::string name:{"rest","cooling","loaded","gradient","breaches","sustained-breaches","sustained-vacuum","evacuated","repressurisation","many-sectors","tall-offset"}) {
             const auto scene=sceneFor(name,size);

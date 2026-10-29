@@ -1,0 +1,10 @@
+Gas model cell-fluid-v2-shear; 4096 Cells, four gases, single native thread; construction excluded; 2 warmups + 10 measured trials
+rest, 0.100 simulated s: 0.120 ms mean, 0.124 ms max; steps=0, faces=0, retries=0
+wave, 0.100 simulated s: 6.946 ms mean, 7.036 ms max; steps=44, faces=111868, retries=0
+breaches, 0.010 simulated s: 0.583 ms mean, 0.595 ms max; steps=5, faces=244, retries=0
+breaches, 0.050 simulated s: 3.475 ms mean, 3.516 ms max; steps=28, faces=32000, retries=0
+breaches, 0.100 simulated s: 9.976 ms mean, 10.022 ms max; steps=57, faces=196228, retries=0
+breaches, 0.200 simulated s: 26.588 ms mean, 26.656 ms max; steps=116, faces=680860, retries=0
+breaches, 1.000 simulated s: 159.793 ms mean, 160.145 ms max; steps=587, faces=4599580, retries=0
+sustained-breaches, 0.100 simulated s: 16.833 ms mean, 16.876 ms max; steps=59, faces=490880, retries=0
+fully-disturbed, 0.100 simulated s: 12.449 ms mean, 12.503 ms max; steps=44, faces=366078, retries=0

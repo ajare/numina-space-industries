@@ -74,7 +74,11 @@ void check() {
     require(advanced,"Wave update failed");require(allocations==0,"Fluid stepping allocated heap memory");
     require(wave.primitives()[16*32+17].velocityX>0,"Pressure gradient did not produce wind");
     near(wave.primitives()[0].pressurePa,101325,1e-13);
-    require(wave.advance(0.1),"Wave propagation failed");const auto after=sum(wave.states());
+    // The first step creates transverse velocity jumps around the 2-D pulse;
+    // this advance exercises nonzero shear corrections with preallocated caches.
+    trackAllocations=true;const bool propagated=wave.advance(0.1);trackAllocations=false;
+    require(propagated,"Wave propagation failed");require(allocations==0,"Shear stepping allocated heap memory");
+    const auto after=sum(wave.states());
     for (int i=0;i<4;++i) near(before[i],after[i]);near(before[6],after[6]);
     const auto saved=std::vector<CellFluidState>(wave.states().begin(),wave.states().end());
     require(!wave.advance(1,1) && !wave.diagnostic().empty(),"Work budget not enforced");

@@ -4,9 +4,11 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace station {
+inline constexpr std::string_view CellFluidModelRevision="cell-fluid-v2-shear";
 // Integrated conserved quantities in SI: O2/N2/CO2/vapour kg, x/y momentum kg m/s,
 // total (internal + kinetic) energy J. No script/runtime/geometry dependency.
 struct CellFluidState {
@@ -39,7 +41,8 @@ CellFluidState makeCellFluidState(const std::array<double,4>& mass,double temper
     double velocityX=0,double velocityY=0);
 CellFluidPrimitive cellFluidPrimitive(const CellFluidState&,double volumeM3);
 
-// First-order positivity-checked HLLE finite volumes with adaptive acoustic CFL.
+// First-order positivity-checked HLLE finite volumes with contact-speed shear
+// restoration and adaptive acoustic CFL. Bulk/species mixing remains HLLE.
 // All stepping buffers are allocated at construction. advance is transactional;
 // a deterministic work limit refuses the update instead of skipping its time.
 class CellFluidSolver {
@@ -74,7 +77,7 @@ private:
     std::vector<CellFluidState> state_,backup_,candidate_,delta_,rate_,transferred_;
     std::vector<CellFluidPrimitive> primitive_;
     std::vector<unsigned char> active_,initialContacts_;
-    std::vector<double> inverseVolume_;
+    std::vector<double> inverseVolume_,sqrtDensity_; // exact primitive-derived Roe weights, preallocated
     std::vector<std::size_t> referenceOrder_;
     double referencePressure_{};
     std::array<double,4> referenceDensity_{};

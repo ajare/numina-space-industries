@@ -1,4 +1,5 @@
 #include <nsi/systems/CellAtmosphere.h>
+#include <station/CellAerodynamics.h>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -35,6 +36,22 @@ void check(const char* path) {
         && std::abs(run.fluid().primitives()[cell].temperatureK-*surface.areaWeightedTemperatureK())>.01,
         "S0 gas and structural temperatures conflated");
     require(run.structure().paths.portalEscapeJ>0,"S0 breach did not radiate");
+    // Owner's two-Door regression at the actual 2 m resolution. Preserve a
+    // directional inlet jet instead of acoustically smearing its X momentum
+    // into the row below. This is a specific replay quality check, not a rule
+    // that every instantaneous force everywhere must point at an opening.
+    CellAtmosphereTransport twoDoor(geometry,CellThermalMode::LocalStructure);
+    require(twoDoor.setDoorOpen(0,wall,true),"Two-Door exterior control refused");
+    for(int i=0;i<10;++i) step(twoDoor);
+    require(twoDoor.setDoorOpen(0,level.verticalWall(13,7),true),"S1-S0 Door control refused");
+    step(twoDoor);
+    const auto jet=geometry.cellIndices[0][7*16+13],offJet=geometry.cellIndices[0][8*16+13];
+    require(twoDoor.fluid().primitives()[jet].velocityX>10*std::abs(twoDoor.fluid().primitives()[offJet].velocityX),
+        "Two-Door inlet jet lost direction to lateral acoustic momentum mixing");
+    step(twoDoor);
+    station::CellAerodynamicField loads(twoDoor.fluid().states().size());loads.update(twoDoor.fluid());
+    for(unsigned x=13;x<=15;++x) require(loads.sample(twoDoor.fluid(),geometry.cellIndices[0][9*16+x]).forceN[0]>0,
+        "Two-Door bottom-row load remains dominated by adverse numerical pressure");
     // Controlled drain derivative: reach exact evacuation in bounded CI time,
     // without claiming a particular natural blowdown duration/temperature curve.
     auto drained=expandCellAtmosphere(original,true);

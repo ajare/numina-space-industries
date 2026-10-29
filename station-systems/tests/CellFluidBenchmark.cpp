@@ -7,7 +7,7 @@
 #include <string>
 using namespace station;
 int main() {
-    std::cout<<"4096 Cells, four gases, single native thread; construction excluded; 2 warmups + 10 measured trials\n";
+    std::cout<<"Gas model "<<CellFluidModelRevision<<"; 4096 Cells, four gases, single native thread; construction excluded; 2 warmups + 10 measured trials\n";
     for (const std::string scenario:{"rest","wave","breaches","sustained-breaches","fully-disturbed"}) {
         for (const double seconds:{0.01,0.05,0.1,0.2,1.0}) {
             if (scenario!="breaches" && seconds!=0.1) continue;
