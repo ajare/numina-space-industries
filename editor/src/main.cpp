@@ -8,6 +8,7 @@
 // draws, forwards input, and supplies native-dialog and storage adapters.
 
 #include "imgui.h"
+#include "implot.h"
 #include "imgui_internal.h"  // DockBuilder* (initial dock layout) is internal API
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
@@ -177,6 +178,7 @@ int runEditor() {
         return 1;
     }
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
+    ImPlot::CreateContext();
 
     bool running = true;
     bool first_frame = true;
@@ -557,9 +559,12 @@ int runEditor() {
         if (selected_sector) {
             const auto snapshot = simulation.runtime()
                 ? std::optional{simulation.runtime()->snapshot()} : std::nullopt;
-            station::editor::drawSectorThermal(station::editor::sectorThermal(
+            const auto thermal = station::editor::sectorThermal(
                 session.installation(), active_level, *selected_sector,
-                snapshot ? &*snapshot : nullptr));
+                snapshot ? &*snapshot : nullptr);
+            station::editor::drawSectorThermal(thermal, thermal.atmosphere
+                ? simulation.temperatureHistory(thermal.atmosphere->id)
+                : std::span<const station::editor::TemperatureSample>{});
         } else ImGui::TextUnformatted("Select a Sector in Sector mode to inspect its systems.");
         ImGui::End();
 
@@ -574,6 +579,7 @@ int runEditor() {
         SDL_GL_SwapWindow(window);
     }
 
+    ImPlot::DestroyContext();
     ImGui_ImplSDL2_Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext(context);

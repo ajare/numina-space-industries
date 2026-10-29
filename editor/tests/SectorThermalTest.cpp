@@ -1,6 +1,7 @@
 #include "SectorThermal.h"
 #include "SimulationPlayback.h"
 #include <nsi/systems/Atmosphere.h>
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -19,16 +20,32 @@ void check() {
     near(a.links[0].conductanceKWPerK,0.05*32/1000);
     near(*a.drainSeconds,0.851*12/(0.05*32/1000));
     require(!a.links[0].outwardKW, "Unstarted flow fabricated");
+    require(!a.atmosphere, "Live atmosphere fabricated without a snapshot");
     I bigger(2,2); bigger.setHullType(single.hullType());
     auto b = sectorThermal(bigger,0,0);
     require(*b.drainSeconds>*a.drainSeconds, "Timescale ignored actual geometry");
     SimulationPlayback playback;
-    playback.synchronize(single); playback.togglePlaying();
+    playback.synchronize(single);
+    auto initial = playback.runtime()->snapshot();
+    auto initialReadout = sectorThermal(single,0,0,&initial);
+    require(initialReadout.atmosphere.has_value(), "Initial atmosphere stats missing");
+    near(initialReadout.atmosphere->temperatureC,20);
+    near(initialReadout.atmosphere->startingTemperatureC,20);
+    playback.togglePlaying();
     for (int n=0;n<10;++n) playback.update(0.1);
     auto snapshot = playback.runtime()->snapshot();
     a=sectorThermal(single,0,0,&snapshot);
     require(a.links[0].outwardKW && *a.links[0].outwardKW>0, "Live Hull outflow missing");
     near(*a.links[0].outwardKW,snapshot.thermalLinks[0].flowRateKW);
+    require(a.atmosphere && *a.atmosphere==snapshot.atmospheres[0], "Thermal stats differ from runtime snapshot");
+    require(a.atmosphere->temperatureC < a.atmosphere->startingTemperatureC,
+        "Live temperature did not show Hull cooling");
+    require(a.atmosphere->currentEnergyKJ < a.atmosphere->startingEnergyKJ
+        && a.atmosphere->lastConductedKW < 0, "Live thermal energy and cooling rate missing");
+    playback.reset(single);
+    auto reset = playback.runtime()->snapshot();
+    near(sectorThermal(single,0,0,&reset).atmosphere->temperatureC,20);
+    require(!sectorThermal(single,0,0).atmosphere, "Removed snapshot left stale atmosphere stats");
 
     I pair(2,1);
     pair.setHullType(I::HullType::BareSkin);
@@ -47,7 +64,24 @@ void check() {
     require(runtime.advanceTo(1), "Thermal runtime failed");
     snapshot=runtime.snapshot();
     require(snapshot.healthy && snapshot.elapsedSeconds > 0, "Thermal runtime did not advance");
+    // Snapshot order is not Sector order: select by stable id, not index/name.
+    std::reverse(snapshot.atmospheres.begin(),snapshot.atmospheres.end());
     auto l=sectorThermal(pair,0,left,&snapshot), r=sectorThermal(pair,0,right,&snapshot);
+    require(l.atmosphere && r.atmosphere && l.atmosphere->id!=r.atmosphere->id,
+        "Sector selection did not resolve distinct atmosphere stats");
+    require(l.atmosphere->temperatureC > r.atmosphere->temperatureC,
+        "Selected temperature came from wrong compartment");
+    for (const auto* state : {&l,&r}) {
+        const auto expected=nsi::systems::expandSector(pair,0,state==&l ? left : right);
+        require(state->atmosphere->id==expected->id,"Readout ignored stable atmosphere identity");
+        const auto found=std::find_if(snapshot.atmospheres.begin(),snapshot.atmospheres.end(),
+            [&](const auto& air){ return air.id==expected->id; });
+        require(found!=snapshot.atmospheres.end() && *state->atmosphere==*found,
+            "Selected thermal stats do not match snapshot");
+    }
+    auto missing=snapshot; missing.atmospheres.clear();
+    require(!sectorThermal(pair,0,left,&missing).atmosphere,
+        "Missing compartment fabricated live stats");
     require(l.links.size()==2 && r.links.size()==2,"Not every attached link is shown");
     const auto neighbour=[](const SectorThermal& s)->const SectorThermalLink& {
         for (const auto& row:s.links) if (!row.hull) return row;
@@ -77,6 +111,11 @@ void check() {
     I vacuum; vacuum.deserialize(yaml);
     auto empty=sectorThermal(vacuum,0,0);
     require(!empty.hasAtmosphere && empty.links.empty() && !empty.isolated(),"Void compartment gained links");
+    require(!sectorThermal(vacuum,0,0,&snapshot).atmosphere,
+        "Void-preset Sector reused live stats from an old compartment");
+    vacuum.setCell(0,0,0,I::SectorType::Void);
+    require(!sectorThermal(vacuum,0,vacuum.level(0).cellData(0,0).sector,&snapshot).atmosphere,
+        "Void Sector gained atmosphere stats");
 }
 }
 int main() { try { check(); } catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; } }

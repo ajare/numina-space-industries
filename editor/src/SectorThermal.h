@@ -19,6 +19,9 @@ struct SectorThermalLink {
 struct SectorThermal {
     nsi::core::Installation::ExteriorSkin skin;
     bool hasAtmosphere = false;
+    // Owned snapshot for the selected stable atmosphere id; absent before a
+    // runtime exists or when that compartment is not present in the snapshot.
+    std::optional<StationAtmosphereSnapshot> atmosphere;
     std::optional<double> drainSeconds;
     std::vector<SectorThermalLink> links;
     bool isolated() const { return hasAtmosphere && links.empty(); }

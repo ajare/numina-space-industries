@@ -61,6 +61,25 @@ else()
     target_compile_options(editor-imgui PRIVATE -w)
 endif()
 
+# ImPlot v0.16 supports the Editor's pinned Dear ImGui 1.89.5.
+FetchContent_Declare(implot
+    GIT_REPOSITORY https://github.com/epezent/implot.git
+    GIT_TAG 18c72431f8265e2b0b5378a3a73d8a883b2175ff # v0.16
+)
+FetchContent_MakeAvailable(implot)
+add_library(editor-implot STATIC
+    "${implot_SOURCE_DIR}/implot.cpp"
+    "${implot_SOURCE_DIR}/implot_items.cpp"
+)
+add_library(editor::implot ALIAS editor-implot)
+target_include_directories(editor-implot PUBLIC "${implot_SOURCE_DIR}")
+target_link_libraries(editor-implot PUBLIC editor::imgui)
+if(MSVC)
+    target_compile_options(editor-implot PRIVATE /w)
+else()
+    target_compile_options(editor-implot PRIVATE -w)
+endif()
+
 # Headless playback adapter keeps simulation dependencies out of the document model.
 add_library(editor-simulation STATIC src/SimulationPlayback.cpp src/SectorThermal.cpp)
 target_include_directories(editor-simulation PUBLIC src)
@@ -89,7 +108,7 @@ target_link_libraries(editor PRIVATE
     editor::document
     editor-simulation
     nfd
-    editor::imgui
+    editor::implot
     SDL2::SDL2-static
     OpenGL::GL
 )
@@ -108,6 +127,13 @@ add_custom_target(editor-font-assets
 add_dependencies(editor editor-font-assets)
 
 if(BUILD_TESTING)
+    add_executable(editor-sector-thermal-panel-test
+        tests/SectorThermalPanelTest.cpp src/SectorThermalPanel.cpp)
+    target_link_libraries(editor-sector-thermal-panel-test PRIVATE editor-simulation editor::implot)
+    add_test(NAME editor-sector-thermal-panel COMMAND editor-sector-thermal-panel-test)
+    set_tests_properties(editor-sector-thermal-panel PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
     add_executable(editor-sector-systems-test tests/SectorThermalTest.cpp)
     target_link_libraries(editor-sector-systems-test PRIVATE editor-simulation)
     add_test(NAME editor-sector-systems COMMAND editor-sector-systems-test)

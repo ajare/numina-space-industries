@@ -1,14 +1,55 @@
 #include "SectorThermalPanel.h"
 #include "imgui.h"
+#include "implot.h"
 #include <algorithm>
 #include <cmath>
 
 namespace station::editor {
-void drawSectorThermal(const SectorThermal& state) {
+void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSample> history) {
     if (!state.hasAtmosphere) ImGui::TextUnformatted("No atmosphere compartment; no thermal links or Hull connection.");
     else if (state.isolated()) ImGui::TextUnformatted("Thermally isolated");
     if (!ImGui::BeginTabBar("SectorSystems")) return;
     if (ImGui::BeginTabItem("Thermal")) {
+        ImGui::TextUnformatted("Atmosphere thermal state");
+        if (state.atmosphere) {
+            const auto& air = *state.atmosphere;
+            ImGui::Text("Temperature: %.3f C", air.temperatureC);
+            if (!history.empty()) {
+                if (ImPlot::BeginPlot("Temperature — last minute###SectorTemperature", ImVec2(-1,180),
+                        ImPlotFlags_NoLegend)) {
+                    const double now = history.back().seconds;
+                    ImPlot::SetupAxes("Simulation time (s)", "Temperature (C)",
+                        ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
+                    ImPlot::SetupAxisLimits(ImAxis_X1, std::max(0.0,now-60.0),
+                        std::max(60.0,now), ImGuiCond_Always);
+                    ImPlot::PlotLineG("Temperature", [](int index, void* data) {
+                        const auto& sample = (*static_cast<std::span<const TemperatureSample>*>(data))[index];
+                        return ImPlotPoint(sample.seconds,sample.temperatureC);
+                    }, &history, static_cast<int>(history.size()));
+                    ImPlot::EndPlot();
+                }
+            } else ImGui::TextUnformatted("Temperature history unavailable.");
+            ImGui::Text("Starting temperature: %.3f C | Change: %+.3f C",
+                air.startingTemperatureC, air.temperatureC - air.startingTemperatureC);
+            ImGui::Text("Heat capacity: %.3f kJ/K", air.thermalCapacityKJPerK);
+            ImGui::Text("Thermal energy: %.3f kJ | Starting: %.3f kJ",
+                air.currentEnergyKJ, air.startingEnergyKJ);
+            ImGui::TextUnformatted("Last-step heat rates (kW; positive adds heat to this Sector)");
+            ImGui::Text("Conduction: %+.6f | Reservoir exchange: %+.6f",
+                air.lastConductedKW, air.lastExchangeIntoCompartmentKW);
+            ImGui::Text("Occupants: %+.6f | Latent heat: %+.6f | Advection: %+.6f",
+                air.lastOccupantHeatKW, air.lastLatentHeatKW, air.lastAdvectedKW);
+            ImGui::Text("Crew: %+.6f | Crops: %+.6f | Algae: %+.6f",
+                air.lastCrewHeatKW, air.lastCropHeatKW, air.lastAlgaeHeatKW);
+            ImGui::Text("Fixtures: %+.6f | Hazard heat: %+.6f",
+                air.lastFixtureHeatKW, air.lastHazardHeatKW);
+            ImGui::Text("Thermal energy balance residual: %+.6f kJ", air.residualKJ);
+        } else if (state.hasAtmosphere) {
+            ImGui::TextWrapped("Live atmosphere stats unavailable: no runtime snapshot for this compartment.");
+        } else {
+            ImGui::TextUnformatted("Atmosphere stats unavailable: no atmosphere compartment.");
+        }
+        ImGui::Separator();
         ImGui::Text("Exterior skin: %.2f m2 total", state.skin.totalM2());
         ImGui::Text("Side %.2f | Roof %.2f | Exposed floor underside %.2f m2",
             state.skin.sideM2, state.skin.roofM2, state.skin.floorUndersideM2);

@@ -94,6 +94,64 @@ void editingLockout() {
     require(session.installation() == beforeStroke, "Lock lost in-flight stroke history");
 }
 
+void temperatureHistory() {
+    using I=nsi::core::Installation;
+    using station::editor::SimulationPlayback;
+    I installation(2,1);
+    installation.toggleWall(0,installation.level(0).verticalWall(1,0));
+    SimulationPlayback playback;
+    playback.reset(installation);
+    const auto initial=playback.runtime()->snapshot();
+    for (const auto& air:initial.atmospheres) {
+        const auto samples=playback.temperatureHistory(air.id);
+        require(samples.size()==1,"History did not start at time zero");
+        near(samples[0].seconds,0); near(samples[0].temperatureC,air.temperatureC);
+    }
+    require(playback.temperatureHistory("missing").empty(),"Unknown compartment gained history");
+    for (int speed : {0,2,4}) {
+        playback.reset(installation);
+        playback.setSpeedIndex(speed);
+        playback.togglePlaying();
+        const int frames=static_cast<int>(70.0 / (0.1 * SimulationPlayback::speeds[speed])) + 1;
+        for (int frame=0;frame<frames;++frame) playback.update(0.1);
+        const auto snapshot=playback.runtime()->snapshot();
+        // Every Sector is recorded without needing to select it in the UI.
+        for (const auto& air:snapshot.atmospheres) {
+            const auto samples=playback.temperatureHistory(air.id);
+            require(samples.size()>50 && samples.size()<=602,"Minute history is not bounded");
+            require(samples.front().seconds >= snapshot.elapsedSeconds-60.0-1e-8,
+                "Expired sample remained in graph");
+            require(samples.front().seconds <= snapshot.elapsedSeconds-58.9,
+                "History did not retain the last minute");
+            require(samples.back().seconds <= snapshot.elapsedSeconds &&
+                samples.back().seconds > snapshot.elapsedSeconds-0.11,"History is not on simulation time");
+            for (std::size_t n=1;n<samples.size();++n)
+                require(samples[n].seconds>samples[n-1].seconds,"Duplicate or unordered history samples");
+            require(samples.back().temperatureC < samples.front().temperatureC,"History did not capture cooling");
+        }
+        const auto id=snapshot.atmospheres[0].id;
+        const auto count=playback.temperatureHistory(id).size();
+        const auto last=playback.temperatureHistory(id).back();
+        playback.togglePlaying(); playback.update(100);
+        require(playback.temperatureHistory(id).size()==count,"Paused graph added samples");
+        near(playback.temperatureHistory(id).back().seconds,last.seconds);
+        near(playback.temperatureHistory(id).back().temperatureC,last.temperatureC);
+    }
+    const auto id=initial.atmospheres[0].id;
+    playback.reset(installation);
+    require(playback.temperatureHistory(id).size()==1,"Reset retained old temperature graph");
+    near(playback.temperatureHistory(id)[0].temperatureC,20);
+    installation.setName("Replacement");
+    playback.synchronize(installation);
+    require(playback.temperatureHistory(id).size()==1,"Document replacement retained graph");
+    installation.setCell(0,0,0,I::SectorType::Void);
+    playback.synchronize(installation);
+    require(playback.temperatureHistory(id).empty(),"Removed compartment retained graph");
+    playback.synchronize(nullptr);
+    for (const auto& air:initial.atmospheres)
+        require(playback.temperatureHistory(air.id).empty(),"Closed document retained graph");
+}
+
 void hullPlayback() {
     using I=nsi::core::Installation;
     auto temperature=[](I::HullType type) {
@@ -180,6 +238,7 @@ int main() {
         editingLockout();
         documentAvailability();
         hullPlayback();
+        temperatureHistory();
         EditorSession session;
         // A real load makes it impossible for a clock-only mock to pass.
         auto yaml = nsi::core::Installation(1, 1).serialize();

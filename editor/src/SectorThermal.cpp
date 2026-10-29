@@ -11,6 +11,11 @@ SectorThermal sectorThermal(const nsi::core::Installation& installation,
     const auto atmosphere = nsi::systems::expandSector(installation, level, sector);
     if (!atmosphere) return result;
     result.hasAtmosphere = true;
+    if (live) {
+        const auto it = std::find_if(live->atmospheres.begin(), live->atmospheres.end(),
+            [&](const auto& state) { return state.id == atmosphere->id; });
+        if (it != live->atmospheres.end()) result.atmosphere = *it;
+    }
     std::map<std::string, std::string> names;
     for (std::size_t l = 0; l < installation.levelCount(); ++l) {
         const auto sectors = installation.level(l).sectors();

@@ -1,11 +1,16 @@
 #pragma once
 
+#include "TemperatureSample.h"
 #include <nsi/core/Installation.h>
 #include <station/StationSystemsRuntime.h>
 
 #include <array>
 #include <memory>
 #include <optional>
+#include <map>
+#include <span>
+#include <string>
+#include <vector>
 
 namespace station::editor {
 // Runtime preview only: simulation never writes into the authored document.
@@ -25,7 +30,14 @@ public:
     int speedIndex() const noexcept { return speedIndex_; }
     void update(double wallSeconds);
     const StationSystemsRuntime* runtime() const noexcept { return runtime_.get(); }
+    // Last minute of simulation time, collected for every compartment even
+    // while its Sector is not selected. Invalidated by reset/update/synchronize.
+    std::span<const TemperatureSample> temperatureHistory(const std::string& atmosphereId) const;
 private:
+    void recordTemperatures();
+    std::map<std::string, std::vector<TemperatureSample>> temperatureHistory_;
+    static constexpr double historySeconds = 60.0;
+    static constexpr double historySampleIntervalSeconds = 0.1;
     static constexpr double updateIntervalSeconds = 0.1;
     // Bound catch-up after stalls/native dialogs; discard excess wall-time debt.
     static constexpr int maxCatchUpUpdates = 5;

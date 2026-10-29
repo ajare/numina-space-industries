@@ -1,6 +1,7 @@
 #include "SimulationPlayback.h"
 
 #include <nsi/systems/Atmosphere.h>
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -9,6 +10,7 @@ void SimulationPlayback::synchronize(const nsi::core::Installation* installation
     if (!installation) {
         playing_ = false;
         runtime_.reset();
+        temperatureHistory_.clear();
         source_.reset();
         remainder_ = 0;
     } else if (!source_ || *source_ != *installation) reset(*installation);
@@ -17,6 +19,7 @@ void SimulationPlayback::synchronize(const nsi::core::Installation* installation
 void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     playing_ = false;
     runtime_.reset();
+    temperatureHistory_.clear();
     source_ = installation;
     remainder_ = 0;
     StationSystemsSettings settings;
@@ -29,6 +32,28 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     settings.thermalLinks = std::move(thermal.links);
     settings.solarCycle = std::move(thermal.solarCycle);
     runtime_ = std::make_unique<StationSystemsRuntime>(std::move(settings), StationSystemsUpdateMode::Variable);
+    recordTemperatures();
+}
+
+std::span<const TemperatureSample> SimulationPlayback::temperatureHistory(const std::string& id) const {
+    const auto it = temperatureHistory_.find(id);
+    return it == temperatureHistory_.end() ? std::span<const TemperatureSample>{} : it->second;
+}
+
+void SimulationPlayback::recordTemperatures() {
+    const auto snapshot = runtime_->snapshot();
+    for (const auto& air : snapshot.atmospheres) {
+        auto& samples = temperatureHistory_[air.id];
+        // Sample on simulation time, not frame time: slow playback must not
+        // create an unbounded number of points within the one-minute window.
+        if (samples.empty() || snapshot.elapsedSeconds - samples.back().seconds
+                >= historySampleIntervalSeconds - 1e-9)
+            samples.push_back({snapshot.elapsedSeconds, air.temperatureC});
+        const auto first = std::lower_bound(samples.begin(), samples.end(),
+            snapshot.elapsedSeconds - historySeconds,
+            [](const auto& sample, double time) { return sample.seconds < time; });
+        samples.erase(samples.begin(), first);
+    }
 }
 
 void SimulationPlayback::setSpeedIndex(int index) {
@@ -51,6 +76,7 @@ void SimulationPlayback::update(double wallSeconds) {
                 throw std::runtime_error(diagnostics.empty() ? "Simulation advance failed"
                                                             : diagnostics.front().message);
             }
+            recordTemperatures();
         }
     } catch (...) {
         playing_ = false;
