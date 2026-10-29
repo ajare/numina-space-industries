@@ -63,9 +63,17 @@ the smaller Sector height in metres; all shared edges (including disjoint
 segments) are summed into one link per sorted uid pair. Pair link ids are
 `pair-<level>-<lowerUid>-<higherUid>`: uids are Level-local, so the Level namespace
 prevents collisions while preserving identity across Sector index reshuffles.
-The Partition U-value times shared area is converted to kW/K at this boundary.
-A missing Partition type emits no partition links, and no Hull suppresses all
-geometry-authored coupling. Vertical floor coupling remains follow-up work.
+Touching height claims also conduct across floors: a lower Sector's roof at
+`level + height` must meet an upper Sector's starting Level, and each overlapping
+world-coordinate Cell contributes 4 m². Different grid sizes and offsets do not
+clip claims at intermediate Levels. Cross-Level ids are
+`pair-<lowerLevel>-<uid>-<upperLevel>-<uid>`; both interface kinds use one canonical
+(Level, uid) endpoint-pair accumulator. A valid pair cannot share both a side
+Wall and a floor: floor contact requires disjoint height intervals, while side
+contact requires overlapping height intervals.
+The same Partition U-value times summed shared area is converted to kW/K at
+this boundary. A missing Partition type emits no partition links, and no Hull
+suppresses all geometry-authored coupling.
 
 The runtime consumer follows the station-systems scenario-rig precedent and
 checks isolated temperatures across ticks, active loads/couplings, and pressure

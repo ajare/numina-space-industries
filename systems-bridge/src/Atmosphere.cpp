@@ -104,10 +104,15 @@ ThermalExpansion expandThermal(const core::Installation& installation) {
     }
     if (installation.partitionType()) {
         const double u = core::Installation::partitionSpec(*installation.partitionType()).transmittanceWPerM2K;
+        // Uids are Level-local. Both surface kinds accumulate into one canonical
+        // pair of stable (Level, uid) endpoints, never transient Sector indices.
+        using Endpoint = std::pair<std::size_t, std::int64_t>;
+        std::map<std::pair<Endpoint, Endpoint>, double> sharedAreas;
+        auto addArea = [&](Endpoint a, Endpoint b, double area) {
+            sharedAreas[std::minmax(a, b)] += area;
+        };
         for (std::size_t l = 0; l < installation.levelCount(); ++l) {
             const auto& grid = installation.level(l);
-            // Uids are stable within a Level, so namespace each sorted pair by Level.
-            std::map<std::pair<std::int64_t, std::int64_t>, double> sharedAreas;
             auto shared = [&](std::uint32_t ax, std::uint32_t ay,
                               std::uint32_t bx, std::uint32_t by, std::size_t wall, double edge) {
                 if (grid.walls()[wall].type != core::Installation::WallType::Interior) return;
@@ -116,7 +121,7 @@ ThermalExpansion expandThermal(const core::Installation& installation) {
                 if (a.uid == b.uid || a.type != core::Installation::SectorType::Interior
                     || b.type != core::Installation::SectorType::Interior
                     || !specFor(a.atmosphere) || !specFor(b.atmosphere)) return;
-                sharedAreas[std::minmax(a.uid, b.uid)] += edge * core::LevelHeightM * std::min(a.height, b.height);
+                addArea({l, a.uid}, {l, b.uid}, edge * core::LevelHeightM * std::min(a.height, b.height));
             };
             for (std::uint32_t y = 0; y < grid.depth(); ++y)
                 for (std::uint32_t x = 1; x < grid.width(); ++x)
@@ -124,15 +129,38 @@ ThermalExpansion expandThermal(const core::Installation& installation) {
             for (std::uint32_t y = 1; y < grid.depth(); ++y)
                 for (std::uint32_t x = 0; x < grid.width(); ++x)
                     shared(x, y-1, x, y, grid.horizontalWall(x, y), core::CellWidthM);
-            for (const auto& [pair, area] : sharedAreas) {
-                const auto level = std::to_string(l) + "-";
-                station::ThermalLinkSettings link;
-                link.id = "pair-" + level + std::to_string(pair.first) + "-" + std::to_string(pair.second);
-                link.aAtmosphereId = "sector-" + level + std::to_string(pair.first);
-                link.bAtmosphereId = "sector-" + level + std::to_string(pair.second);
-                link.conductanceKWPerK = u * area / 1000.0;
-                result.links.push_back(std::move(link));
+            // Count each floor interface once, from the lower claim's roof.
+            // The upper Sector must start here, not merely claim this volume.
+            for (std::uint32_t y = 0; y < grid.depth(); ++y) {
+                for (std::uint32_t x = 0; x < grid.width(); ++x) {
+                    const auto& a = grid.sectorAt(x, y);
+                    if (a.type != core::Installation::SectorType::Interior || !specFor(a.atmosphere)) continue;
+                    const auto top = l + std::size_t(a.height);
+                    if (top >= installation.levelCount()) continue;
+                    const auto& upper = installation.level(top);
+                    const auto ux = std::int64_t(grid.offsetX()) + x - upper.offsetX();
+                    const auto uy = std::int64_t(grid.offsetY()) + y - upper.offsetY();
+                    if (ux < 0 || uy < 0 || ux >= upper.width() || uy >= upper.depth()) continue;
+                    const auto& b = upper.sectorAt(static_cast<std::uint32_t>(ux), static_cast<std::uint32_t>(uy));
+                    if (b.type != core::Installation::SectorType::Interior || !specFor(b.atmosphere)) continue;
+                    addArea({l, a.uid}, {top, b.uid}, core::CellWidthM * core::CellDepthM);
+                }
             }
+        }
+        for (const auto& [pair, area] : sharedAreas) {
+            const auto endpointId = [](Endpoint e) {
+                return std::to_string(e.first) + "-" + std::to_string(e.second);
+            };
+            station::ThermalLinkSettings link;
+            // Keep existing same-Level identities; cross-Level pairs include
+            // both namespaces so equal uids on different Levels cannot collide.
+            link.id = "pair-" + endpointId(pair.first) + "-"
+                + (pair.first.first == pair.second.first ? std::to_string(pair.second.second)
+                                                        : endpointId(pair.second));
+            link.aAtmosphereId = "sector-" + endpointId(pair.first);
+            link.bAtmosphereId = "sector-" + endpointId(pair.second);
+            link.conductanceKWPerK = u * area / 1000.0;
+            result.links.push_back(std::move(link));
         }
     }
     if (totalArea > 0.0) {
