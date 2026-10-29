@@ -11,11 +11,15 @@ not on the bridge, simulation, or Lua.
 
 station::StationSystemsSettings settings;
 settings.atmospheres = nsi::systems::expandInstallation(installation);
+auto thermal = nsi::systems::expandThermal(installation);
+settings.hull = std::move(thermal.hull);
+settings.thermalLinks = std::move(thermal.links);
+settings.solarCycle = std::move(thermal.solarCycle);
 ```
 
 `expandSector` returns an optional compartment (invalid indices throw).
 Void geometry or a Void atmosphere preset returns no compartment. Expansion
-returns only atmospheres, never thermal links or pathways. IDs are
+via `expandInstallation` returns only atmospheres. IDs are
 `sector-<levelIndex>-<uid>`.
 
 Earth-like is intensive: 101.325 kPa total, 20 °C, 40% RH, dry O₂ fraction
@@ -34,9 +38,19 @@ and maximum 5 kPa CO₂.
 Sector assignments pass through unchanged: occupant count and all four rates,
 leak rate, reservoir id and exchanger conductance, and optional fire parameters.
 A reservoir supplies heat-only coupling; an empty id leaves the compartment
-adiabatic. Fire parameters enable the simulation's injectable `fire` fault;
+adiabatic when no geometry-derived thermal link is present. Fire parameters enable the simulation's injectable `fire` fault;
 they do not ignite a fire at startup. Declared limits report crossings without
 clamping the integrated state.
+
+`expandThermal` maps side exterior skin to one station-wide radiating Hull and
+one drain per pressurised Sector with nonzero side area. Conductance is preset
+U × area / 1000 in kW/K. Hull emitting area is the sum of linked areas, projected
+area is one quarter, and panel heat capacity is 0.4 kJ/(K·m²) times that area.
+Optical properties use the jointly calibrated core presets (ADR-0002). Solar
+profile level is constant zero: absorbed power is exactly zero with positive
+optical coefficients. No hull is emitted without a drain, and no hull choice
+means no links. No atmosphere pathway is ever inferred. This tracer counts
+side skin only; roof, underside and partition coupling are not implemented yet.
 
 The runtime consumer follows the station-systems scenario-rig precedent and
 checks isolated temperatures across ticks, active loads/couplings, and pressure

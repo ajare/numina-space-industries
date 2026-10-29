@@ -32,6 +32,81 @@ std::array<double, 4> pressures(const station::AtmosphereSettings& a) {
             result[i], molarMasses[i], a.volumeM3, a.startingTemperatureC);
     return result;
 }
+void thermalExpansion() {
+    using namespace nsi::systems;
+    auto scene=[](const Installation& i) {
+        station::StationSystemsSettings settings;
+        settings.enabled=true;
+        settings.atmospheres=expandInstallation(i);
+        auto thermal=expandThermal(i);
+        settings.hull=thermal.hull;
+        settings.thermalLinks=thermal.links;
+        settings.solarCycle=thermal.solarCycle;
+        require(settings.atmospherePathways.empty(),"No inferred gas pathways");
+        std::string diagnostic;
+        require(station::validateStationSystemsSettings(settings,diagnostic),diagnostic.c_str());
+        return settings;
+    };
+    Installation single(1,1);
+    auto settings=scene(single);
+    require(settings.hull && settings.thermalLinks.size()==1,"One hull and drain");
+    near(single.sideExteriorAreaM2(0,0),24.0);
+    near(settings.hull->emittingAreaM2,24.0);
+    near(settings.hull->projectedAreaM2,6.0);
+    near(settings.hull->heatCapacityKJPerK,9.6);
+    near(settings.solarCycle->constantLevel,0.0);
+    for (auto type : {Installation::HullType::BareSkin, Installation::HullType::StandardInsulated,
+                      Installation::HullType::MultiLayerBlanket}) {
+        single.setHullType(type); const auto spec=Installation::hullSpec(type);
+        settings=scene(single);
+        near(settings.hull->emissivity,spec.emissivity);
+        near(settings.hull->absorptivity,spec.absorptivity);
+        near(settings.thermalLinks[0].conductanceKWPerK,spec.transmittanceWPerM2K*24/1000);
+        require(settings.thermalLinks[0].aAtmosphereId==settings.atmospheres[0].id
+            && settings.thermalLinks[0].bKind==station::ThermalNodeKind::Hull
+            && settings.thermalLinks[0].bAtmosphereId=="hull","Typed Hull endpoint");
+    }
+    const auto twice=scene(Installation(2,2)); // Twice the single Cell perimeter.
+    near(twice.hull->emittingAreaM2,48.0);
+    near(twice.thermalLinks[0].conductanceKWPerK,2*settings.thermalLinks[0].conductanceKWPerK);
+    Installation pair(2,1);
+    pair.toggleWall(0,pair.level(0).verticalWall(1,0));
+    const auto sharedHull=scene(pair);
+    require(sharedHull.hull && sharedHull.thermalLinks.size()==2,"Two Sectors share exactly one Hull");
+    near(sharedHull.hull->emittingAreaM2,36.0);
+    for (const auto& link:sharedHull.thermalLinks) near(link.conductanceKWPerK,0.05*18/1000);
+    auto partial=pair.serialize();
+    partial.replace(partial.find("Earth-like"),10,"Void");
+    Installation mixed; mixed.deserialize(partial);
+    const auto mixedScene=scene(mixed);
+    require(mixedScene.thermalLinks.size()==1,"Void-preset Sector must have no drain");
+    near(mixedScene.hull->emittingAreaM2,18.0);
+    Installation courtyard(3,3); courtyard.setCell(0,1,1,Installation::SectorType::Void);
+    near(scene(courtyard).hull->emittingAreaM2,96.0); // Outer 12 + inner 4 edges.
+    Installation lshape(2,2); lshape.setCell(0,1,1,Installation::SectorType::Void);
+    near(scene(lshape).hull->emittingAreaM2,48.0);
+    Installation buried(3,3);
+    for (auto w : {buried.level(0).horizontalWall(1,1),buried.level(0).horizontalWall(1,2),
+                   buried.level(0).verticalWall(1,1),buried.level(0).verticalWall(2,1)})
+        buried.toggleWall(0,w);
+    auto center=buried.level(0).cellData(1,1).sector;
+    near(buried.sideExteriorAreaM2(0,center),0.0);
+    auto enclosed=scene(buried);
+    require(enclosed.atmospheres.size()==2 && enclosed.thermalLinks.size()==1,"Buried Sector has no drain");
+    require(enclosed.thermalLinks[0].aAtmosphereId!=expandSector(buried,0,center)->id,"No zero-area link");
+    Installation vacuum(std::vector<Installation::Level>{
+        Installation::Level(1,1,Installation::SectorType::Void)});
+    require(!scene(vacuum).hull && scene(vacuum).thermalLinks.empty(),"No hull without compartments");
+    auto yaml=single.serialize(); auto p=yaml.find("Earth-like");
+    yaml.replace(p,10,"Void"); Installation voidPreset; voidPreset.deserialize(yaml);
+    require(!scene(voidPreset).hull && scene(voidPreset).thermalLinks.empty(),"Void preset has no drain or hull");
+    // Existing geometry can explicitly remove every side Wall.
+    Installation open(1,1);
+    for (std::size_t w=0;w<open.level(0).walls().size();++w) open.toggleWall(0,w);
+    require(!scene(open).hull && scene(open).thermalLinks.empty(),"No exterior skin means no hull");
+    single.setHullType(std::nullopt);
+    require(!scene(single).hull && scene(single).thermalLinks.empty(),"No hull opts out of links");
+}
 void check() {
     const auto* spec = nsi::systems::specFor(Installation::AtmospherePreset::EarthLike);
     require(spec != nullptr, "missing Earth-like spec");
@@ -120,6 +195,6 @@ void check() {
 }
 }
 int main() {
-    try { check(); }
+    try { check(); thermalExpansion(); }
     catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

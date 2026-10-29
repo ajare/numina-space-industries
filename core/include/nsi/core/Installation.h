@@ -18,6 +18,15 @@ public:
     struct PipingLayer { bool operator==(const PipingLayer&) const = default; };
     enum class SectorType { Void, Interior };
     enum class WallType { None, Interior, Exterior };
+    enum class HullType { BareSkin, StandardInsulated, MultiLayerBlanket };
+    // Jointly calibrated provisional engineering assumptions; see ADR-0002.
+    struct HullSpec {
+        double transmittanceWPerM2K;
+        double emissivity;
+        double absorptivity;
+        double calibratedFluxWPerM2;
+    };
+    static HullSpec hullSpec(HullType type);
     // The starting condition of a Sector's air, referenced rather than stored.
     // A preset carries only intensive constants - composition fractions,
     // pressure, temperature - so Sectors of any volume share one definition and
@@ -32,13 +41,9 @@ public:
     // specific reservoir. Defaults are inert, so a Sector that only names a
     // preset still expands into a valid compartment.
     //
-    // Sectors do not exchange heat with one another. The bridge authors no
-    // ThermalLink between neighbouring Sectors, so a compartment is adiabatic
-    // unless this assignment names a reservoir coupling - the only heat path a
-    // Sector owns is the one it declares for itself, never one implied by a
-    // shared Wall. Exterior heat loss is out of scope here too: vacuum conducts
-    // nothing, and the radiative path belongs to the Hull model, not to a
-    // conduction boundary.
+    // Without a Hull, inert assignments remain adiabatic. With a Hull the
+    // bridge may additionally author geometry-derived conduction (ADR-0002).
+    // This never implies a gas pathway.
     struct AtmosphereAssignment {
         int occupants = 0;
         double oxygenUsePerOccupantKgPerS = 0.0;
@@ -143,6 +148,10 @@ public:
     static Installation createDefault() { return Installation(); }
     const std::string& getName() const noexcept { return name_; }
     void setName(std::string name) { name_ = std::move(name); }
+    std::optional<HullType> hullType() const noexcept { return hullType_; }
+    void setHullType(std::optional<HullType> type);
+    // Side exterior skin only; roof and underside exposure are not yet modelled.
+    double sideExteriorAreaM2(std::size_t level, std::size_t sector) const;
     std::span<const Level> levels() const noexcept { return levels_; }
     std::size_t levelCount() const noexcept { return levels_.size(); }
     const Level& level(std::size_t index) const { return levels_.at(index); }
@@ -161,6 +170,7 @@ public:
     bool operator==(const Installation&) const = default;
 private:
     std::string name_;
+    std::optional<HullType> hullType_ = HullType::MultiLayerBlanket;
     std::vector<Level> levels_;
     void reindex();
 };

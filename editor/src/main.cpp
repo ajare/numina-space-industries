@@ -438,6 +438,13 @@ int runEditor() {
         };
         textField("Installation name",session.installation().getName(),
                   [&](std::string name){ session.setName(std::move(name)); });
+        using HullType = nsi::core::Installation::HullType;
+        const auto hull = session.installation().hullType();
+        int hullIndex = hull ? static_cast<int>(*hull) + 1 : 0;
+        const char* hullNames[] = {"No hull", "Bare skin", "Standard insulated", "Multi-layer blanket"};
+        if (ImGui::Combo("Hull type", &hullIndex, hullNames, 4))
+            edit([&]{ session.setHullType(hullIndex == 0 ? std::nullopt
+                : std::optional(static_cast<HullType>(hullIndex - 1))); });
         const auto level_label="Level "+std::to_string(active_level);
         if (ImGui::BeginCombo("Level",level_label.c_str())) {
             for (std::size_t l=0;l<session.installation().levelCount();++l) {

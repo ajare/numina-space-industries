@@ -11,7 +11,9 @@ void near(double actual, double expected) {
 }
 // Author through the public document boundary, not mutable geometry internals.
 Installation assigned(std::string const& loads) {
-    auto yaml = Installation(1, 1).serialize();
+    Installation source(1, 1);
+    source.setHullType(std::nullopt);
+    auto yaml = source.serialize();
     const auto key = yaml.find("atmosphere: Earth-like");
     require(key != std::string::npos, "missing preset");
     const auto line = yaml.rfind('\n', key) + 1;
@@ -27,8 +29,11 @@ station::StationSystemsSettings scene(Installation const& installation) {
     settings.systemsStepWorldTicks = 1;
     settings.observationIntervalSeconds = 1;
     settings.atmospheres = nsi::systems::expandInstallation(installation);
-    require(settings.thermalLinks.empty() && settings.atmospherePathways.empty(),
-        "bridge invented connections");
+    auto thermal = nsi::systems::expandThermal(installation);
+    settings.hull = thermal.hull;
+    settings.thermalLinks = thermal.links;
+    settings.solarCycle = thermal.solarCycle;
+    require(settings.atmospherePathways.empty(), "bridge invented gas pathways");
     return settings;
 }
 void advance(station::StationSystemsRuntime& runtime, double seconds) {
@@ -78,8 +83,9 @@ void mapping() {
     require(state.thermallyCoupled && state.lastExchangeIntoCompartmentKW < 0,
         "reservoir did not exchange heat");
 }
-void isolation() {
+void noHullIsolation() {
     Installation installation(2, 1);
+    installation.setHullType(std::nullopt);
     installation.toggleWall(0, installation.level(0).verticalWall(1, 0));
     auto settings = scene(installation);
     // Deliberately impose a gradient: any implicit shared-wall heat path is observable.
@@ -96,6 +102,39 @@ void isolation() {
     const auto a = *nsi::systems::expandSector(installation, 0, 0);
     require(!a.fire && a.reservoirId.empty() && a.exchangerConductanceKWPerK == 0,
         "inert defaults changed");
+}
+void hullCooling() {
+    auto cooling=[](Installation installation) {
+        auto settings=scene(installation);
+        station::StationSystemsRuntime runtime(settings,0.25f);
+        advance(runtime,60);
+        const auto snapshot=runtime.snapshot();
+        require(snapshot.thermal.hull.has_value(),"Hull missing from runtime");
+        require(snapshot.thermal.hull->absorbedKW==0.0
+            && snapshot.thermal.hull->absorbedEnergyKJ==0.0,"Dark sky must absorb exactly zero");
+        require(snapshot.thermal.hull->emittedEnergyKJ>0.0,"Hull must radiate to space");
+        return snapshot.atmospheres[0].temperatureC;
+    };
+    Installation single(1,1);
+    single.setHullType(Installation::HullType::BareSkin);
+    const double bare=cooling(single);
+    single.setHullType(Installation::HullType::MultiLayerBlanket);
+    const double blanket=cooling(single);
+    require(bare < blanket-1.0 && blanket < 20.0,"Bare skin must cool measurably faster");
+    // Same air volume; removing two side panels halves the exterior area.
+    Installation half=single;
+    half.toggleWall(0,half.level(0).horizontalWall(0,0));
+    half.toggleWall(0,half.level(0).horizontalWall(0,1));
+    require(cooling(half)>blanket,"More skin must cool faster at equal air capacity");
+    // A genuine v3 load retains the exact previous no-link behaviour.
+    auto yaml=single.serialize();
+    yaml.replace(yaml.find("version: 4"),10,"version: 3");
+    const auto start=yaml.find("hull:"); yaml.erase(start,yaml.find('\n',start)-start+1);
+    Installation legacy; legacy.deserialize(yaml);
+    auto settings=scene(legacy);
+    require(!settings.hull && settings.thermalLinks.empty(),"Legacy scene gained coupling");
+    station::StationSystemsRuntime runtime(settings,0.25f);
+    advance(runtime,60); near(runtime.snapshot().atmospheres[0].temperatureC,20.0);
 }
 void occupantsAndLimits() {
     const auto installation = assigned("occupants: 2, oxygenUsePerOccupantKgPerS: 0.05, "
@@ -135,6 +174,6 @@ void occupantsAndLimits() {
 }
 }
 int main() {
-    try { mapping(); isolation(); occupantsAndLimits(); }
+    try { mapping(); noHullIsolation(); occupantsAndLimits(); hullCooling(); }
     catch (std::exception const& e) { std::cerr << e.what() << '\n'; return 1; }
 }

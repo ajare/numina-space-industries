@@ -78,4 +78,38 @@ std::vector<station::AtmosphereSettings> expandInstallation(const core::Installa
                 result.push_back(std::move(*atmosphere));
     return result;
 }
+ThermalExpansion expandThermal(const core::Installation& installation) {
+    ThermalExpansion result;
+    if (!installation.hullType()) return result;
+    const auto spec = core::Installation::hullSpec(*installation.hullType());
+    double totalArea = 0.0;
+    for (std::size_t l = 0; l < installation.levelCount(); ++l) {
+        for (std::size_t s = 0; s < installation.level(l).sectors().size(); ++s) {
+            auto atmosphere = expandSector(installation, l, s);
+            if (!atmosphere) continue;
+            const double area = installation.sideExteriorAreaM2(l, s);
+            if (area <= 0.0) continue;
+            totalArea += area;
+            station::ThermalLinkSettings link;
+            link.id = "drain-" + std::to_string(l) + "-"
+                + std::to_string(installation.level(l).sectors()[s].uid);
+            link.aAtmosphereId = atmosphere->id;
+            link.bAtmosphereId = "hull";
+            link.bKind = station::ThermalNodeKind::Hull;
+            link.conductanceKWPerK = spec.transmittanceWPerM2K * area / 1000.0;
+            result.links.push_back(std::move(link));
+        }
+    }
+    if (totalArea > 0.0) {
+        station::HullSettings hull;
+        hull.emittingAreaM2 = totalArea;
+        hull.projectedAreaM2 = totalArea / 4.0;
+        hull.heatCapacityKJPerK = 0.4 * totalArea;
+        hull.emissivity = spec.emissivity;
+        hull.absorptivity = spec.absorptivity;
+        result.hull = hull;
+        result.solarCycle = station::ProfileSettings{0.0};
+    }
+    return result;
+}
 } // namespace nsi::systems

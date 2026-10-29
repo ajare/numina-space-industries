@@ -182,6 +182,9 @@ bool EditorSession::removeTopLevel() {
 void EditorSession::setName(std::string name) {
     edit([&](auto& i){ i.setName(std::move(name)); });
 }
+void EditorSession::setHullType(std::optional<Installation::HullType> type) {
+    edit([&](auto& i){ i.setHullType(type); });
+}
 void EditorSession::undo() {
     endStroke(); if (mUndoHistory.empty()) return;
     mRedoHistory.push_back(std::move(mStation));

@@ -9,7 +9,12 @@ C++20 geometry in `nsi::core`. Include `<nsi/core/Installation.h>` (or
 Walls. Default dimensions are 16×16. All geometry types are nested within
 `Installation`: `FloorLayer`, `WiringLayer`, `PipingLayer`, `Cell`, `SectorType`,
 `Sector`, `WallType`, `Wall`, and `Level`. Layer objects are empty extension points.
-The Installation name defaults to empty.
+The Installation name defaults to empty. New Installations default to Hull type
+`MultiLayerBlanket`; `setHullType` accepts `BareSkin`, `StandardInsulated`,
+`MultiLayerBlanket`, or `std::nullopt` (no hull). `hullSpec` exposes the calibrated
+U-value, emissivity, absorptivity and target flux from [ADR-0002](../docs/adr/0002-geometry-authored-thermal-coupling.md).
+`sideExteriorAreaM2` sums a Sector's Exterior Wall lengths times its height in
+metres, including internal Void boundaries. Roof and underside are not yet counted.
 
 Levels expose read-only Cells, Sectors, Walls and bounds. Use Installation
 commands (`setCell`, `toggleWall`, `setSector`, `setOffset`, `addLevel`,
@@ -42,11 +47,15 @@ its dimensions and offset. `removeTopLevel()` returns false in that case.
 
 ## Persistence
 
-`serialize()` emits version-3 YAML with name and all Levels, including dimensions,
+`serialize()` emits version-4 YAML with name, explicit `hull` (`BareSkin`,
+`StandardInsulated`, `MultiLayerBlanket` or `none`) and all Levels, including dimensions,
 offsets, Cell Sector indices, empty layer maps, Sector name/type/height/uid,
 Sector atmosphere preset and, when non-inert, its atmosphere loads. Cached Sector
 areas and Sector-to-Level indices are omitted and rebuilt on load.
-`deserialize()` checks membership/topology, dimensions, Wall classification and
+`deserialize()` accepts versions 3 and 4. Version 3 loads without a hull;
+a missing `hull` in version 4 also permanently means no hull. Loading never
+applies creation-time defaults. An explicit no-hull choice is written as `hull: none`.
+It checks membership/topology, dimensions, Wall classification and
 vertical occupancy. Invalid input throws `serialization::SerializationException`
 and leaves the Installation unchanged. Old name-only and editor deck-row formats
 are intentionally unsupported. Unknown fields are ignored, not preserved.

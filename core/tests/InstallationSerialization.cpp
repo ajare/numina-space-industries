@@ -109,6 +109,33 @@ void volumes() {
     refused([&]{overlap.setSector(1,0,"Void",2);});
     roundTrip(overlap);
 }
+void hullPersistence() {
+    check(I(1,1).hullType()==I::HullType::MultiLayerBlanket,"Creation default hull");
+    for (auto type : {I::HullType::BareSkin, I::HullType::StandardInsulated, I::HullType::MultiLayerBlanket}) {
+        I i(1,1); i.setHullType(type); roundTrip(i);
+        const auto spec=I::hullSpec(type);
+        check(spec.transmittanceWPerM2K>0 && spec.emissivity>0 && spec.absorptivity>0,
+              "Positive calibrated Hull properties");
+        check(YAML::Load(i.serialize())["version"].as<int>()==4,"Writer emits v4");
+    }
+    I i(1,1); i.setHullType(std::nullopt); roundTrip(i);
+    check(YAML::Load(i.serialize())["hull"].as<std::string>()=="none","Explicit no hull");
+    auto node=YAML::Load(I(1,1).serialize());
+    node.remove("hull");
+    for (int version : {3,4}) {
+        node["version"]=version; YAML::Emitter out; out<<node;
+        I loaded; loaded.deserialize(out.c_str());
+        check(!loaded.hullType(),"Absent key never applies default");
+        check(loaded.level(0)==I(1,1).level(0),"Legacy geometry unchanged");
+        roundTrip(loaded);
+    }
+    node["version"]=4; node["hull"]="Unknown";
+    YAML::Emitter bad; bad<<node;
+    auto before=i; refused([&]{ i.deserialize(bad.c_str()); });
+    check(i==before,"Invalid hull rejected transactionally");
+    refused([&]{ i.setHullType(static_cast<I::HullType>(99)); });
+    check(i==before,"Invalid Hull enum rejected");
+}
 void persistence() {
     I original(3,2); original.setName("name: # [] \" UTF-8 Ω\nnext");
     original.setCell(0,1,0,S::Void); original.addLevel(2,3,-4,5);
@@ -149,6 +176,6 @@ void persistence() {
 }
 }
 int main() {
-    try { topology(); volumes(); persistence(); }
+    try { topology(); volumes(); persistence(); hullPersistence(); }
     catch (const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

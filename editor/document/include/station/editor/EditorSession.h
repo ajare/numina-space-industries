@@ -40,6 +40,7 @@ public:
     void addLevel(std::uint32_t width, std::uint32_t depth, int x = 0, int y = 0);
     bool removeTopLevel();
     void setName(std::string name);
+    void setHullType(std::optional<Installation::HullType> type);
     void undo();
     void redo();
     bool canUndo() const noexcept { return !mUndoHistory.empty(); }

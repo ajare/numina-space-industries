@@ -24,6 +24,10 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     settings.systemsStepWorldTicks = 1;
     settings.observationIntervalSeconds = 1;
     settings.atmospheres = nsi::systems::expandInstallation(installation);
+    auto thermal = nsi::systems::expandThermal(installation);
+    settings.hull = std::move(thermal.hull);
+    settings.thermalLinks = std::move(thermal.links);
+    settings.solarCycle = std::move(thermal.solarCycle);
     runtime_ = std::make_unique<StationSystemsRuntime>(std::move(settings), StationSystemsUpdateMode::Variable);
 }
 

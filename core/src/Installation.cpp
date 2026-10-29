@@ -293,9 +293,45 @@ void Installation::validate() const {
     }
 }
 
+Installation::HullSpec Installation::hullSpec(HullType type) {
+    switch (type) {
+    case HullType::BareSkin: return {8.0, 0.80, 0.40, 224.0};
+    case HullType::StandardInsulated: return {0.6, 0.85, 0.20, 62.0};
+    case HullType::MultiLayerBlanket: return {0.05, 0.03, 0.15, 3.8};
+    }
+    throw std::invalid_argument("Invalid Hull type");
+}
+void Installation::setHullType(std::optional<HullType> type) {
+    if (type) (void)hullSpec(*type);
+    hullType_ = type;
+}
+double Installation::sideExteriorAreaM2(std::size_t l, std::size_t sector) const {
+    const auto& grid = levels_.at(l);
+    const auto& s = grid.sectors_.at(sector);
+    if (s.type == SectorType::Void) return 0.0;
+    double area = 0.0;
+    for (std::size_t w = 0; w < grid.walls_.size(); ++w) {
+        if (grid.walls_[w].type != WallType::Exterior) continue;
+        const auto [a, b] = grid.wallCells(w);
+        if ((a >= 0 && grid.cells_[a].sector == int(sector))
+            || (b >= 0 && grid.cells_[b].sector == int(sector))) {
+            const bool horizontal = w < std::size_t(grid.width_) * (grid.depth_ + 1);
+            area += (horizontal ? CellWidthM : CellDepthM) * LevelHeightM * s.height;
+        }
+    }
+    return area;
+}
+
 std::string Installation::serialize() const {
     validate();
-    YAML::Node root; root["version"]=3; root["name"]=name_;
+    YAML::Node root; root["version"]=4; root["name"]=name_;
+    const char* hull = "none";
+    if (hullType_) switch (*hullType_) {
+    case HullType::BareSkin: hull = "BareSkin"; break;
+    case HullType::StandardInsulated: hull = "StandardInsulated"; break;
+    case HullType::MultiLayerBlanket: hull = "MultiLayerBlanket"; break;
+    }
+    root["hull"] = hull;
     root["levels"]=YAML::Node(YAML::NodeType::Sequence);
     for (const auto& grid:levels_) {
         YAML::Node l; l["width"]=grid.width_; l["depth"]=grid.depth_;
@@ -348,7 +384,16 @@ void Installation::deserialize(const std::string& text) {
     try {
         auto documents=YAML::LoadAll(text); require(documents.size()==1,"Expected one YAML document");
         auto root=documents.front(); mapNode(root,"Installation");
-        require(root["version"].as<int>()==3,"Unsupported Installation format");
+        const int version = root["version"].as<int>();
+        require(version == 3 || version == 4,"Unsupported Installation format");
+        std::optional<HullType> hull;
+        if (version == 4 && root["hull"]) {
+            const auto value = root["hull"].as<std::string>();
+            if (value == "BareSkin") hull = HullType::BareSkin;
+            else if (value == "StandardInsulated") hull = HullType::StandardInsulated;
+            else if (value == "MultiLayerBlanket") hull = HullType::MultiLayerBlanket;
+            else require(value == "none", "Invalid Hull type");
+        }
         auto ls=root["levels"]; require(ls.IsSequence() && ls.size()>0,"Expected Levels");
         std::vector<Level> loaded;
         for (const auto& n:ls) {
@@ -424,7 +469,10 @@ void Installation::deserialize(const std::string& text) {
             }
             loaded.push_back(std::move(grid));
         }
-        Installation next(std::move(loaded)); next.name_=root["name"].as<std::string>(); *this=std::move(next);
+        Installation next(std::move(loaded));
+        next.name_=root["name"].as<std::string>();
+        next.hullType_ = hull; // Never apply creation-time defaults when loading.
+        *this=std::move(next);
     } catch (const std::exception& e) { throw serialization::SerializationException(e.what()); }
 }
 } // namespace nsi::core

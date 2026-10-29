@@ -13,6 +13,27 @@ void near(double a, double b) {
     require(std::abs(a - b) < 1e-6, "Unexpected simulation time");
 }
 
+void hullPlayback() {
+    using I=nsi::core::Installation;
+    auto temperature=[](I::HullType type) {
+        station::editor::EditorSession session;
+        session.newDocument(1,1);
+        session.setHullType(type);
+        station::editor::SimulationPlayback playback;
+        playback.synchronize(session.installation());
+        playback.setSpeedIndex(4);
+        playback.togglePlaying();
+        for (int frame=0;frame<600;++frame) playback.update(0.1);
+        const auto state=playback.runtime()->snapshot();
+        require(state.healthy && state.thermal.hull.has_value(),"Playback omitted Hull");
+        require(state.thermal.hull->emittedEnergyKJ>0,"Playback Hull did not radiate");
+        require(state.thermal.hull->absorbedEnergyKJ==0,"Playback sky not dark");
+        return state.atmospheres[0].temperatureC;
+    };
+    const auto bare=temperature(I::HullType::BareSkin);
+    const auto blanket=temperature(I::HullType::MultiLayerBlanket);
+    require(bare<blanket-1.0 && blanket<20.0,"Playback did not wire Hull drain links");
+}
 void documentAvailability() {
     using namespace station::editor;
     struct Dialogs : FileDialogs {
@@ -76,6 +97,7 @@ int main() {
     try {
         using namespace station::editor;
         documentAvailability();
+        hullPlayback();
         EditorSession session;
         // A real load makes it impossible for a clock-only mock to pass.
         auto yaml = nsi::core::Installation(1, 1).serialize();

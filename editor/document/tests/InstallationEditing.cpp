@@ -137,6 +137,21 @@ void rejectedWallStroke() {
     session.toggleCell(1,2,0);
     check(session.installation().level(1).allVoid(),"Cell editing works after rejected Wall stroke");
 }
+void hullHistory() {
+    EditorSession session; session.newDocument(1,1);
+    check(session.installation().hullType()==I::HullType::MultiLayerBlanket,"New has blanket");
+    session.setHullType(I::HullType::BareSkin);
+    check(session.unsavedChanges() && session.canUndo(),"Hull edit dirties document");
+    session.setHullType(I::HullType::BareSkin); // No extra history for same value.
+    session.undo();
+    check(session.installation().hullType()==I::HullType::MultiLayerBlanket
+          && !session.unsavedChanges() && !session.canUndo(),"Undo hull restores baseline");
+    session.redo(); check(session.installation().hullType()==I::HullType::BareSkin,"Redo hull");
+    session.setHullType(std::nullopt);
+    check(!session.installation().hullType(),"Explicit no hull command");
+    session.undo(); check(session.installation().hullType()==I::HullType::BareSkin,"Undo no hull");
+    session.redo(); check(!session.installation().hullType(),"Redo no hull");
+}
 void history() {
     EditorSession session; session.newDocument(3,1);
     check(session.installation().level(0).width()==3,"Custom New dimensions");
@@ -221,6 +236,6 @@ void replay() {
 }
 }
 int main() {
-    try {automaticWalls(); wallStrokes(); rejectedWallStroke(); history(); picking(); replay();}
+    try {automaticWalls(); wallStrokes(); rejectedWallStroke(); history(); hullHistory(); picking(); replay();}
     catch (const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
