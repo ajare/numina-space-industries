@@ -377,6 +377,12 @@ int runEditor() {
         if (ImGui::Combo("Speed", &speed_index, "0.1x\0" "0.5x\0" "1x\0" "2x\0" "10x\0"))
             simulation.setSpeedIndex(speed_index);
         ImGui::EndDisabled();
+        auto observation_options=simulation.observationOptions();
+        ImGui::SameLine();bool observations_changed=ImGui::Checkbox("Wind diagnostics",&observation_options.windDiagnostics);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Calculate/report optional wind speed. Conservative gas momentum and transport remain enabled.");
+        ImGui::SameLine();observations_changed=ImGui::Checkbox("Object forces",&observation_options.objectForces) || observations_changed;
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Calculate one-way drag and pressure-gradient loads. Uses solver velocity independently of wind diagnostics; no rigid-body motion.");
+        if (observations_changed) simulation.setObservationOptions(observation_options);
         // Do not erase an earlier diagnostic on every successful frame.
         try { simulation.update(io.DeltaTime); }
         catch (const std::exception& error) { file_status = error.what(); }
@@ -553,7 +559,7 @@ int runEditor() {
         const auto open_doors=simulation.openDoors(active_level);
         const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector,{},door_controls,open_doors,thermal_colours,
             snapshot ? std::span<const station::StationCellAtmosphereSnapshot>(snapshot->cellAtmospheres) : std::span<const station::StationCellAtmosphereSnapshot>{},
-            active_level,render_settings.windArrows);
+            active_level,render_settings.forceArrows,render_settings.forceHalfLengthN);
         ImGui::EndDisabled();
         const bool stroke_event=session.strokeActive() &&
             (pointer.phase==DeckPointerPhase::Release ||

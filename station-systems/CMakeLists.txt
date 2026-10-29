@@ -63,6 +63,7 @@ add_library(StationSystems STATIC
     src/StationSystemsPhysics.cpp
     src/StationGasFlow.cpp
     src/CellFluid.cpp
+    src/CellAerodynamics.cpp
     src/CellThermal.cpp
     src/StationSystemsSnapshot.cpp
     src/StationSystemsTrends.cpp

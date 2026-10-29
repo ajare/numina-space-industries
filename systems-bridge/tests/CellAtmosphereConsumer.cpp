@@ -44,6 +44,26 @@ void momentumCloses(const CellAtmosphereTransport& gas) {
     const auto& m=gas.momentum();
     for (int axis=0;axis<2;++axis) near(m.starting[axis]+m.sources[axis]+m.wallImpulse[axis]-m.exteriorLost[axis],m.current[axis],1e-8);
 }
+void prolongedDecompression() {
+    I scene(4,4);scene.setHullType(std::nullopt);const auto grid=scene.level(0);
+    for (unsigned y=0;y<4;++y) scene.toggleWall(0,grid.verticalWall(2,y));
+    const auto door=grid.verticalWall(0,1);scene.setDoor(0,door,true);
+    for (const double dt:{0.1,1.0}) {
+    CellAtmosphereTransport gas(scene,CellThermalMode::Geometry);require(gas.setDoorOpen(0,door,true),"Decompression Door control failed");
+    const auto initial=std::vector<CellSectorAtmosphere>(gas.sectors().begin(),gas.sectors().end());
+    for (int step=0;step<int(120/dt);++step)
+        require(gas.advance(dt),"Prolonged two-room decompression failed positivity refinement");
+    near(gas.elapsedSeconds(),120);momentumCloses(gas);
+    for (std::size_t i=0;i<initial.size();++i) {
+        const auto& end=gas.sectors()[i];const auto& l=end.ledger;
+        for (int g=0;g<4;++g) near(initial[i].massKg[g]+l.sourceKg[g]+l.transportedKg[g],end.massKg[g]);
+        const double supplied=l.inventoryEnergyJ+l.transportedEnergyJ+l.externalHeatJ+l.occupantHeatJ+l.latentHeatJ;
+        // Scale roundoff by the booked energy, not the almost-empty remainder.
+        require(std::abs(initial[i].totalEnergyJ+supplied-end.totalEnergyJ)<=1e-7
+            +1e-12*(std::abs(initial[i].totalEnergyJ)+std::abs(supplied)+std::abs(end.totalEnergyJ)),"Decompression energy ledger did not close");
+    }
+    }
+}
 void geometry() {
     I scene(4,3);const auto authored=scene.serialize();auto e=expandCellAtmosphere(scene);
     require(e.mesh.cells.size()==12 && e.mesh.faces.size()==31,"Incorrect Cell topology");heatBudgets(scene,e);
@@ -168,5 +188,5 @@ void rollback() {
     for (std::size_t i=0;i<before.size();++i) require(before[i].q==gas.fluid().states()[i].q,"Late failure changed gas");
 }
 }
-int main() {try {geometry();doors();loadsAndPhase();rollback();std::cout<<"Cell atmosphere bridge passed\n";return 0;}
+int main() {try {prolongedDecompression();geometry();doors();loadsAndPhase();rollback();std::cout<<"Cell atmosphere bridge passed\n";return 0;}
 catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

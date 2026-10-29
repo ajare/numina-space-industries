@@ -10,6 +10,11 @@ namespace station
 		std::array<double,4> massKg{};
 		double pressureKPa{}, temperatureC{}, relativeHumidity{}, velocityX{}, velocityY{};
 		bool resolvedGas{};
+		double densityKgPerM3{},windSpeedMS{},dynamicPressurePa{};
+		std::array<double,2> pressureGradientPaPerM{},dragForceN{},pressureForceN{},forceN{};
+		// Force fields refer to stationary A=1 m2, V=1 m3, Cd=1; never actual
+		// placed objects. Disabled/unavailable zeros are not measurements.
+		bool windEnabled{},forcesEnabled{},windAvailable{},forceAvailable{};
 		bool operator==(StationCellAtmosphereSnapshot const&) const = default;
 	};
 	struct StationAtmosphereSnapshot

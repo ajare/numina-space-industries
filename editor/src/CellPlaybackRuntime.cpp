@@ -10,8 +10,8 @@ namespace {
 constexpr std::array<double,4> inverseMolarMass{1/StationMolarMassOxygenKgPerMol,1/StationMolarMassNitrogenKgPerMol,
     1/StationMolarMassCarbonDioxideKgPerMol,1/StationMolarMassWaterKgPerMol};
 }
-CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation)
-    :model_(installation,nsi::systems::CellThermalMode::Geometry),previous_(model_.sectors().size()) {
+CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,CellObservationOptions options)
+    :model_(installation,nsi::systems::CellThermalMode::Geometry),aerodynamics_(model_.fluid().states().size()),options_(options),previous_(model_.sectors().size()) {
     diagnostics_.reserve(1);snapshot_.enabled=true;snapshot_.variableTimestep=true;snapshot_.systemsStepWorldTicks=0;
     const auto& geometry=model_.geometry();snapshot_.atmospheres.resize(geometry.atmospheres.size());
     for (std::size_t i=0;i<geometry.atmospheres.size();++i) {
@@ -73,7 +73,35 @@ bool CellPlaybackRuntime::update(double seconds,std::size_t acousticBudget,std::
 }
 bool CellPlaybackRuntime::setDoorOpen(std::size_t level,std::size_t wall,bool open) {
     if (!model_.setDoorOpen(level,wall,open)) return false;
-    doorConditions();return true;
+    doorConditions();publishDiagnostics();return true;
+}
+void CellPlaybackRuntime::setObservationOptions(CellObservationOptions options) {
+    options_=options;publishDiagnostics();
+}
+std::optional<CellAerodynamicLoad> CellPlaybackRuntime::objectForce(std::size_t level,std::size_t gridIndex,const CellAerodynamicBody& body) const {
+    if (!options_.objectForces || level>=model_.geometry().cellIndices.size()) return std::nullopt;
+    const auto& cells=model_.geometry().cellIndices[level];if (gridIndex>=cells.size() || cells[gridIndex]==SIZE_MAX) return std::nullopt;
+    const auto load=aerodynamics_.sample(model_.fluid(),cells[gridIndex],body);
+    return load.available ? std::optional<CellAerodynamicLoad>(load) : std::nullopt;
+}
+void CellPlaybackRuntime::publishDiagnostics() {
+    if (options_.objectForces) aerodynamics_.update(model_.fluid());
+    for (std::size_t i=0;i<snapshot_.cellAtmospheres.size();++i) {
+        auto& s=snapshot_.cellAtmospheres[i];const auto& p=model_.fluid().primitives()[i];
+        s.densityKgPerM3=p.density;s.windEnabled=options_.windDiagnostics;s.forcesEnabled=options_.objectForces;
+        s.windAvailable=s.windEnabled && p.resolvedGas;s.forceAvailable=false;
+        s.velocityX=s.windAvailable ? p.velocityX : 0;s.velocityY=s.windAvailable ? p.velocityY : 0;
+        s.windSpeedMS=s.windAvailable ? std::hypot(p.velocityX,p.velocityY) : 0;
+        if (!std::isfinite(s.windSpeedMS)) {s.windAvailable=false;s.windSpeedMS=s.velocityX=s.velocityY=0;}
+        s.dynamicPressurePa=0;s.pressureGradientPaPerM=s.dragForceN=s.pressureForceN=s.forceN={};
+        if (!options_.objectForces) continue;
+        const auto force=aerodynamics_.sample(model_.fluid(),i);
+        s.forceAvailable=force.available;
+        if (force.available) {
+            s.dynamicPressurePa=force.dynamicPressurePa;s.pressureGradientPaPerM=aerodynamics_.pressureGradients()[i];
+            s.dragForceN=force.dragN;s.pressureForceN=force.pressureN;s.forceN=force.forceN;
+        }
+    }
 }
 void CellPlaybackRuntime::doorConditions() {
     for (std::size_t i=0;i<paths_.size();++i) {
@@ -128,7 +156,7 @@ void CellPlaybackRuntime::publish(double seconds) {
         const auto& q=model_.fluid().states()[i].q;auto& a=snapshot_.atmospheres[c.atmosphere];
         for (int g=0;g<4;++g) s.massKg[g]=q[g];
         s.resolvedGas=p.resolvedGas;s.pressureKPa=p.pressurePa/1000;s.temperatureC=p.resolvedGas ? p.temperatureK-StationCelsiusOffset : 0;
-        s.velocityX=p.velocityX;s.velocityY=p.velocityY;s.relativeHumidity=0;
+        s.relativeHumidity=0;
         if (!s.resolvedGas) {a.lowOxygen=a.minOxygenPartialPressureKPa>0 || a.lowOxygen;continue;}
         std::array<double,4> moles{};double total=0;
         for (int g=0;g<4;++g) {moles[g]=q[g]*inverseMolarMass[g];total+=moles[g];}
@@ -173,6 +201,6 @@ void CellPlaybackRuntime::publish(double seconds) {
         s.status=s.bulkFlowRateKgPerS!=0 ? StationAtmospherePathwayStatus::Active : StationAtmospherePathwayStatus::Idle;
     }
     if (geometry.thermal.solarCycle) snapshot_.solarCycle=evaluateStationProfile(*geometry.thermal.solarCycle,snapshot_.elapsedSeconds);
-    doorConditions();
+    doorConditions();publishDiagnostics();
 }
 } // namespace station::editor

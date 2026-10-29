@@ -40,6 +40,12 @@ The gas inventory and local condition within one Interior Cell's volume, includi
 **Wind**:
 The local horizontal velocity of the gas in a Cell. It is distinct from the movement of objects or people.
 
+**Aerodynamic load**:
+The estimated push of the local atmosphere on an object, combining drag from relative gas motion with the surrounding pressure gradient. It depends on gas density and the object's exposed area, displaced volume, shape and velocity; it is distinct from Wind speed.
+
+**Reference object**:
+The stationary object used to compare atmospheric loads between Cells, with a projected area of 1 m², displaced volume of 1 m³ and drag coefficient of one. It is a probe, not a placed object or an obstruction to airflow.
+
 **Breach**:
 An absent Wall between an Interior Cell and geometric Void or the outside of its Level's grid, exposing a full horizontal Cell face. It is distinct from a Door and from the absence of a compartment under the Void atmosphere preset.
 

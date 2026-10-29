@@ -6,6 +6,10 @@
 #include <map>
 
 namespace station::editor {
+double airflowLoadArrowFraction(double forceN,double halfLengthN) {
+    if (!std::isfinite(forceN) || !std::isfinite(halfLengthN) || forceN<=0 || halfLengthN<=0) return 0;
+    return 1/(1+halfLengthN/forceN);
+}
 bool ThermalColourScale::valid() const {
     return std::isfinite(minimumC) && std::isfinite(referenceC) && std::isfinite(maximumC)
         && minimumC < referenceC && referenceC < maximumC;

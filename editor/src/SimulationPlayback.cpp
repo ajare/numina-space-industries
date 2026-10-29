@@ -29,7 +29,7 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     atmosphereHistory_.clear();
     source_ = installation;
     remainder_ = 0;pendingStepSeconds_.reset();
-    runtime_=std::make_unique<CellPlaybackRuntime>(installation);
+    runtime_=std::make_unique<CellPlaybackRuntime>(installation,observationOptions_);
     for (const auto& door:runtime_->model().geometry().doors)
         doors_.emplace(std::pair{door.level,door.wall},DoorState{});
     recordAtmosphereHistory();
@@ -100,6 +100,10 @@ std::optional<StationSystemsSnapshot> SimulationPlayback::snapshotFor(
     return runtime_->snapshot();
 }
 
+void SimulationPlayback::setObservationOptions(CellObservationOptions options) {
+    if (runtime_) runtime_->setObservationOptions(options);
+    observationOptions_=options;
+}
 void SimulationPlayback::setSpeedIndex(int index) {
     if (index < 0 || index >= static_cast<int>(speeds.size()))
         throw std::out_of_range("Invalid simulation speed");

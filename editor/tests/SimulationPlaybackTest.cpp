@@ -288,6 +288,45 @@ void hullPlayback() {
     const auto blanket=temperature(I::HullType::MultiLayerBlanket);
     require(bare<blanket-1.0 && blanket<20.0,"Playback did not wire Hull drain links");
 }
+void observationControls() {
+    using namespace station::editor;using I=nsi::core::Installation;
+    I scene(4,4);scene.setHullType(std::nullopt);scene.toggleWall(0,scene.level(0).horizontalWall(1,0));
+    const auto authored=scene;CellPlaybackRuntime reference(scene),controlled(scene);
+    require(controlled.observationOptions().windDiagnostics && controlled.observationOptions().objectForces,"Calculation defaults changed");
+    for (bool wind:{true,false}) for (bool forces:{true,false}) {
+        const auto clock=controlled.snapshot().elapsedSeconds;const auto transfers=controlled.snapshot().atmospherePathways[0].netTransferredKg;
+        controlled.setObservationOptions({wind,forces});
+        require(controlled.snapshot().elapsedSeconds==clock && controlled.snapshot().atmospherePathways[0].netTransferredKg==transfers,"Calculation toggle advanced/rebooked physics");
+        require(controlled.update(0.1) && reference.update(0.1),"Observation toggle broke advance");
+        for (std::size_t i=0;i<controlled.model().fluid().states().size();++i) {
+            require(controlled.model().fluid().states()[i].q==reference.model().fluid().states()[i].q,"Diagnostics changed conserved gas state");
+            const auto& c=controlled.snapshot().cellAtmospheres[i];
+            require(c.windEnabled==wind && c.forcesEnabled==forces,"Calculation flags not published");
+            if (!wind) require(!c.windAvailable && c.windSpeedMS==0 && c.velocityX==0 && c.velocityY==0,"Disabled wind retained stale observations");
+            if (!forces) require(!c.forceAvailable && c.forceN==std::array<double,2>{},"Disabled forces retained stale observations");
+            else require(c.forceN==reference.snapshot().cellAtmospheres[i].forceN,"Forces depended on optional wind diagnostics");
+        }
+        const auto force=controlled.objectForce(0,1);require(bool(force)==forces,"Object force sampling ignored its toggle");
+        if (forces) {
+            station::CellAerodynamicBody moving;const auto& p=controlled.model().fluid().primitives()[1];moving.velocityMS={p.velocityX,p.velocityY};
+            const auto carried=controlled.objectForce(0,1,moving);
+            require(carried && std::hypot(carried->dragN[0],carried->dragN[1])<1e-12,"Object sampling ignored relative velocity");
+        }
+    }
+    require(!controlled.objectForce(99,0) && !controlled.objectForce(0,999),"Missing Cell invented object forces");
+    SimulationPlayback playback;playback.setObservationOptions({false,true});playback.reset(scene);playback.togglePlaying();playback.update(0.1);
+    const auto id=playback.runtime()->snapshot().atmospheres[0].id;const auto count=playback.temperatureHistory(id).size();
+    playback.setObservationOptions({true,false});require(playback.temperatureHistory(id).size()==count,"Toggling observations added history");
+    playback.reset(scene);require(playback.observationOptions()==station::CellObservationOptions{true,false}
+        && !playback.runtime()->snapshot().cellAtmospheres[0].forcesEnabled,"Reset lost calculation controls");
+    require(scene==authored,"Calculation options mutated authored Installation");
+    CellPlaybackRuntime evacuation(scene);double initialLoad=0;
+    for (const auto& c:evacuation.snapshot().cellAtmospheres) initialLoad=std::max(initialLoad,std::hypot(c.forceN[0],c.forceN[1]));
+    for (int step=0;step<100;++step) require(evacuation.update(0.1),"Load decay scenario failed");
+    double remainingLoad=0;for (const auto& c:evacuation.snapshot().cellAtmospheres)
+        if (c.forceAvailable) remainingLoad=std::max(remainingLoad,std::hypot(c.forceN[0],c.forceN[1]));
+    require(initialLoad>0 && remainingLoad<initialLoad*0.001,"Evacuated gas retained full-strength airflow load");
+}
 void nativeSnapshots() {
     using namespace station::editor;using I=nsi::core::Installation;
     I scene(5,5);scene.setHullType(std::nullopt);scene.toggleWall(0,scene.level(0).horizontalWall(2,0));
@@ -397,6 +436,7 @@ int main() {
     try {
         using namespace station::editor;
         editingLockout();
+        observationControls();
         nativeSnapshots();
         failedPlaybackDebt();
         doorControls();

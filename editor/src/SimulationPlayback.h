@@ -31,6 +31,8 @@ public:
     void setSpeedIndex(int index);
     int speedIndex() const noexcept { return speedIndex_; }
     void update(double wallSeconds);
+    void setObservationOptions(CellObservationOptions options);
+    CellObservationOptions observationOptions() const {return observationOptions_;}
     // Runtime-only, instantaneous controls. Paused/missing/non-Door targets refuse.
     bool toggleDoor(std::size_t level, std::size_t wall);
     bool doorOpen(std::size_t level, std::size_t wall) const;
@@ -63,5 +65,6 @@ private:
     double remainder_ = 0;
     int speedIndex_ = 2;
     bool playing_ = false;
+    CellObservationOptions observationOptions_{};
 };
 } // namespace station::editor

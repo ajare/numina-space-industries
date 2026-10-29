@@ -23,6 +23,47 @@ std::array<double,7> sum(std::span<const CellFluidState> states) {
     std::array<double,7> total{};for (const auto& s:states) for (int i=0;i<7;++i) total[i]+=s.q[i];return total;
 }
 void near(double a,double b,double relative=1e-10) {require(std::abs(a-b)<=relative*std::max({1.0,std::abs(a),std::abs(b)}),"Fluid conservation mismatch");}
+void prolongedDoorDecompression() {
+    // Two equal rooms: the sealed room keeps the activity reference at one
+    // atmosphere while its neighbour drains through a restricted exterior Door.
+    auto mesh=fluid_test::earthLikeGrid(4,4);std::size_t door=SIZE_MAX;
+    for (std::size_t i=0;i<mesh.faces.size();++i) {
+        auto& f=mesh.faces[i];
+        if (f.axis==0 && f.b!=SIZE_MAX && f.a%4==1) f.openFraction=0;
+        if (f.axis==0 && f.a==4 && f.b==SIZE_MAX && f.sign==-1) {
+            f.openFraction=0.3;f.dischargeCoefficient=0.7;door=i;
+        }
+    }
+    // Unresolved inventory must also remain untouched while an unrelated
+    // sealed room has acoustic activity; a global force gauge invents impulse.
+    auto trace=mesh;
+    for (std::size_t i=0;i<trace.cells.size();++i) {
+        if (i%4<2) for (auto& q:trace.cells[i].initial.q) q*=1e-22;
+        else trace.cells[i].initial.q[6]*=1.013;
+    }
+    trace.cells[3].initial.q[6]*=1.1;CellFluidSolver frozen(trace);
+    require(frozen.advance(0.1),"Unrelated acoustic activity destabilised retained near-vacuum gas");
+    for (std::size_t i=0;i<trace.cells.size();++i) if (i%4<2)
+        require(frozen.states()[i].q==trace.cells[i].initial.q,"Pressure reference invented near-vacuum momentum");
+    CellFluidSolver fluid(mesh);const auto initial=sum(fluid.states());
+    std::array<double,7> exterior{};std::array<double,2> walls{};
+    for (int step=0;step<1200;++step) {
+        require(fluid.advance(0.1),"Prolonged Door decompression failed positivity refinement");
+        for (int k=0;k<7;++k) exterior[k]+=fluid.faceTransfers()[door].q[k];
+        for (int axis=0;axis<2;++axis) walls[axis]+=fluid.wallImpulse()[axis];
+    }
+    const auto current=sum(fluid.states());
+    for (int g=0;g<4;++g) near(initial[g],current[g]+exterior[g]);
+    near(initial[6],current[6]+exterior[6]);
+    for (int axis=0;axis<2;++axis) near(current[4+axis]-initial[4+axis],walls[axis]-exterior[4+axis],1e-7);
+    for (std::size_t i=0;i<fluid.states().size();++i) {
+        if (i%4>=2) require(fluid.states()[i].q==mesh.cells[i].initial.q,"Venting disturbed the sealed room");
+        else {
+            require(fluid.primitives()[i].pressurePa<1e-6,"Door did not evacuate its room");
+            require(fluid.states()[i].q[6]>0,"Decompression discarded retained gas energy");
+        }
+    }
+}
 void check() {
     CellFluidSolver resting(fluid_test::grid(64,64));const auto initial=sum(resting.states());
     require(resting.advance(10),"Resting update failed");require(resting.work().resting && resting.work().substeps==0,"Rest did unnecessary acoustic work");
@@ -151,4 +192,4 @@ void check() {
     require(source.states()[0].q==finite.q,"Invalid duration changed inventory");
 }
 }
-int main() {try {check();std::cout<<"Cell fluids passed\n";return 0;}catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}
+int main() {try {prolongedDoorDecompression();check();std::cout<<"Cell fluids passed\n";return 0;}catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

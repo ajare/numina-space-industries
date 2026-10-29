@@ -27,13 +27,17 @@ struct InstallationRenderSettings {
     InstallationRenderMode mode = InstallationRenderMode::Default;
     ThermalColourScale thermal;
     PressureColourScale pressure;
-    bool windArrows=false;
+    bool forceArrows=false;
+    float forceHalfLengthN=10;
 };
 struct SectorColour {
     float red, green, blue;
     bool operator==(const SectorColour&) const = default;
 };
 
+// Smooth bounded force scale: zero length at zero load, half length at scale.
+// No minimum arrow length or speed saturation; invalid inputs return zero.
+double airflowLoadArrowFraction(double forceN,double halfLengthN=10);
 SectorColour defaultSectorColour(nsi::core::Installation::SectorType);
 // Piecewise linear RGB interpolation with exact blue/green/red anchors.
 // Values outside the scale saturate; invalid scales/temperatures have no colour.

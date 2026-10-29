@@ -49,7 +49,7 @@ DeckPointerEvent drawDeckGrid(const char* id,
                              bool doorControlsEnabled, std::span<const std::size_t> openDoors,
                              std::span<const station::editor::SectorColour> cellColours,
                              std::span<const station::StationCellAtmosphereSnapshot> atmosphere,
-                             std::size_t levelIndex,bool windArrows) {
+                             std::size_t levelIndex,bool forceArrows,double forceHalfLengthN) {
     DeckPointerEvent event;
 
     const float available_width = ImGui::GetContentRegionAvail().x;
@@ -96,12 +96,12 @@ DeckPointerEvent drawDeckGrid(const char* id,
         }
     }
 
-    if (windArrows) for (const auto& c:atmosphere) {
-        if (!validCell(c) || !c.resolvedGas) continue;
-        const double speed=std::hypot(c.velocityX,c.velocityY);
-        if (!std::isfinite(speed) || speed<0.05) continue;
-        const float dx=static_cast<float>(c.velocityX/speed),dy=static_cast<float>(c.velocityY/speed);
-        const float length=cell*0.72f*static_cast<float>(std::clamp(speed/20.0,0.15,1.0));
+    if (forceArrows) for (const auto& c:atmosphere) {
+        if (!validCell(c) || !c.resolvedGas || !c.forcesEnabled || !c.forceAvailable) continue;
+        const double force=std::hypot(c.forceN[0],c.forceN[1]);
+        const float length=cell*0.72f*static_cast<float>(station::editor::airflowLoadArrowFraction(force,forceHalfLengthN));
+        if (length<0.5f) continue;
+        const float dx=static_cast<float>(c.forceN[0]/force),dy=static_cast<float>(c.forceN[1]/force);
         const ImVec2 center{origin.x+cell*(float(c.gridIndex%level.width())+0.5f),origin.y+cell*(float(c.gridIndex/level.width())+0.5f)};
         const ImVec2 tail{center.x-dx*length/2,center.y-dy*length/2},tip{center.x+dx*length/2,center.y+dy*length/2};
         const float head=std::min(4.0f,length*0.35f);const auto colour=IM_COL32(255,245,160,240);
@@ -225,10 +225,20 @@ DeckPointerEvent drawDeckGrid(const char* id,
         const auto index=std::size_t(readout->y)*level.width()+readout->x;
         const auto it=std::find_if(atmosphere.begin(),atmosphere.end(),[&](const auto& c){return c.gridIndex==index && validCell(c);});
         if (it!=atmosphere.end()) {
-            if (!it->resolvedGas) ImGui::TextUnformatted("Pressure below resolved range (~0 kPa); temperature, composition and wind unavailable.");
+            if (!it->resolvedGas) ImGui::TextUnformatted("Pressure below resolved range (~0 kPa); temperature, composition, wind and force unavailable.");
             else {
                 ImGui::Text("Pressure %.6g kPa | Temperature %.3f C | RH %.2f%%",it->pressureKPa,it->temperatureC,100*it->relativeHumidity);
-                ImGui::Text("Wind (%.3f, %.3f) m/s | Speed %.3f m/s",it->velocityX,it->velocityY,std::hypot(it->velocityX,it->velocityY));
+                if (!it->windEnabled) ImGui::TextUnformatted("Wind diagnostics: disabled");
+                else if (!it->windAvailable) ImGui::TextUnformatted("Wind diagnostics: unavailable");
+                else ImGui::Text("Wind (%.3f, %.3f) m/s | Speed %.3f m/s",it->velocityX,it->velocityY,it->windSpeedMS);
+                if (!it->forcesEnabled) ImGui::TextUnformatted("Object forces: disabled");
+                else if (!it->forceAvailable) ImGui::TextUnformatted("Object forces: unavailable");
+                else {
+                    ImGui::Text("Reference load (%.6g, %.6g) N | Magnitude %.6g N",it->forceN[0],it->forceN[1],std::hypot(it->forceN[0],it->forceN[1]));
+                    ImGui::Text("Drag (%.6g, %.6g) N | Pressure (%.6g, %.6g) N",it->dragForceN[0],it->dragForceN[1],it->pressureForceN[0],it->pressureForceN[1]);
+                    ImGui::Text("Density %.6g kg/m3 | Dynamic pressure %.6g Pa",it->densityKgPerM3,it->dynamicPressurePa);
+                    ImGui::TextUnformatted("Reference: stationary, A=1 m2, V=1 m3, Cd=1; one-way load estimate.");
+                }
                 const double molar[]={station::StationMolarMassOxygenKgPerMol,station::StationMolarMassNitrogenKgPerMol,
                     station::StationMolarMassCarbonDioxideKgPerMol,station::StationMolarMassWaterKgPerMol};
                 double total=0;for (int g=0;g<4;++g) total+=it->massKg[g]/molar[g];

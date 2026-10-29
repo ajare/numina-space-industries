@@ -7,8 +7,13 @@ void drawInstallationRenderModeCombo(InstallationRenderSettings& settings) {
     ImGui::SetNextItemWidth(110);
     if (ImGui::Combo("Render mode",&mode,"Default\0Thermal\0Pressure\0"))
         settings.mode = static_cast<InstallationRenderMode>(mode);
-    ImGui::SameLine();ImGui::Checkbox("Wind arrows",&settings.windArrows);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Cell wind direction; arrow length saturates at 20 m/s. No forces on objects.");
+    ImGui::SameLine();ImGui::Checkbox("Airflow load arrows",&settings.forceArrows);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Estimated force in N on a stationary reference object: area 1 m2, volume 1 m3, Cd 1. Drag + coarse pressure-gradient load; no rigid-body motion.");
+    if (settings.forceArrows) {
+        ImGui::SameLine();ImGui::SetNextItemWidth(110);
+        ImGui::SliderFloat("Half-length load (N)",&settings.forceHalfLengthN,0.001f,100000.0f,"%.3g",ImGuiSliderFlags_Logarithmic|ImGuiSliderFlags_AlwaysClamp);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Arrow length = load / (load + scale). It shrinks smoothly to zero; half length at this force. Subpixel arrows are omitted.");
+    }
 }
 
 void drawThermalRenderControls(InstallationRenderSettings& settings) {

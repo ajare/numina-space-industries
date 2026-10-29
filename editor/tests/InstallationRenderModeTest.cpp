@@ -261,21 +261,34 @@ void cellRendering() {
         && cellRenderColours(levels,1,settings,&layered)[0]==SectorColour{1,0,0},"Cell temperatures crossed Level identities");
     ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.DisplaySize={900,700};io.DeltaTime=1/60.0f;
     unsigned char* pixels;int width,height;io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
-    for (auto& c:snapshot.cellAtmospheres) {c.velocityX=10;c.velocityY=0;}
-    int without=0,with=0;std::string text;
-    for (int frame=0;frame<3;++frame) {
+    for (auto& c:snapshot.cellAtmospheres) {c.velocityX=10;c.velocityY=0;c.windSpeedMS=10;c.forceN={10,0};}
+    near(airflowLoadArrowFraction(0,10),0);near(airflowLoadArrowFraction(10,10),0.5);
+    require(airflowLoadArrowFraction(1,10)<airflowLoadArrowFraction(10,10)
+        && airflowLoadArrowFraction(0.001,10)<airflowLoadArrowFraction(0.01,10),"Force arrows have a fixed minimum length");
+    require(airflowLoadArrowFraction(100,10)<airflowLoadArrowFraction(1000,10),"Force arrows saturate at a fixed threshold");
+    require(airflowLoadArrowFraction(1,0)==0 && airflowLoadArrowFraction(std::numeric_limits<double>::quiet_NaN(),10)==0,"Invalid load scale accepted");
+    int without=0,with=0;std::string text,loadedText;
+    for (int frame=0;frame<6;++frame) {
+        for (auto& c:snapshot.cellAtmospheres) {
+            c.forceN={frame==3 ? 1e-9 : 10,0};c.forcesEnabled=frame!=4;c.windEnabled=frame!=5;
+        }
         ImGui::NewFrame();ImGui::SetNextWindowPos({0,0});ImGui::SetNextWindowSize({700,600});ImGui::Begin("Cell observations");
         const auto origin=ImGui::GetCursorScreenPos();auto* draw=ImGui::GetWindowDrawList();const auto first=draw->VtxBuffer.Size;
         ImGui::BeginDisabled();ImGui::LogToBuffer();
-        drawDeckGrid("Native",scene.level(0),EditMode::Cell,std::nullopt,{},false,{},colours,snapshot.cellAtmospheres,0,frame==2);
+        drawDeckGrid("Native",scene.level(0),EditMode::Cell,std::nullopt,{},false,{},colours,snapshot.cellAtmospheres,0,frame>=2);
         text=ImGui::GetCurrentContext()->LogBuffer.c_str();ImGui::LogFinish();ImGui::EndDisabled();
         for (int v=0;v<4;++v) require(draw->VtxBuffer[first+v].col==IM_COL32(0,0,255,255),"Widget did not use Cell colour");
         for (int v=4;v<8;++v) require(draw->VtxBuffer[first+v].col==IM_COL32(255,0,0,255),"Widget used uniform Sector colour");
-        if (frame==1) without=draw->VtxBuffer.Size-first;if (frame==2) with=draw->VtxBuffer.Size-first;
+        if (frame==1) without=draw->VtxBuffer.Size-first;if (frame==2) {with=draw->VtxBuffer.Size-first;loadedText=text;}
+        int arrows=0;for (int v=first;v<draw->VtxBuffer.Size;++v) arrows+=draw->VtxBuffer[v].col==IM_COL32(255,245,160,240);
+        if (frame==2 || frame==5) require(arrows>0,"Force arrows incorrectly depend on wind diagnostics");
+        if (frame==3 || frame==4) require(arrows==0,"Tiny/disabled forces still displayed full wind arrows");
+        if (frame==4) require(text.find("Object forces: disabled")!=std::string::npos,"Disabled forces were displayed as measurements");
+        if (frame==5) require(text.find("Wind diagnostics: disabled")!=std::string::npos,"Disabled wind was displayed as a measurement");
         ImGui::End();ImGui::Render();io.AddMousePosEvent(origin.x+15,origin.y+15);
     }
-    require(with>without,"Wind arrows did not render");
-    require(text.find("Pressure")!=std::string::npos && text.find("Wind (")!=std::string::npos && text.find("Wet mole")!=std::string::npos,
+    require(with>without,"Airflow load arrows did not render");
+    require(loadedText.find("Pressure")!=std::string::npos && loadedText.find("Wind (")!=std::string::npos && loadedText.find("Wet mole")!=std::string::npos && loadedText.find("Reference load")!=std::string::npos,
         "Read-only playing grid did not expose Cell observations");
     ImGui::DestroyContext();
 }

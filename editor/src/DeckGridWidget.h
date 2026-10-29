@@ -48,4 +48,4 @@ DeckPointerEvent drawDeckGrid(const char* id, const station::editor::Level& leve
                               std::span<const std::size_t> openDoors = {},
                               std::span<const station::editor::SectorColour> cellColours = {},
                               std::span<const station::StationCellAtmosphereSnapshot> atmosphere = {},
-                              std::size_t levelIndex = 0, bool windArrows = false);
+                              std::size_t levelIndex = 0, bool forceArrows = false,double forceHalfLengthN = 10);

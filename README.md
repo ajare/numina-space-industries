@@ -77,7 +77,8 @@ extension are tracked in `editor/vendor/imnodes/`.
 Editor playback runs native conservative Cell gas dynamics and Hull/partition
 heat, replacing—not supplementing—the well-mixed compartment runtime. Each Level
 has independent horizontal flow: four gas species, pressure, temperature and wind;
-there is no vertical airflow or force on objects. Cells store 12 m³ × Sector
+there is no vertical airflow or rigid-body motion. Passive aerodynamic-load
+sampling is described below. Cells store 12 m³ × Sector
 height, but full gas faces stay 6 m². Doors use **0.9 m × 2 m (1.8 m²)** openings
 and discharge coefficient 0.7. Restricted-face HLLE flux is a coarse aperture
 model, not the standalone runtime's analytic nozzle law. Mixing is numerical,
@@ -107,9 +108,27 @@ interpolation and saturation. Anchors remain strictly ordered and nonnegative,
 within 0–1000 kPa; missing/invalid live data retains Default colours.
 
 Hover a Cell to inspect pressure, temperature, humidity, wet composition and
-horizontal velocity, including while playing. **Wind arrows** optionally show
-direction, with length saturating at 20 m/s. Vacuum/unresolved gas never fabricates
-temperature or velocity observations.
+horizontal velocity, including while playing. **Airflow load arrows** show the
+estimated push on a stationary reference object (area 1 m², volume 1 m³, Cd 1),
+not gas speed. Length scales smoothly as `force / (force + scale)`; adjust
+**Half-length load (N)** to change sensitivity. There is no fixed minimum arrow
+length; subpixel arrows are omitted. As a room evacuates, density-dependent load
+shrinks even if velocity stays similar. Hover shows density, dynamic pressure,
+separate drag/pressure forces and the resultant in newtons. Unresolved or
+unrepresentable loads are unavailable, never fabricated zero measurements.
+
+**Wind diagnostics** and **Object forces** are independent calculation toggles,
+both on by default. They work while paused/playing, survive Reset and document
+replacement, and do not edit the Installation or advance time. Wind-off hides
+optional speed/vector diagnostics, not the gas solver's mandatory momentum.
+Force-on still uses solver velocity when wind diagnostics are off; force-off
+skips load/gradient calculation and clears old observations.
+
+`station/CellAerodynamics.h` provides object-specific relative-velocity drag and
+coarse pressure-gradient force sampling. `CellPlaybackRuntime::objectForce`
+accepts a Level/Cell and object area, volume, Cd and velocity. These are one-way
+engineering estimates: no object motion, obstruction, friction, collision or
+opposite gas booking is implied. See [ADR-0005](docs/adr/0005-passive-aerodynamic-loads.md).
 
 Render settings are editor-only: they do not modify saved Installations or the
 simulation and remain adjustable during playback.

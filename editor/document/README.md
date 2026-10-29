@@ -96,8 +96,16 @@ remain available during playback and are view state only. Missing atmosphere
 data retains Default colours. Thermal/Pressure colours are per Cell, keyed by
 Level/grid index and stable Sector uid. Hover inspection remains active on the
 read-only playing grid and reports composition and horizontal velocity. Optional
-Wind arrows saturate visually at 20 m/s, without changing physics. Unresolved gas
-does not display placeholder temperatures/wind as observations.
+Airflow load arrows show drag plus pressure-gradient force on the stationary
+reference object (A=1 m², V=1 m³, Cd=1), not speed. Their smooth force scale has
+an adjustable half-length in N and no fixed minimum length; subpixel loads are
+not drawn. Hover includes density and separate force terms. Wind diagnostics
+and Object forces calculations are independent, initially enabled controls;
+disabling wind reporting does not disable conservative gas momentum or forces.
+Disabling forces skips the load/gradient pass and invalidates cached load queries.
+These runtime options survive Reset/document replacement without adding history
+or editing the Installation. Unresolved gas does not display placeholder
+measurements. Loads are passive estimates, not rigid-body motion/two-way coupling.
 Histories cover every compartment, preserve the
 last committed data while paused and clear on reset or document replacement.
 Refused native advances pause with a diagnostic, retaining the exact unadvanced

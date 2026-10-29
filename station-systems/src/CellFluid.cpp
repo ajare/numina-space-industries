@@ -105,7 +105,7 @@ CellFluidSolver::CellFluidSolver(CellFluidMesh mesh):mesh_(std::move(mesh)) {
 }
 void CellFluidSolver::rebaseReference() {
     if (state_.empty()) return;
-    // A constant pressure reference cancels on each complete Cell boundary.
+    // This reference selects resting activity, not momentum-force arithmetic.
     // Rebase to the current background once per advance: uniform source changes
     // must not turn every resting Cell into an active pressure/composition wave.
     // A median-pressure representative avoids choosing a local source/breach
@@ -272,7 +272,7 @@ bool CellFluidSolver::advance(double seconds,std::size_t maxSubsteps) {
             ++work_.faceEvaluations;
             const auto& a=primitive_[f.a];const CellFluidPrimitive vacuum{};
             const auto& b=exterior ? vacuum : primitive_[f.b];
-            const double normal=f.sign,ref=referencePressure_;
+            const double normal=f.sign;
             const double ua=normal*(f.axis==0 ? a.velocityX : a.velocityY);
             const double ub=normal*(f.axis==0 ? b.velocityX : b.velocityY);
             const double openArea=f.areaM2*f.openFraction*f.dischargeCoefficient;
@@ -282,8 +282,11 @@ bool CellFluidSolver::advance(double seconds,std::size_t maxSubsteps) {
             };
             const int momentum=4+f.axis;
             const double wa=wallPressure(a,ua)*blocked,wb=exterior ? 0 : wallPressure(b,-ub)*blocked;
-            delta_[f.a].q[momentum]-=normal*(wa-ref*blocked);
-            if (!exterior) delta_[f.b].q[momentum]+=normal*(wb-ref*blocked);
+            // Each Cell's own pressure cancels on its complete boundary.
+            // Never subtract a distant pressurised room's activity reference
+            // here: roundoff at that scale can overwhelm near-vacuum momentum.
+            delta_[f.a].q[momentum]-=normal*(wa-a.pressurePa*blocked);
+            if (!exterior) delta_[f.b].q[momentum]+=normal*(wb-b.pressurePa*blocked);
             wallRate[f.axis]+=normal*(wb-wa);
             if (!(openArea>0)) continue;
             const double left=std::min(ua-a.soundSpeed,ub-b.soundSpeed),right=std::max(ua+a.soundSpeed,ub+b.soundSpeed);
@@ -298,9 +301,8 @@ bool CellFluidSolver::advance(double seconds,std::size_t maxSubsteps) {
                 if (k==momentum) {fa+=normal*a.pressurePa;fb+=normal*b.pressurePa;}
                 if (k==6) {fa+=a.pressurePa*ua;fb+=b.pressurePa*ub;}
                 rate.q[k]=openArea*(wl*fa+wr*fb+wd*(qb-qa));
-                const double shifted=rate.q[k]-(k==momentum ? normal*ref*openArea : 0);
-                delta_[f.a].q[k]-=shifted;
-                if (!exterior) delta_[f.b].q[k]+=shifted;
+                delta_[f.a].q[k]-=rate.q[k]-(k==momentum ? normal*a.pressurePa*openArea : 0);
+                if (!exterior) delta_[f.b].q[k]+=rate.q[k]-(k==momentum ? normal*b.pressurePa*openArea : 0);
             }
         }
         bool accepted=false;

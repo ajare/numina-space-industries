@@ -14,6 +14,28 @@ runtime rules and diagnostics in one implementation, not parallel client copies.
 The atmosphere observation value type and metric catalogue accompany validation
 because they are the authoritative source of valid atmosphere Monitor metrics.
 
+## Native aerodynamic-load observations
+
+`station/CellAerodynamics.h` provides a preallocated `CellAerodynamicField` and
+`cellAerodynamicLoad`: relative-flow drag plus `-V grad(p)` for a supplied body's
+area, volume, drag coefficient and velocity. The default stationary reference
+body has A=1 m², V=1 m³ and Cd=1. Loads are N; density is kg/m³ and dynamic
+pressure is Pa. The field reconstructs a coarse volume-averaged pressure gradient
+using open-face mean pressures, actual aperture/Cd and Cell volume; closed Walls
+and independent Levels cannot create a fictitious pressure stencil.
+
+Update the field after successful gas/opening changes before sampling. It never
+mutates gas or advances time, and field update/sampling allocate no successful-step
+heap memory. Invalid body parameters throw; unresolved gas, nonfinite gradients
+or unrepresentable forces return `available=false`. This is one-way small-object
+sampling, without resolved jets, shape/obstruction, lift, torque, added mass,
+rarefied/Mach corrections or rigid-body integration. Actual moving bodies and
+conservative opposite gas bookings require a separate coupling layer (ADR-0005).
+
+Editor playback independently enables wind diagnostics and load calculations,
+both by default; turning off wind observations leaves the gas solver's required
+velocity/kinetic energy intact. Turning off loads skips field/force evaluation.
+
 ## Native Cell fluid kernel
 
 `station/CellFluid.h` exposes a standalone `station::CellFluidSolver` through

@@ -186,9 +186,12 @@ higher playback speeds are not a real-time guarantee.
 
 The Editor runtime benchmark additionally publishes Cell/Sector/Hull/pathway
 snapshots, including derived `breach-<level>-<wall>` telemetry. On the same machine,
-two warmups and ten trials measured **0.61 ms** at rest, **9.68 ms** for four
-breaches and **9.78 ms** for sustained breaches per 0.1 simulated seconds.
-A sustained one-simulated-second update measured **94.5 ms** (95.5 ms maximum).
+using the current wind/load-enabled runtime, two warmups and ten trials measured
+**0.72 ms** at rest, **8.77 ms** for four breaches and **10.06 ms** for sustained
+breaches per 0.1 simulated seconds. The sustained case is slightly over the
+10 ms target with both optional calculations enabled; both disabled measured
+**9.92 ms**. A sustained one-simulated-second update with both enabled measured
+**97.4 ms** (98.0 ms maximum).
 These include native gas/heat and snapshot publication, but exclude construction,
 controller history/copy costs, GUI rendering and scheduling overhead; accelerated
 playback still has no real-time guarantee.
@@ -196,7 +199,8 @@ playback still has no real-time guarantee.
 ```sh
 cmake --build build-linux --config Release --target editor-cell-playback-benchmark -j 16
 build-linux/editor/editor-cell-playback-benchmark
-build-linux/editor/editor-cell-playback-benchmark sustained-breaches 1
+build-linux/editor/editor-cell-playback-benchmark sustained-breaches 1 both
+build-linux/editor/editor-cell-playback-benchmark sustained-breaches 0.1 none
 ```
 
 The runtime consumer follows the station-systems scenario-rig precedent and
