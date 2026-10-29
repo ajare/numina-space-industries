@@ -88,7 +88,7 @@ void roundTrips(TempFiles& temp) {
         require(session.path() == path && !session.unsavedChanges(), "successful Save adopts clean path");
         const auto emitted = readText(path);
         const auto parsed=YAML::Load(emitted);
-        require(parsed["version"].as<int>()==3 && parsed["levels"].IsSequence(),
+        require(parsed["version"].as<int>()==4 && parsed["levels"].IsSequence(),
                 "versioned Installation YAML");
         require(emitted.find("area:") == std::string::npos,
                 "cached Sector areas are not serialized");

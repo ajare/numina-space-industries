@@ -7,7 +7,9 @@
 // lives in the headless station::editor::EditorSession; this file only
 // draws, forwards input, and supplies native-dialog and storage adapters.
 
+#include "InstallationRenderControls.h"
 #include "imgui.h"
+#include "implot.h"
 #include "imgui_internal.h"  // DockBuilder* (initial dock layout) is internal API
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
@@ -20,6 +22,7 @@
 #include "NativeFileDialogs.h"
 #include "SimulationPlayback.h"
 #include "SectorSystemsView.h"
+#include "SectorThermalPanel.h"
 
 #include "station/editor/EditorSession.h"
 #include "station/editor/Installation.h"
@@ -179,6 +182,7 @@ int runEditor() {
         return 1;
     }
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
+    ImPlot::CreateContext();
 
     bool running = true;
     bool first_frame = true;
@@ -187,6 +191,7 @@ int runEditor() {
     station::editor::EditorSession session;
     station::editor::SimulationPlayback simulation;
     station::editor::SectorSystemsView sector_view;
+    station::editor::InstallationRenderSettings render_settings;
     SdlUnsavedChangesPrompt unsaved_prompt(window);
     std::string file_status;
     auto report = [&](const station::editor::FileResult& result) {
@@ -253,6 +258,8 @@ int runEditor() {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
+
+        session.setEditingEnabled(simulation.editingAllowed());
 
         // Undo/redo hotkeys, handled here rather than as menu shortcuts so
         // one press fires exactly one step whether or not the Edit menu is
@@ -341,17 +348,17 @@ int runEditor() {
             toolbar_min,
             ImVec2(toolbar_min.x + toolbar_width, toolbar_min.y + toolbar_height),
             ImGui::GetColorU32(ImGuiCol_Border));
-        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, !session.canUndo());
+        ImGui::BeginDisabled(!session.canUndo());
         if (ImGui::Button(ICON_FA_UNDO " Undo")) {
             session.undo();
         }
-        ImGui::PopItemFlag();
+        ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, !session.canRedo());
+        ImGui::BeginDisabled(!session.canRedo());
         if (ImGui::Button(ICON_FA_REDO " Redo")) {
             session.redo();
         }
-        ImGui::PopItemFlag();
+        ImGui::EndDisabled();
 
         try { simulation.synchronize(session.hasDocument() ? &session.installation() : nullptr); }
         catch (const std::exception& error) { file_status = error.what(); }
@@ -375,6 +382,7 @@ int runEditor() {
         catch (const std::exception& error) { file_status = error.what(); }
         ImGui::SameLine();
         ImGui::Text("%.1f s", simulation.runtime() ? simulation.runtime()->snapshot().elapsedSeconds : 0.0);
+        session.setEditingEnabled(simulation.editingAllowed());
 
         // Plain-letter shortcuts must not consume text-field input or chords.
         if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt && !io.KeySuper && !io.KeyShift &&
@@ -392,6 +400,8 @@ int runEditor() {
         ImGui::SetNextItemWidth(140);
         if (ImGui::Combo("Mode", &mode_index, "Cell (C)\0Wall (W)\0Sector (S)\0")) session.endStroke();
         const auto mode=static_cast<EditMode>(mode_index);
+        ImGui::SameLine();
+        station::editor::drawInstallationRenderModeCombo(render_settings);
         active_level=std::min(active_level,session.installation().levelCount()-1);
         if (ImGui::FindWindowSettingsByID(ImHashStr(kGridTitle)) == nullptr) {
             // Add the grid to existing user layouts without rebuilding them.
@@ -443,8 +453,27 @@ int runEditor() {
             if (ImGui::InputText(label,buffer.data(),buffer.size()))
                 edit([&]{ commit(std::string(buffer.data())); });
         };
+        station::editor::drawThermalRenderControls(render_settings);
+        if (!session.editingEnabled())
+            ImGui::TextWrapped("Reset the simulation to the start before editing the Installation.");
+        ImGui::BeginDisabled(!session.editingEnabled());
         textField("Installation name",session.installation().getName(),
                   [&](std::string name){ session.setName(std::move(name)); });
+        using HullType = nsi::core::Installation::HullType;
+        const auto hull = session.installation().hullType();
+        int hullIndex = hull ? static_cast<int>(*hull) + 1 : 0;
+        const char* hullNames[] = {"No hull", "Bare skin", "Standard insulated", "Multi-layer blanket"};
+        if (ImGui::Combo("Hull type", &hullIndex, hullNames, 4))
+            edit([&]{ session.setHullType(hullIndex == 0 ? std::nullopt
+                : std::optional(static_cast<HullType>(hullIndex - 1))); });
+        using PartitionType = nsi::core::Installation::PartitionType;
+        const auto partition = session.installation().partitionType();
+        int partitionIndex = partition ? static_cast<int>(*partition) + 1 : 0;
+        const char* partitionNames[] = {"No partition coupling", "Bare partition", "Thermal break", "Insulated partition"};
+        if (ImGui::Combo("Partition type", &partitionIndex, partitionNames, 4))
+            edit([&]{ session.setPartitionType(partitionIndex == 0 ? std::nullopt
+                : std::optional(static_cast<PartitionType>(partitionIndex - 1))); });
+        ImGui::EndDisabled();
         const auto level_label="Level "+std::to_string(active_level);
         if (ImGui::BeginCombo("Level",level_label.c_str())) {
             for (std::size_t l=0;l<session.installation().levelCount();++l) {
@@ -457,6 +486,7 @@ int runEditor() {
         }
         const auto inspected=session.installation().level(active_level);
         ImGui::Text("Size: %u x %u",inspected.width(),inspected.depth());
+        ImGui::BeginDisabled(!session.editingEnabled());
         int offsets[2]={inspected.offsetX(),inspected.offsetY()};
         if (ImGui::InputInt2("Offset",offsets))
             edit([&]{ session.setOffset(active_level,offsets[0],offsets[1]); });
@@ -500,6 +530,7 @@ int runEditor() {
                 }
             }
         }
+        ImGui::EndDisabled();
         ImGui::End();
 
         // --- Grid input ----------------------------------------------------
@@ -509,12 +540,21 @@ int runEditor() {
         std::optional<int> selected_sector;
         if (mode==EditMode::Sector && selected_cell && grid.contains(selected_cell->x,selected_cell->y))
             selected_sector=grid.cellData(selected_cell->x,selected_cell->y).sector;
-        const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector);
+        // Sector selection remains available for inspection during playback.
+        ImGui::BeginDisabled(!session.editingEnabled() && mode!=EditMode::Sector);
+        const auto snapshot = simulation.snapshotFor(session.installation());
+        std::vector<station::editor::SectorColour> thermal_colours;
+        if (render_settings.mode == station::editor::InstallationRenderMode::Thermal)
+            thermal_colours = station::editor::sectorRenderColours(session.installation(),active_level,
+                render_settings,snapshot ? &*snapshot : nullptr);
+        const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector,thermal_colours);
+        ImGui::EndDisabled();
         const bool stroke_event=session.strokeActive() &&
             (pointer.phase==DeckPointerPhase::Release ||
              (pointer.phase==DeckPointerPhase::Drag &&
               ((mode==EditMode::Cell && pointer.cell) || (mode==EditMode::Wall && pointer.wall))));
-        if (pointer.phase==DeckPointerPhase::Press || stroke_event) edit([&]{
+        if ((session.editingEnabled() || mode==EditMode::Sector) &&
+            (pointer.phase==DeckPointerPhase::Press || stroke_event)) edit([&]{
             if (pointer.phase==DeckPointerPhase::Press) {
                 if (mode==EditMode::Wall && pointer.wall) {
                     session.beginWallStroke(active_level,*pointer.wall);
@@ -533,8 +573,8 @@ int runEditor() {
         });
         ImGui::End();
 
-        // A selected Sector adds a dock tab beside Level Grid, rather than
-        // replacing the geometry view or placing system editing in the inspector.
+        // Preserve the node configuration viewer alongside Thermal and the
+        // thermal Systems graph in the selected Sector's dock tab.
         if (mode == EditMode::Sector && selected_cell) {
             const auto current = session.installation().level(active_level);
             if (current.contains(selected_cell->x, selected_cell->y)) {
@@ -542,11 +582,17 @@ int runEditor() {
                     ImGui::DockBuilderDockWindow(kSectorTitle, grid_dock_id);
                 if (ImGui::Begin(kSectorTitle)) {
                     const auto id = current.cellData(selected_cell->x, selected_cell->y).sector;
-                    // A grid/inspector edit can precede this draw but follow
-                    // the frame's preview update. Never attach stale telemetry.
+                    // Grid/inspector edits can follow synchronization; never
+                    // attach telemetry from a preview of a different document.
                     const auto live = simulation.snapshotFor(session.installation());
-                    sector_view.draw(station::editor::buildSectorSystemsGraph(session.installation(), active_level, id,
-                                                                             live ? &*live : nullptr));
+                    const auto thermal = station::editor::sectorThermal(
+                        session.installation(),active_level,id,live ? &*live : nullptr);
+                    station::editor::drawSectorThermal(thermal, thermal.atmosphere
+                        ? simulation.temperatureHistory(thermal.atmosphere->id)
+                        : std::span<const station::editor::TemperatureSample>{}, [&] {
+                            sector_view.draw(station::editor::buildSectorSystemsGraph(
+                                session.installation(),active_level,id,live ? &*live : nullptr));
+                        });
                 }
                 ImGui::End();
             }
@@ -564,6 +610,7 @@ int runEditor() {
     }
 
     sector_view.reset();
+    ImPlot::DestroyContext();
     ImGui_ImplSDL2_Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext(context);

@@ -109,6 +109,115 @@ void volumes() {
     refused([&]{overlap.setSector(1,0,"Void",2);});
     roundTrip(overlap);
 }
+void compartmentLimit() {
+    const auto message=[](std::size_t count) {
+        return "Installation has " + std::to_string(count)
+            + " atmosphere compartments; the supported maximum is 128. "
+              "Reduce the number of Interior Sectors with non-Void atmosphere presets "
+              "by merging compartments or using the Void atmosphere preset.";
+    };
+    const auto rejected=[&](auto fn,std::size_t count) {
+        try { fn(); }
+        catch (const std::invalid_argument& e) {
+            check(e.what()==message(count),"Compartment refusal names actual count, maximum and remedy");
+            return;
+        }
+        throw std::runtime_error("Expected compartment limit refusal");
+    };
+    I boundary(std::vector<I::Level>(128,I::Level(2,1)));
+    boundary.validate(); roundTrip(boundary);
+    for (std::size_t count : {129,146})
+        rejected([&]{ I oversized(std::vector<I::Level>(count,I::Level(1,1))); },count);
+
+    // Splitting a compartment or painting a new one cannot bypass validation.
+    auto before=boundary;
+    rejected([&]{ boundary.toggleWall(0,boundary.level(0).verticalWall(1,0)); },129);
+    check(boundary==before,"Over-limit Wall edit preserves Installation");
+    boundary.addLevel(1,1);
+    before=boundary;
+    rejected([&]{ boundary.setCell(128,0,0,S::Interior); },129);
+    check(boundary==before,"Over-limit Cell edit preserves Installation");
+
+    auto node=YAML::Load(I(1,1).serialize());
+    const auto interior=YAML::Clone(node["levels"][0]);
+    const auto empty=YAML::Load(I(std::vector<I::Level>{I::Level(1,1,S::Void)}).serialize())["levels"][0];
+    auto unpressurised=YAML::Clone(interior);
+    unpressurised["sectors"][0]["atmosphere"]="Void";
+    node["levels"]=YAML::Node(YAML::NodeType::Sequence);
+    for (int n=0;n<3;++n) node["levels"].push_back(YAML::Clone(interior));
+    for (int n=0;n<150;++n) {
+        node["levels"].push_back(YAML::Clone(empty));
+        node["levels"].push_back(YAML::Clone(unpressurised));
+    }
+    YAML::Emitter mixed; mixed<<node;
+    I loaded; loaded.deserialize(mixed.c_str()); loaded.validate(); roundTrip(loaded);
+    check(loaded.levelCount()==303,"Many Void and Void-preset Sectors do not consume compartment budget");
+
+    // An oversized saved document fails in core, before any runtime can be built.
+    // Count past the measured agent-budget ceiling, not just one above the limit.
+    node["levels"]=YAML::Node(YAML::NodeType::Sequence);
+    for (int n=0;n<146;++n) node["levels"].push_back(YAML::Clone(interior));
+    for (int version : {3,4}) {
+        node["version"]=version; YAML::Emitter oversized; oversized<<node;
+        before=loaded;
+        bool threw=false;
+        try { loaded.deserialize(oversized.c_str()); }
+        catch (const serialization::SerializationException& e) {
+            threw=true;
+            check(e.what()==message(146),"Oversized load reports compartments, not an internal simulation error");
+        }
+        check(threw && loaded==before,"Oversized load rejected transactionally before simulation construction");
+    }
+}
+void partitionPersistence() {
+    check(I(1,1).partitionType()==I::PartitionType::InsulatedPartition,"Creation default partition");
+    for (auto type : {I::PartitionType::BarePartition, I::PartitionType::ThermalBreak, I::PartitionType::InsulatedPartition}) {
+        I i(1,1); i.setPartitionType(type); roundTrip(i);
+        check(I::partitionSpec(type).transmittanceWPerM2K>0,"Positive Partition U-value");
+    }
+    I i(1,1); i.setPartitionType(std::nullopt); roundTrip(i);
+    check(YAML::Load(i.serialize())["partition"].as<std::string>()=="none","Explicit no partition");
+    auto node=YAML::Load(I(1,1).serialize()); node.remove("partition");
+    for (int version : {3,4}) {
+        node["version"]=version; YAML::Emitter out; out<<node;
+        I loaded; loaded.deserialize(out.c_str());
+        check(!loaded.partitionType(),"Absent partition never applies creation default");
+        roundTrip(loaded);
+    }
+    node["version"]=4; node["partition"]="Unknown";
+    YAML::Emitter bad; bad<<node;
+    auto before=i; refused([&]{i.deserialize(bad.c_str());});
+    check(i==before,"Invalid partition rejected transactionally");
+    refused([&]{i.setPartitionType(static_cast<I::PartitionType>(99));});
+    check(i==before,"Invalid Partition enum rejected");
+}
+void hullPersistence() {
+    check(I(1,1).hullType()==I::HullType::MultiLayerBlanket,"Creation default hull");
+    for (auto type : {I::HullType::BareSkin, I::HullType::StandardInsulated, I::HullType::MultiLayerBlanket}) {
+        I i(1,1); i.setHullType(type); roundTrip(i);
+        const auto spec=I::hullSpec(type);
+        check(spec.transmittanceWPerM2K>0 && spec.emissivity>0 && spec.absorptivity>0,
+              "Positive calibrated Hull properties");
+        check(YAML::Load(i.serialize())["version"].as<int>()==4,"Writer emits v4");
+    }
+    I i(1,1); i.setHullType(std::nullopt); roundTrip(i);
+    check(YAML::Load(i.serialize())["hull"].as<std::string>()=="none","Explicit no hull");
+    auto node=YAML::Load(I(1,1).serialize());
+    node.remove("hull");
+    for (int version : {3,4}) {
+        node["version"]=version; YAML::Emitter out; out<<node;
+        I loaded; loaded.deserialize(out.c_str());
+        check(!loaded.hullType(),"Absent key never applies default");
+        check(loaded.level(0)==I(1,1).level(0),"Legacy geometry unchanged");
+        roundTrip(loaded);
+    }
+    node["version"]=4; node["hull"]="Unknown";
+    YAML::Emitter bad; bad<<node;
+    auto before=i; refused([&]{ i.deserialize(bad.c_str()); });
+    check(i==before,"Invalid hull rejected transactionally");
+    refused([&]{ i.setHullType(static_cast<I::HullType>(99)); });
+    check(i==before,"Invalid Hull enum rejected");
+}
 void persistence() {
     I original(3,2); original.setName("name: # [] \" UTF-8 Ω\nnext");
     original.setCell(0,1,0,S::Void); original.addLevel(2,3,-4,5);
@@ -149,6 +258,6 @@ void persistence() {
 }
 }
 int main() {
-    try { topology(); volumes(); persistence(); }
+    try { topology(); volumes(); persistence(); hullPersistence(); partitionPersistence(); compartmentLimit(); }
     catch (const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

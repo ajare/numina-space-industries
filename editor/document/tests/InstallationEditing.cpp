@@ -137,6 +137,39 @@ void rejectedWallStroke() {
     session.toggleCell(1,2,0);
     check(session.installation().level(1).allVoid(),"Cell editing works after rejected Wall stroke");
 }
+void partitionHistory() {
+    EditorSession session; session.newDocument(1,1);
+    check(session.installation().partitionType()==I::PartitionType::InsulatedPartition,"New partition default");
+    session.setPartitionType(I::PartitionType::BarePartition);
+    check(session.unsavedChanges() && session.canUndo(),"Partition edit dirties document");
+    session.setPartitionType(I::PartitionType::BarePartition);
+    session.undo();
+    check(session.installation().partitionType()==I::PartitionType::InsulatedPartition
+        && !session.unsavedChanges() && !session.canUndo(),"Undo partition restores clean baseline; no redundant history");
+    session.redo(); check(session.installation().partitionType()==I::PartitionType::BarePartition,"Redo partition");
+    session.setPartitionType(I::PartitionType::ThermalBreak);
+    session.undo(); check(session.installation().partitionType()==I::PartitionType::BarePartition,"Undo changed partition");
+    session.redo(); check(session.installation().partitionType()==I::PartitionType::ThermalBreak,"Redo changed partition");
+    session.setPartitionType(std::nullopt);
+    check(!session.installation().partitionType(),"Explicit no partition command");
+    session.undo(); check(session.installation().partitionType()==I::PartitionType::ThermalBreak,"Undo no partition");
+    session.redo(); check(!session.installation().partitionType(),"Redo no partition");
+}
+void hullHistory() {
+    EditorSession session; session.newDocument(1,1);
+    check(session.installation().hullType()==I::HullType::MultiLayerBlanket,"New has blanket");
+    session.setHullType(I::HullType::BareSkin);
+    check(session.unsavedChanges() && session.canUndo(),"Hull edit dirties document");
+    session.setHullType(I::HullType::BareSkin); // No extra history for same value.
+    session.undo();
+    check(session.installation().hullType()==I::HullType::MultiLayerBlanket
+          && !session.unsavedChanges() && !session.canUndo(),"Undo hull restores baseline");
+    session.redo(); check(session.installation().hullType()==I::HullType::BareSkin,"Redo hull");
+    session.setHullType(std::nullopt);
+    check(!session.installation().hullType(),"Explicit no hull command");
+    session.undo(); check(session.installation().hullType()==I::HullType::BareSkin,"Undo no hull");
+    session.redo(); check(!session.installation().hullType(),"Redo no hull");
+}
 void history() {
     EditorSession session; session.newDocument(3,1);
     check(session.installation().level(0).width()==3,"Custom New dimensions");
@@ -221,6 +254,6 @@ void replay() {
 }
 }
 int main() {
-    try {automaticWalls(); wallStrokes(); rejectedWallStroke(); history(); picking(); replay();}
+    try {automaticWalls(); wallStrokes(); rejectedWallStroke(); history(); hullHistory(); partitionHistory(); picking(); replay();}
     catch (const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

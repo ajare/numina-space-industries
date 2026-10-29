@@ -270,9 +270,12 @@ bool Installation::removeTopLevel() {
 void Installation::validate() const {
     require(!levels_.empty(),"Installation must contain a Level");
     std::set<std::tuple<std::size_t,std::int64_t,std::int64_t>> claims;
+    std::size_t compartments=0;
     for (std::size_t l=0;l<levels_.size();++l) {
         const auto& grid=levels_[l];
         for (const auto& s:grid.sectors_) {
+            if (s.type==SectorType::Interior && s.atmosphere!=AtmospherePreset::Void)
+                ++compartments;
             require(s.height>=1,"Sector height must be positive");
             require(s.type!=SectorType::Void || s.height==1,"Void height must be 1");
             require(s.type!=SectorType::Interior || std::size_t(s.height)<=levels_.size()-l,
@@ -291,11 +294,106 @@ void Installation::validate() const {
                 require(claims.emplace(l+std::size_t(h),x,y).second,"Sector volumes overlap");
         }
     }
+    // Leave headroom below the simulation's measured agent instruction ceiling.
+    constexpr std::size_t maxCompartments=128;
+    require(compartments<=maxCompartments,
+            "Installation has " + std::to_string(compartments)
+            + " atmosphere compartments; the supported maximum is " + std::to_string(maxCompartments)
+            + ". Reduce the number of Interior Sectors with non-Void atmosphere presets "
+              "by merging compartments or using the Void atmosphere preset.");
+}
+
+Installation::HullSpec Installation::hullSpec(HullType type) {
+    switch (type) {
+    case HullType::BareSkin: return {8.0, 0.80, 0.40, 224.0};
+    case HullType::StandardInsulated: return {0.6, 0.85, 0.20, 62.0};
+    case HullType::MultiLayerBlanket: return {0.05, 0.03, 0.15, 3.8};
+    }
+    throw std::invalid_argument("Invalid Hull type");
+}
+Installation::PartitionSpec Installation::partitionSpec(PartitionType type) {
+    switch (type) {
+    case PartitionType::BarePartition: return {5.0};
+    case PartitionType::ThermalBreak: return {1.0};
+    case PartitionType::InsulatedPartition: return {0.3};
+    }
+    throw std::invalid_argument("Invalid Partition type");
+}
+void Installation::setPartitionType(std::optional<PartitionType> type) {
+    if (type) (void)partitionSpec(*type);
+    partitionType_ = type;
+}
+void Installation::setHullType(std::optional<HullType> type) {
+    if (type) (void)hullSpec(*type);
+    hullType_ = type;
+}
+const Installation::Sector* Installation::interiorAtWorld(
+    std::size_t l, std::int64_t x, std::int64_t y) const {
+    if (l >= levels_.size()) return nullptr;
+    for (std::size_t base = 0; base <= l; ++base) {
+        const auto& grid = levels_[base];
+        // Compare before subtracting so even extreme query coordinates are safe.
+        if (x < grid.offsetX_ || x >= std::int64_t(grid.offsetX_) + grid.width_
+            || y < grid.offsetY_ || y >= std::int64_t(grid.offsetY_) + grid.depth_) continue;
+        const auto& s = grid.sectorAt(static_cast<std::uint32_t>(x - grid.offsetX_),
+                                     static_cast<std::uint32_t>(y - grid.offsetY_));
+        if (s.type == SectorType::Interior && l - base < std::size_t(s.height)) return &s;
+    }
+    return nullptr;
+}
+Installation::ExteriorSkin Installation::exteriorSkin(std::size_t l, std::size_t sector) const {
+    const auto& grid = levels_.at(l);
+    const auto& s = grid.sectors_.at(sector);
+    ExteriorSkin result;
+    if (s.type == SectorType::Void) return result;
+    result.sideM2 = sideExteriorAreaM2(l, sector);
+    for (std::size_t i = 0; i < grid.cells_.size(); ++i) {
+        if (grid.cells_[i].sector != int(sector)) continue;
+        const auto x = std::int64_t(grid.offsetX_) + static_cast<std::int64_t>(i % grid.width_);
+        const auto y = std::int64_t(grid.offsetY_) + static_cast<std::int64_t>(i / grid.width_);
+        if (!interiorAtWorld(l + std::size_t(s.height), x, y))
+            result.roofM2 += CellWidthM * CellDepthM;
+        // A tall Sector below can touch this floor even though its own floor
+        // starts several Levels down. Claimed volume, not just floor, covers it.
+        if (l == 0 || !interiorAtWorld(l - 1, x, y))
+            result.floorUndersideM2 += CellWidthM * CellDepthM;
+    }
+    return result;
+}
+double Installation::sideExteriorAreaM2(std::size_t l, std::size_t sector) const {
+    const auto& grid = levels_.at(l);
+    const auto& s = grid.sectors_.at(sector);
+    if (s.type == SectorType::Void) return 0.0;
+    double area = 0.0;
+    for (std::size_t w = 0; w < grid.walls_.size(); ++w) {
+        if (grid.walls_[w].type != WallType::Exterior) continue;
+        const auto [a, b] = grid.wallCells(w);
+        if ((a >= 0 && grid.cells_[a].sector == int(sector))
+            || (b >= 0 && grid.cells_[b].sector == int(sector))) {
+            const bool horizontal = w < std::size_t(grid.width_) * (grid.depth_ + 1);
+            area += (horizontal ? CellWidthM : CellDepthM) * LevelHeightM * s.height;
+        }
+    }
+    return area;
 }
 
 std::string Installation::serialize() const {
     validate();
-    YAML::Node root; root["version"]=3; root["name"]=name_;
+    YAML::Node root; root["version"]=4; root["name"]=name_;
+    const char* hull = "none";
+    if (hullType_) switch (*hullType_) {
+    case HullType::BareSkin: hull = "BareSkin"; break;
+    case HullType::StandardInsulated: hull = "StandardInsulated"; break;
+    case HullType::MultiLayerBlanket: hull = "MultiLayerBlanket"; break;
+    }
+    root["hull"] = hull;
+    const char* partition = "none";
+    if (partitionType_) switch (*partitionType_) {
+    case PartitionType::BarePartition: partition = "BarePartition"; break;
+    case PartitionType::ThermalBreak: partition = "ThermalBreak"; break;
+    case PartitionType::InsulatedPartition: partition = "InsulatedPartition"; break;
+    }
+    root["partition"] = partition;
     root["levels"]=YAML::Node(YAML::NodeType::Sequence);
     for (const auto& grid:levels_) {
         YAML::Node l; l["width"]=grid.width_; l["depth"]=grid.depth_;
@@ -348,7 +446,24 @@ void Installation::deserialize(const std::string& text) {
     try {
         auto documents=YAML::LoadAll(text); require(documents.size()==1,"Expected one YAML document");
         auto root=documents.front(); mapNode(root,"Installation");
-        require(root["version"].as<int>()==3,"Unsupported Installation format");
+        const int version = root["version"].as<int>();
+        require(version == 3 || version == 4,"Unsupported Installation format");
+        std::optional<HullType> hull;
+        if (version == 4 && root["hull"]) {
+            const auto value = root["hull"].as<std::string>();
+            if (value == "BareSkin") hull = HullType::BareSkin;
+            else if (value == "StandardInsulated") hull = HullType::StandardInsulated;
+            else if (value == "MultiLayerBlanket") hull = HullType::MultiLayerBlanket;
+            else require(value == "none", "Invalid Hull type");
+        }
+        std::optional<PartitionType> partition;
+        if (version == 4 && root["partition"]) {
+            const auto value = root["partition"].as<std::string>();
+            if (value == "BarePartition") partition = PartitionType::BarePartition;
+            else if (value == "ThermalBreak") partition = PartitionType::ThermalBreak;
+            else if (value == "InsulatedPartition") partition = PartitionType::InsulatedPartition;
+            else require(value == "none", "Invalid Partition type");
+        }
         auto ls=root["levels"]; require(ls.IsSequence() && ls.size()>0,"Expected Levels");
         std::vector<Level> loaded;
         for (const auto& n:ls) {
@@ -424,7 +539,11 @@ void Installation::deserialize(const std::string& text) {
             }
             loaded.push_back(std::move(grid));
         }
-        Installation next(std::move(loaded)); next.name_=root["name"].as<std::string>(); *this=std::move(next);
+        Installation next(std::move(loaded));
+        next.name_=root["name"].as<std::string>();
+        next.hullType_ = hull; // Never apply creation-time defaults when loading.
+        next.partitionType_ = partition;
+        *this=std::move(next);
     } catch (const std::exception& e) { throw serialization::SerializationException(e.what()); }
 }
 } // namespace nsi::core

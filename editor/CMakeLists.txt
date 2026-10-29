@@ -75,8 +75,28 @@ add_library(editor-sector-systems STATIC src/SectorSystemsGraph.cpp src/SectorSy
 target_include_directories(editor-sector-systems PUBLIC src)
 target_link_libraries(editor-sector-systems PUBLIC nsi::systemsBridge editor::imgui PRIVATE editor-imnodes)
 
+# ImPlot v0.16 supports the Editor's pinned Dear ImGui 1.89.5.
+FetchContent_Declare(implot
+    GIT_REPOSITORY https://github.com/epezent/implot.git
+    GIT_TAG 18c72431f8265e2b0b5378a3a73d8a883b2175ff # v0.16
+)
+FetchContent_MakeAvailable(implot)
+add_library(editor-implot STATIC
+    "${implot_SOURCE_DIR}/implot.cpp"
+    "${implot_SOURCE_DIR}/implot_items.cpp"
+)
+add_library(editor::implot ALIAS editor-implot)
+target_include_directories(editor-implot PUBLIC "${implot_SOURCE_DIR}")
+target_link_libraries(editor-implot PUBLIC editor::imgui)
+if(MSVC)
+    target_compile_options(editor-implot PRIVATE /w)
+else()
+    target_compile_options(editor-implot PRIVATE -w)
+endif()
+
 # Headless playback adapter keeps simulation dependencies out of the document model.
-add_library(editor-simulation STATIC src/SimulationPlayback.cpp)
+add_library(editor-simulation STATIC
+    src/SimulationPlayback.cpp src/SectorThermal.cpp src/InstallationRenderMode.cpp)
 target_include_directories(editor-simulation PUBLIC src)
 target_link_libraries(editor-simulation PUBLIC nsi::systemsBridge)
 
@@ -85,6 +105,8 @@ add_executable(editor
     src/NativeFileDialogs.cpp
     src/EditorFonts.cpp
     src/DeckGridWidget.cpp
+    src/InstallationRenderControls.cpp
+    src/SectorThermalPanel.cpp
 )
 target_compile_features(editor PRIVATE cxx_std_20)
 target_include_directories(editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -103,7 +125,7 @@ target_link_libraries(editor PRIVATE
     editor-simulation
     editor-sector-systems
     nfd
-    editor::imgui
+    editor::implot
     SDL2::SDL2-static
     OpenGL::GL
 )
@@ -122,8 +144,29 @@ add_custom_target(editor-font-assets
 add_dependencies(editor editor-font-assets)
 
 if(BUILD_TESTING)
-    add_executable(editor-sector-systems-test tests/SectorSystemsTest.cpp)
-    target_link_libraries(editor-sector-systems-test PRIVATE editor-sector-systems editor-simulation editor::document)
+    add_executable(editor-sector-node-view-test tests/SectorSystemsTest.cpp)
+    target_link_libraries(editor-sector-node-view-test PRIVATE editor-sector-systems editor-simulation editor::document)
+    add_test(NAME editor-sector-node-view COMMAND editor-sector-node-view-test)
+    set_tests_properties(editor-sector-node-view PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
+    add_executable(editor-installation-render-mode-test
+        tests/InstallationRenderModeTest.cpp src/DeckGridWidget.cpp src/InstallationRenderControls.cpp)
+    target_link_libraries(editor-installation-render-mode-test PRIVATE
+        editor-simulation editor::document editor::imgui)
+    add_test(NAME editor-installation-render-mode COMMAND editor-installation-render-mode-test)
+    set_tests_properties(editor-installation-render-mode PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
+    add_executable(editor-sector-thermal-panel-test
+        tests/SectorThermalPanelTest.cpp src/SectorThermalPanel.cpp)
+    target_link_libraries(editor-sector-thermal-panel-test PRIVATE editor-simulation editor::implot)
+    add_test(NAME editor-sector-thermal-panel COMMAND editor-sector-thermal-panel-test)
+    set_tests_properties(editor-sector-thermal-panel PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
+    add_executable(editor-sector-systems-test tests/SectorThermalTest.cpp)
+    target_link_libraries(editor-sector-systems-test PRIVATE editor-simulation)
     add_test(NAME editor-sector-systems COMMAND editor-sector-systems-test)
     set_tests_properties(editor-sector-systems PROPERTIES
         LABELS "editor;functional;validation-fast" TIMEOUT 30)

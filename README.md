@@ -38,7 +38,9 @@ under `editor/include/imgui/`.
 
 In the Editor, choose **Sector (S)** mode and click a Cell to select its Sector.
 A **Sector** dock tab appears beside **Level Grid**, showing the selected
-Sector's authored systems as nodes with the shared Station port/link catalogue.
+Sector's **Configuration graph** alongside its **Thermal** and **Systems graph**
+tabs. The configuration graph shows authored systems as nodes with the shared
+Station port/link catalogue.
 Expand a node's **Configuration** to inspect its authored starting values.
 The separate **Simulation state** section shows the matching preview's current
 temperature, pressure, humidity, gas masses, wet mole fractions and partial
@@ -52,10 +54,42 @@ middle/right mouse pans the canvas and **Center view** restores its origin.
 Currently Sector authoring supplies an Atmosphere preset, loads, fire opt-in and
 an optional reservoir coupling. Referenced reservoirs without a definition are
 marked unresolved, not fabricated. Void Sectors/presets explicitly show that no
-compartment exists; no neighbour heat or gas links are inferred. The diagram is
+compartment exists; no gas pathways are inferred. Geometry-authored conductive
+links are shown in the separate **Systems graph** tab. The configuration diagram is
 a configuration/live-state viewer, not a second simulation or a live-state editor. The imnodes
 canvas follows the sibling Flow view; its source/license and small read-only
 extension are tracked in `editor/vendor/imnodes/`.
+
+## Installation render modes
+
+The toolbar's **Render mode** combo switches between **Default** (the existing
+floor/void view) and **Thermal** (live Sector atmosphere temperatures). In Thermal
+mode, expand **Thermal rendering** in the left panel to adjust minimum, maximum
+and reference temperatures in Celsius (defaults: -273, 100 and 20). The scale
+interpolates blue → green → red, with pure green at the reference temperature;
+values outside the scale saturate at blue/red. Sliders keep minimum < reference
+< maximum within -273 to 1000 °C. Sectors without live atmosphere data keep their
+Default appearance. Thermal selection/hover uses outlines, preserving fill colours.
+
+Render settings are editor-only: they do not modify saved Installations or the
+simulation and remain adjustable during playback.
+
+## Sector thermal inspection
+
+In the Editor, choose Sector mode and select a Cell. The **Sector** panel's
+**Thermal** tab shows side, roof and exposed floor-underside skin areas,
+conductance and signed heat flow for every attached neighbour/Hull link.
+The **Systems graph** tab draws those connections; arrows follow the last
+simulation step's heat flow. Inspection remains available during playback.
+
+Timescales use the selected compartment's geometry-derived air capacity:
+`diffusion = C / G_neighbour`, `drain = C / G_hull`, in seconds. Each neighbour's
+ratio is `diffusion / drain`. These are local response times with the other
+endpoint held fixed, not two-body equilibration or nonlinear radiative cooling
+predictions. No Hull link means an infinite drain time (ratio zero for existing
+neighbour links); no links means thermally isolated. Void atmosphere presets
+have no compartment and no connections. Flow is unavailable without a runtime,
+and zero until the first simulation step.
 
 The Station Systems library needs no runtime asset installation and embeds its
 own default Lua. World-specific code, documents and assets remain in Promethium.

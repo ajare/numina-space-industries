@@ -26,7 +26,9 @@ Modes:
 - **Sector**: click a Cell to select its Sector. The left collapsible inspector
   edits its name and Interior height and displays type, cached area and Level index.
 
-The left inspector also edits the Installation name and selected Level offset,
+The left inspector also edits the Installation name, Hull type directly beneath
+it (including an explicit No hull option), and selected Level offset. Hull edits
+route through `EditorSession` and support undo/redo. It
 appends Void Levels of chosen dimensions/offsets, and removes the top Level.
 Removal clears rather than deletes a Level needed by a lower Sector's height.
 File → New offers width/depth, initially 16×16. The grid follows the selected Level. Invalid occupancy edits report an explanation without modifying
@@ -37,6 +39,21 @@ undo/redo history. Snapshots restore automatically changed Walls and Sector
 metadata exactly; an inverse Cell edit would not suffice. New/Open reset history;
 saving preserves it. Rendering, native dialogs and file I/O remain adapters.
 
+## Simulation edit lock
+
+Installation editing is disabled while playback is playing (even at time zero)
+or elapsed simulation time is non-zero (even when paused). Reset returns to the
+start and re-enables editing. The inspector explains why editing is unavailable.
+This covers names, Hull and Partition types, Cells, Walls, Sector properties,
+Level operations and undo/redo, including keyboard shortcuts. Level and Sector
+selection remain available for inspection; saving is still allowed.
+
+The host applies `SimulationPlayback::editingAllowed()` through
+`EditorSession::setEditingEnabled()`. Session commands refuse mutations while
+locked, and locking finishes an in-flight stroke as one undo step. New/Open
+replace the scenario and reset playback, rather than mutate the running scenario;
+cancelled or failed actions preserve the existing lock and preview.
+
 ## Files and unsaved changes
 
 New, Open, Save, Save As and Exit retain the shared guarded action path. Dirty
@@ -45,7 +62,7 @@ actions. Discard does not eagerly reset geometry, so a subsequent cancelled Open
 still preserves the document. Successful saves alone adopt a destination/baseline.
 The title's `*` and statusbar compare the whole Installation to that baseline.
 
-Files use the [core version-3 YAML schema](../../core/README.md). Old deck-row and
+Files use the [core version-4 YAML schema](../../core/README.md). Old deck-row and
 name-only documents are rejected entirely. The core validates loads transactionally;
 `YamlDocumentFiles` uses the shared `Promethium::Serialization` transactional file
 writer for saves, preserving an existing file after a partial write failure.

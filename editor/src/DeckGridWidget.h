@@ -8,6 +8,8 @@
 #pragma once
 
 #include "station/editor/Installation.h"
+#include "InstallationRenderMode.h"
+#include <span>
 
 #include <cstdint>
 #include <optional>
@@ -36,4 +38,5 @@ struct DeckPointerEvent {
 
 DeckPointerEvent drawDeckGrid(const char* id, const station::editor::Level& level,
                               EditMode mode = EditMode::Cell,
-                              std::optional<int> selectedSector = std::nullopt);
+                              std::optional<int> selectedSector = std::nullopt,
+                              std::span<const station::editor::SectorColour> thermalColours = {});

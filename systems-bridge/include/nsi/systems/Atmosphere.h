@@ -27,7 +27,17 @@ const AtmospherePresetSpec* specFor(core::Installation::AtmospherePreset) noexce
 // Invalid indices throw std::out_of_range. Void geometry or preset returns nullopt.
 std::optional<station::AtmosphereSettings> expandSector(
     const core::Installation&, std::size_t level, std::size_t sector);
-// Atmosphere-only output: never authors thermal links or atmosphere pathways.
+// Atmosphere-only output. Compose with expandThermal for geometry-authored heat loss.
 std::vector<station::AtmosphereSettings> expandInstallation(const core::Installation&);
+
+struct ThermalExpansion {
+    std::optional<station::HullSettings> hull;
+    std::vector<station::ThermalLinkSettings> links;
+    std::optional<station::ProfileSettings> solarCycle;
+};
+// Total exterior skin (side, roof, exposed floor underside) and shared-Wall/floor
+// partition conduction. One pair link per sorted (Level, stable Sector uid) pair.
+// No hull means no links. No gas pathways are ever inferred.
+ThermalExpansion expandThermal(const core::Installation&);
 
 } // namespace nsi::systems

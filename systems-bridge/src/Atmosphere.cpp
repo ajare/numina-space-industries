@@ -1,5 +1,7 @@
 #include <nsi/systems/Atmosphere.h>
 #include <stdexcept>
+#include <algorithm>
+#include <map>
 
 namespace nsi::systems {
 namespace {
@@ -76,6 +78,101 @@ std::vector<station::AtmosphereSettings> expandInstallation(const core::Installa
         for (std::size_t sector = 0; sector < installation.level(level).sectors().size(); ++sector)
             if (auto atmosphere = expandSector(installation, level, sector))
                 result.push_back(std::move(*atmosphere));
+    return result;
+}
+ThermalExpansion expandThermal(const core::Installation& installation) {
+    ThermalExpansion result;
+    if (!installation.hullType()) return result;
+    const auto spec = core::Installation::hullSpec(*installation.hullType());
+    double totalArea = 0.0;
+    for (std::size_t l = 0; l < installation.levelCount(); ++l) {
+        for (std::size_t s = 0; s < installation.level(l).sectors().size(); ++s) {
+            auto atmosphere = expandSector(installation, l, s);
+            if (!atmosphere) continue;
+            const double area = installation.exteriorSkin(l, s).totalM2();
+            if (area <= 0.0) continue;
+            totalArea += area;
+            station::ThermalLinkSettings link;
+            link.id = "drain-" + std::to_string(l) + "-"
+                + std::to_string(installation.level(l).sectors()[s].uid);
+            link.aAtmosphereId = atmosphere->id;
+            link.bAtmosphereId = "hull";
+            link.bKind = station::ThermalNodeKind::Hull;
+            link.conductanceKWPerK = spec.transmittanceWPerM2K * area / 1000.0;
+            result.links.push_back(std::move(link));
+        }
+    }
+    if (installation.partitionType()) {
+        const double u = core::Installation::partitionSpec(*installation.partitionType()).transmittanceWPerM2K;
+        // Uids are Level-local. Both surface kinds accumulate into one canonical
+        // pair of stable (Level, uid) endpoints, never transient Sector indices.
+        using Endpoint = std::pair<std::size_t, std::int64_t>;
+        std::map<std::pair<Endpoint, Endpoint>, double> sharedAreas;
+        auto addArea = [&](Endpoint a, Endpoint b, double area) {
+            sharedAreas[std::minmax(a, b)] += area;
+        };
+        for (std::size_t l = 0; l < installation.levelCount(); ++l) {
+            const auto& grid = installation.level(l);
+            auto shared = [&](std::uint32_t ax, std::uint32_t ay,
+                              std::uint32_t bx, std::uint32_t by, std::size_t wall, double edge) {
+                if (grid.walls()[wall].type != core::Installation::WallType::Interior) return;
+                const auto& a = grid.sectorAt(ax, ay);
+                const auto& b = grid.sectorAt(bx, by);
+                if (a.uid == b.uid || a.type != core::Installation::SectorType::Interior
+                    || b.type != core::Installation::SectorType::Interior
+                    || !specFor(a.atmosphere) || !specFor(b.atmosphere)) return;
+                addArea({l, a.uid}, {l, b.uid}, edge * core::LevelHeightM * std::min(a.height, b.height));
+            };
+            for (std::uint32_t y = 0; y < grid.depth(); ++y)
+                for (std::uint32_t x = 1; x < grid.width(); ++x)
+                    shared(x-1, y, x, y, grid.verticalWall(x, y), core::CellDepthM);
+            for (std::uint32_t y = 1; y < grid.depth(); ++y)
+                for (std::uint32_t x = 0; x < grid.width(); ++x)
+                    shared(x, y-1, x, y, grid.horizontalWall(x, y), core::CellWidthM);
+            // Count each floor interface once, from the lower claim's roof.
+            // The upper Sector must start here, not merely claim this volume.
+            for (std::uint32_t y = 0; y < grid.depth(); ++y) {
+                for (std::uint32_t x = 0; x < grid.width(); ++x) {
+                    const auto& a = grid.sectorAt(x, y);
+                    if (a.type != core::Installation::SectorType::Interior || !specFor(a.atmosphere)) continue;
+                    const auto top = l + std::size_t(a.height);
+                    if (top >= installation.levelCount()) continue;
+                    const auto& upper = installation.level(top);
+                    const auto ux = std::int64_t(grid.offsetX()) + x - upper.offsetX();
+                    const auto uy = std::int64_t(grid.offsetY()) + y - upper.offsetY();
+                    if (ux < 0 || uy < 0 || ux >= upper.width() || uy >= upper.depth()) continue;
+                    const auto& b = upper.sectorAt(static_cast<std::uint32_t>(ux), static_cast<std::uint32_t>(uy));
+                    if (b.type != core::Installation::SectorType::Interior || !specFor(b.atmosphere)) continue;
+                    addArea({l, a.uid}, {top, b.uid}, core::CellWidthM * core::CellDepthM);
+                }
+            }
+        }
+        for (const auto& [pair, area] : sharedAreas) {
+            const auto endpointId = [](Endpoint e) {
+                return std::to_string(e.first) + "-" + std::to_string(e.second);
+            };
+            station::ThermalLinkSettings link;
+            // Keep existing same-Level identities; cross-Level pairs include
+            // both namespaces so equal uids on different Levels cannot collide.
+            link.id = "pair-" + endpointId(pair.first) + "-"
+                + (pair.first.first == pair.second.first ? std::to_string(pair.second.second)
+                                                        : endpointId(pair.second));
+            link.aAtmosphereId = "sector-" + endpointId(pair.first);
+            link.bAtmosphereId = "sector-" + endpointId(pair.second);
+            link.conductanceKWPerK = u * area / 1000.0;
+            result.links.push_back(std::move(link));
+        }
+    }
+    if (totalArea > 0.0) {
+        station::HullSettings hull;
+        hull.emittingAreaM2 = totalArea;
+        hull.projectedAreaM2 = totalArea / 4.0;
+        hull.heatCapacityKJPerK = 0.4 * totalArea;
+        hull.emissivity = spec.emissivity;
+        hull.absorptivity = spec.absorptivity;
+        result.hull = hull;
+        result.solarCycle = station::ProfileSettings{0.0};
+    }
     return result;
 }
 } // namespace nsi::systems

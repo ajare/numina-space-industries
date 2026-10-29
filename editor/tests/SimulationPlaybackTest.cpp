@@ -13,6 +13,166 @@ void near(double a, double b) {
     require(std::abs(a - b) < 1e-6, "Unexpected simulation time");
 }
 
+void editingLockout() {
+    using namespace station::editor;
+    using I = nsi::core::Installation;
+    EditorSession session;
+    session.newDocument(2, 2);
+    session.setName("Before");
+    session.setName("After");
+    session.undo(); // Keep both undo and redo history to exercise both paths.
+    SimulationPlayback playback;
+    playback.synchronize(session.installation());
+    auto policy = [&] { session.setEditingEnabled(playback.editingAllowed()); };
+    auto blocked = [&] {
+        policy();
+        require(!session.editingEnabled(), "Playback did not lock editing");
+        require(!session.canUndo() && !session.canRedo(), "Locked history controls enabled");
+        const auto before = session.installation();
+        const auto dirty = session.unsavedChanges();
+        session.setHullType(I::HullType::BareSkin);
+        require(session.installation() == before, "Hull selector bypassed lock");
+        session.setPartitionType(I::PartitionType::BarePartition);
+        require(session.installation() == before, "Partition selector bypassed lock");
+        session.setName("Blocked");
+        session.setSector(0, 0, "Blocked", 2);
+        session.setOffset(0, 1, 2);
+        session.addLevel(3, 3);
+        session.removeTopLevel();
+        session.toggleCell(0, 0, 0);
+        session.beginStroke(0, 0, 0);
+        session.paintStroke(1, 0);
+        session.endStroke();
+        session.toggleWall(0, 0);
+        session.beginWallStroke(0, 0);
+        session.paintWallStroke(0);
+        session.endStroke();
+        session.undo();
+        session.redo();
+        require(session.installation() == before && session.unsavedChanges() == dirty,
+                "Installation mutation bypassed playback lock");
+        require(!session.strokeActive(), "Locked input started a stroke");
+        playback.synchronize(session.installation());
+    };
+    policy();
+    require(session.editingEnabled(), "Paused at start was locked");
+    playback.togglePlaying();
+    blocked(); // Playing at time zero is locked, even before the first update.
+    require(playback.playing(), "Blocked edit reset playback");
+    playback.togglePlaying();
+    policy();
+    require(session.editingEnabled(), "Pause at time zero stayed locked");
+    playback.togglePlaying();
+    playback.update(0.1);
+    blocked();
+    playback.togglePlaying();
+    blocked(); // Pausing after advancing does not unlock authoring.
+    require(playback.runtime()->snapshot().elapsedSeconds > 0, "Blocked edit reset time");
+    playback.reset(session.installation());
+    policy();
+    require(session.editingEnabled() && session.canUndo() && session.canRedo(),
+            "Reset did not restore editing and history");
+    session.redo();
+    require(session.installation().getName() == "After", "Lock damaged redo history");
+    session.undo();
+    require(session.installation().getName() == "Before", "Lock damaged undo history");
+    session.setHullType(I::HullType::BareSkin);
+    session.setPartitionType(I::PartitionType::BarePartition);
+    require(session.installation().hullType() == I::HullType::BareSkin &&
+            session.installation().partitionType() == I::PartitionType::BarePartition,
+            "Reset did not unlock assembly selectors");
+    const auto beforeStroke = session.installation();
+    session.beginStroke(0, 0, 0);
+    session.paintStroke(0, 0);
+    session.setEditingEnabled(false);
+    const auto afterStroke = session.installation();
+    session.paintStroke(1, 0);
+    require(!session.strokeActive() && session.installation() == afterStroke,
+            "Lock did not finish in-flight stroke");
+    session.setEditingEnabled(true);
+    session.undo();
+    require(session.installation() == beforeStroke, "Lock lost in-flight stroke history");
+}
+
+void temperatureHistory() {
+    using I=nsi::core::Installation;
+    using station::editor::SimulationPlayback;
+    I installation(2,1);
+    installation.toggleWall(0,installation.level(0).verticalWall(1,0));
+    SimulationPlayback playback;
+    playback.reset(installation);
+    const auto initial=playback.runtime()->snapshot();
+    for (const auto& air:initial.atmospheres) {
+        const auto samples=playback.temperatureHistory(air.id);
+        require(samples.size()==1,"History did not start at time zero");
+        near(samples[0].seconds,0); near(samples[0].temperatureC,air.temperatureC);
+    }
+    require(playback.temperatureHistory("missing").empty(),"Unknown compartment gained history");
+    for (int speed : {0,2,4}) {
+        playback.reset(installation);
+        playback.setSpeedIndex(speed);
+        playback.togglePlaying();
+        const int frames=static_cast<int>(70.0 / (0.1 * SimulationPlayback::speeds[speed])) + 1;
+        for (int frame=0;frame<frames;++frame) playback.update(0.1);
+        const auto snapshot=playback.runtime()->snapshot();
+        // Every Sector is recorded without needing to select it in the UI.
+        for (const auto& air:snapshot.atmospheres) {
+            const auto samples=playback.temperatureHistory(air.id);
+            require(samples.size()>50 && samples.size()<=602,"Minute history is not bounded");
+            require(samples.front().seconds >= snapshot.elapsedSeconds-60.0-1e-8,
+                "Expired sample remained in graph");
+            require(samples.front().seconds <= snapshot.elapsedSeconds-58.9,
+                "History did not retain the last minute");
+            require(samples.back().seconds <= snapshot.elapsedSeconds &&
+                samples.back().seconds > snapshot.elapsedSeconds-0.11,"History is not on simulation time");
+            for (std::size_t n=1;n<samples.size();++n)
+                require(samples[n].seconds>samples[n-1].seconds,"Duplicate or unordered history samples");
+            require(samples.back().temperatureC < samples.front().temperatureC,"History did not capture cooling");
+        }
+        const auto id=snapshot.atmospheres[0].id;
+        const auto count=playback.temperatureHistory(id).size();
+        const auto last=playback.temperatureHistory(id).back();
+        playback.togglePlaying(); playback.update(100);
+        require(playback.temperatureHistory(id).size()==count,"Paused graph added samples");
+        near(playback.temperatureHistory(id).back().seconds,last.seconds);
+        near(playback.temperatureHistory(id).back().temperatureC,last.temperatureC);
+    }
+    const auto id=initial.atmospheres[0].id;
+    playback.reset(installation);
+    require(playback.temperatureHistory(id).size()==1,"Reset retained old temperature graph");
+    near(playback.temperatureHistory(id)[0].temperatureC,20);
+    installation.setName("Replacement");
+    playback.synchronize(installation);
+    require(playback.temperatureHistory(id).size()==1,"Document replacement retained graph");
+    installation.setCell(0,0,0,I::SectorType::Void);
+    playback.synchronize(installation);
+    require(playback.temperatureHistory(id).empty(),"Removed compartment retained graph");
+    playback.synchronize(nullptr);
+    for (const auto& air:initial.atmospheres)
+        require(playback.temperatureHistory(air.id).empty(),"Closed document retained graph");
+}
+
+void hullPlayback() {
+    using I=nsi::core::Installation;
+    auto temperature=[](I::HullType type) {
+        station::editor::EditorSession session;
+        session.newDocument(1,1);
+        session.setHullType(type);
+        station::editor::SimulationPlayback playback;
+        playback.synchronize(session.installation());
+        playback.setSpeedIndex(4);
+        playback.togglePlaying();
+        for (int frame=0;frame<600;++frame) playback.update(0.1);
+        const auto state=playback.runtime()->snapshot();
+        require(state.healthy && state.thermal.hull.has_value(),"Playback omitted Hull");
+        require(state.thermal.hull->emittedEnergyKJ>0,"Playback Hull did not radiate");
+        require(state.thermal.hull->absorbedEnergyKJ==0,"Playback sky not dark");
+        return state.atmospheres[0].temperatureC;
+    };
+    const auto bare=temperature(I::HullType::BareSkin);
+    const auto blanket=temperature(I::HullType::MultiLayerBlanket);
+    require(bare<blanket-1.0 && blanket<20.0,"Playback did not wire Hull drain links");
+}
 void documentAvailability() {
     using namespace station::editor;
     struct Dialogs : FileDialogs {
@@ -75,7 +235,10 @@ void documentAvailability() {
 int main() {
     try {
         using namespace station::editor;
+        editingLockout();
         documentAvailability();
+        hullPlayback();
+        temperatureHistory();
         EditorSession session;
         // A real load makes it impossible for a clock-only mock to pass.
         auto yaml = nsi::core::Installation(1, 1).serialize();
@@ -133,6 +296,8 @@ int main() {
         require(playback.runtime()->snapshot().worldTick == 2, "Speed switch reset or subdivided preview");
         playback.synchronize(session.installation());
         require(playback.playing(), "Unchanged document reset playback");
+        // Geometry edits now require an explicit reset of the running preview.
+        playback.reset(session.installation());
         session.toggleCell(0, 0, 0);
         playback.synchronize(session.installation());
         require(!playback.playing(), "Geometry edit did not pause");

@@ -43,7 +43,8 @@ std::optional<DeckCellCoord> cellAt(const ImVec2& origin, float cell,
 
 DeckPointerEvent drawDeckGrid(const char* id,
                              const station::editor::Level& level, EditMode mode,
-                             std::optional<int> selectedSector) {
+                             std::optional<int> selectedSector,
+                             std::span<const station::editor::SectorColour> thermalColours) {
     DeckPointerEvent event;
 
     const float available_width = ImGui::GetContentRegionAvail().x;
@@ -64,9 +65,17 @@ DeckPointerEvent drawDeckGrid(const char* id,
             const ImVec2 a(origin.x + cell * static_cast<float>(x),
                           origin.y + cell * static_cast<float>(y));
             const ImVec2 b(a.x + cell, a.y + cell);
-            draw->AddRectFilled(a, b, cellColour(level.cell(x, y)));
-            if (selectedSector && level.cellData(x,y).sector == *selectedSector)
-                draw->AddRectFilled(a,b,IM_COL32(245,190,60,85));
+            const auto sector = level.cellData(x,y).sector;
+            ImU32 colour = cellColour(level.cell(x,y));
+            if (sector >= 0 && std::size_t(sector) < thermalColours.size()) {
+                const auto& thermal = thermalColours[sector];
+                colour = ImGui::ColorConvertFloat4ToU32({thermal.red,thermal.green,thermal.blue,1});
+            }
+            draw->AddRectFilled(a, b, colour);
+            if (selectedSector && sector == *selectedSector) {
+                if (thermalColours.empty()) draw->AddRectFilled(a,b,IM_COL32(245,190,60,85));
+                else draw->AddRect({a.x+2,a.y+2},{b.x-2,b.y-2},IM_COL32(245,190,60,255),0,0,2);
+            }
         }
     }
 
@@ -116,8 +125,9 @@ DeckPointerEvent drawDeckGrid(const char* id,
     if (mode!=EditMode::Wall && ImGui::IsItemHovered() && under.has_value()) {
         const ImVec2 a(origin.x + cell * static_cast<float>(under->x),
                       origin.y + cell * static_cast<float>(under->y));
-        draw->AddRectFilled(a, ImVec2(a.x + cell, a.y + cell),
-                           IM_COL32(255, 255, 255, 46));
+        if (thermalColours.empty())
+            draw->AddRectFilled(a, ImVec2(a.x + cell, a.y + cell), IM_COL32(255,255,255,46));
+        else draw->AddRect({a.x+1,a.y+1},{a.x+cell-1,a.y+cell-1},IM_COL32(255,255,255,255));
     }
 
     // The press is reported on activation, the drag while this widget still
