@@ -72,6 +72,18 @@ _Avoid_: Void (empty space or the no-compartment atmosphere preset), Exterior Wa
 An Installation-wide choice of internal thermal assembly for shared Walls and floors between Sectors, characterised by thermal transmittance.
 _Avoid_: Wall (a geometric edge, not an assembly type), Hull type (the exterior assembly), per-Wall material
 
+**Structural assembly**:
+A physical Hull panel, partition, shared floor/ceiling or Door leaf/frame, distinct from the gas on either side. A shared assembly has one physical mass even when it has two exposed sides.
+
+**Structural surface**:
+One exposed side of a Structural assembly, with its own local temperature, distinct from the temperature of adjacent gas.
+
+**Radiation cavity**:
+An Interior Sector's enclosure for diffuse thermal radiation, independent of whether the Sector has modelled gas. It represents a radiation field, not a material body or stored heat.
+
+**Radiation portal**:
+An opening that exchanges thermal radiation between cavities or with exterior space. It is distinct from solid conduction and its clear area is not reduced by a gas Discharge coefficient.
+
 **Exterior skin**:
 The surface area of a Sector facing void, comprising its sides, roof and exposed floor underside, measured in square metres. It includes surfaces facing internal voids, not just the Installation's outer perimeter.
 _Avoid_: Exterior Wall (only an edge contributing to side area), Hull (the physical assembly, not an area), perimeter

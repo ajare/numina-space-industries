@@ -2,6 +2,8 @@
 
 **Status: Accepted.** This decision amends [ADR-0001](0001-sector-atmosphere-presets-and-bridge.md) for [exterior heat loss and Sector thermal diffusion (#11)](https://github.com/ajare/numina-space-industries/issues/11). Vocabulary is defined in [CONTEXT.md](../../CONTEXT.md).
 
+[ADR-0007](0007-native-structural-thermal-contract.md) amends the single Hull body, gas-mediated partition paths, absence of partition mass and no-structure-for-Void-preset rules **for the planned native playback upgrade only**. Its calibration and measured-performance gates precede default rollout; this ADR remains the standalone compartment contract and the current native backend is unchanged until that upgrade.
+
 ADR-0001 bundled two different rules: no inferred gas pathways and no geometry-authored thermal links. We retain the first absolutely and reverse the second. Without interior conduction, only perimeter Sectors with exterior walls could lose heat; buried rooms would remain at their starting temperature forever regardless of the cold rooms surrounding them. Conducting through authored structure lets the core cool through its neighbours toward the exterior instead.
 
 ## Authored geometry permits conduction, never gas exchange
