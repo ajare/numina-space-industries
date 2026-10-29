@@ -30,6 +30,15 @@ std::optional<station::AtmosphereSettings> expandSector(
 // Atmosphere-only output. Compose with expandThermal for geometry-authored heat loss.
 std::vector<station::AtmosphereSettings> expandInstallation(const core::Installation&);
 
+// One runtime control per authored Door. Missing Interior compartments and
+// same-compartment endpoints have no gas pathway, but the Door still operates.
+struct DoorExpansion {
+    std::size_t level;
+    std::size_t wall;
+    std::optional<station::AtmospherePathwaySettings> pathway;
+};
+std::vector<DoorExpansion> expandDoors(const core::Installation&);
+
 struct ThermalExpansion {
     std::optional<station::HullSettings> hull;
     std::vector<station::ThermalLinkSettings> links;

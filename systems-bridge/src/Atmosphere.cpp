@@ -72,6 +72,42 @@ std::optional<station::AtmosphereSettings> expandSector(
     return result;
 }
 
+std::vector<DoorExpansion> expandDoors(const core::Installation& installation) {
+    std::vector<DoorExpansion> result;
+    for (std::size_t l=0;l<installation.levelCount();++l) {
+        const auto& grid=installation.level(l);
+        auto endpoint=[&](int x,int y) -> std::optional<std::string> {
+            if (x<0 || y<0 || x>=int(grid.width()) || y>=int(grid.depth())
+                || grid.cell(x,y)==core::Installation::SectorType::Void)
+                return station::StationExteriorAtmosphereId;
+            if (const auto air=expandSector(installation,l,grid.cellData(x,y).sector)) return air->id;
+            return std::nullopt; // Void preset is absence, not exterior vacuum.
+        };
+        const auto horizontal=std::size_t(grid.width())*(std::size_t(grid.depth())+1);
+        for (std::size_t w=0;w<grid.walls().size();++w) {
+            if (grid.walls()[w].type!=core::Installation::WallType::Door) continue;
+            const bool alongX=w<horizontal;
+            const auto i=alongX ? w : w-horizontal;
+            const auto stride=alongX ? std::size_t(grid.width()) : std::size_t(grid.width())+1;
+            const int x=static_cast<int>(i%stride), y=static_cast<int>(i/stride);
+            const auto a=endpoint(x-(alongX ? 0 : 1),y-(alongX ? 1 : 0));
+            const auto b=endpoint(x,y);
+            DoorExpansion door{l,w,std::nullopt};
+            if (a && b && *a!=*b) {
+                station::AtmospherePathwaySettings path;
+                path.id="door-"+std::to_string(l)+"-"+std::to_string(w);
+                path.aAtmosphereId=*a; path.bAtmosphereId=*b;
+                // One Cell edge wide and one Level high, not the Sector height.
+                path.areaM2=(alongX ? core::CellWidthM : core::CellDepthM)*core::LevelHeightM;
+                path.openFraction=0.0;
+                door.pathway=std::move(path);
+            }
+            result.push_back(std::move(door));
+        }
+    }
+    return result;
+}
+
 std::vector<station::AtmosphereSettings> expandInstallation(const core::Installation& installation) {
     std::vector<station::AtmosphereSettings> result;
     for (std::size_t level = 0; level < installation.levelCount(); ++level)

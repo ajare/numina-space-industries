@@ -28,7 +28,13 @@ Modes:
   is one undo step. A Door needs solid collinear Walls at both ends and cannot
   share an endpoint with another Door. Edits removing its supports are rejected;
   remove the Door first. Doors remain Sector boundaries and retain wall thermal
-  coupling; opening/closing and gas pathways are not yet authored.
+  coupling. While playback is actively running, Shift+left-click directly on a
+  Door toggles it open/closed instantly; paused playback refuses toggles. Doors
+  start closed, open Doors show a gap, and Reset/New/Open restore them closed.
+  These controls affect only runtime state, never geometry, undo history or
+  saved files. Valid Door endpoints exchange gas while open; exterior Doors
+  vent to space. Same-compartment or missing Interior atmosphere endpoints
+  still allow Door operation but have no gas pathway.
 - **Sector**: click a Cell to select its Sector. The left collapsible inspector
   edits its name and Interior height and displays type, cached area and Level index.
 
@@ -52,7 +58,9 @@ or elapsed simulation time is non-zero (even when paused). Reset returns to the
 start and re-enables editing. The inspector explains why editing is unavailable.
 This covers names, Hull and Partition types, Cells, Walls, Sector properties,
 Level operations and undo/redo, including keyboard shortcuts. Level and Sector
-selection remain available for inspection; saving is still allowed.
+selection remain available for inspection; saving is still allowed. Runtime
+Door toggles are the exception to locked interaction, not to locked authoring:
+Shift+left-click operates existing Doors only during active playback.
 
 The host applies `SimulationPlayback::editingAllowed()` through
 `EditorSession::setEditingEnabled()`. Session commands refuse mutations while
@@ -76,5 +84,5 @@ writer for saves, preserving an existing file after a partial write failure.
 Linux native dialogs use the XDG desktop portal; Windows/macOS use native backends.
 Release CTest consumers exercise real files, failed writes, history, topology,
 vertical occupancy and picking without a desktop. Native smoke checks should also
-cover all three modes, Level selection/offsets, height conflicts, New dimensions,
+cover all four modes, Level selection/offsets, height conflicts, New dimensions,
 grid updates, undo/redo and Save/Discard/Cancel through native dialogs.

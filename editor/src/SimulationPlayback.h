@@ -29,6 +29,10 @@ public:
     void setSpeedIndex(int index);
     int speedIndex() const noexcept { return speedIndex_; }
     void update(double wallSeconds);
+    // Runtime-only, instantaneous controls. Paused/missing/non-Door targets refuse.
+    bool toggleDoor(std::size_t level, std::size_t wall);
+    bool doorOpen(std::size_t level, std::size_t wall) const;
+    std::vector<std::size_t> openDoors(std::size_t level) const;
     const StationSystemsRuntime* runtime() const noexcept { return runtime_.get(); }
     // Read-only snapshot only when the preview still matches this document.
     // Geometry edits may occur later in the frame than synchronization.
@@ -39,6 +43,8 @@ public:
     std::span<const TemperatureSample> temperatureHistory(const std::string& atmosphereId) const;
 private:
     void recordTemperatures();
+    struct DoorState { bool open=false; std::optional<std::string> pathwayId; };
+    std::map<std::pair<std::size_t,std::size_t>, DoorState> doors_;
     std::map<std::string, std::vector<TemperatureSample>> temperatureHistory_;
     static constexpr double historySeconds = 60.0;
     static constexpr double historySampleIntervalSeconds = 0.1;

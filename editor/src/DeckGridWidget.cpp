@@ -44,7 +44,8 @@ std::optional<DeckCellCoord> cellAt(const ImVec2& origin, float cell,
 DeckPointerEvent drawDeckGrid(const char* id,
                              const station::editor::Level& level, EditMode mode,
                              std::optional<int> selectedSector,
-                             std::span<const station::editor::SectorColour> thermalColours) {
+                             std::span<const station::editor::SectorColour> thermalColours,
+                             bool doorControlsEnabled, std::span<const std::size_t> openDoors) {
     DeckPointerEvent event;
 
     const float available_width = ImGui::GetContentRegionAvail().x;
@@ -97,7 +98,12 @@ DeckPointerEvent drawDeckGrid(const char* id,
     const ImGuiIO& io = ImGui::GetIO();
     const auto wall = station::editor::nearestWall(level,
         (io.MousePos.x-origin.x)/cell, (io.MousePos.y-origin.y)/cell);
-    auto drawWall = [&](std::size_t index, ImU32 colour, float thickness) {
+    const double mouseX=(io.MousePos.x-origin.x)/cell, mouseY=(io.MousePos.y-origin.y)/cell;
+    const bool hoveredDoor=ImGui::IsItemHovered() && wall
+        && level.walls()[*wall].type==nsi::core::Installation::WallType::Door
+        && std::min(std::abs(mouseX-std::round(mouseX)),std::abs(mouseY-std::round(mouseY)))*cell<=6.0;
+    auto isOpen=[&](std::size_t w) { return std::find(openDoors.begin(),openDoors.end(),w)!=openDoors.end(); };
+    auto drawWall = [&](std::size_t index, ImU32 colour, float thickness, bool open=false) {
         const auto horizontal = std::size_t(level.width())*(std::size_t(level.depth())+1);
         ImVec2 a,b;
         if (index < horizontal) {
@@ -110,7 +116,11 @@ DeckPointerEvent drawDeckGrid(const char* id,
                      origin.y+float(i/(std::size_t(level.width())+1))*cell);
             b=ImVec2(a.x,a.y+cell);
         }
-        draw->AddLine(a,b,colour,thickness);
+        if (open) {
+            const ImVec2 d(b.x-a.x,b.y-a.y);
+            draw->AddLine(a,{a.x+d.x*0.2f,a.y+d.y*0.2f},colour,thickness);
+            draw->AddLine({a.x+d.x*0.8f,a.y+d.y*0.8f},b,colour,thickness);
+        } else draw->AddLine(a,b,colour,thickness);
     };
     using WallType=nsi::core::Installation::WallType;
     for (std::size_t i=0;i<level.walls().size();++i) {
@@ -118,11 +128,13 @@ DeckPointerEvent drawDeckGrid(const char* id,
         if (type!=WallType::None)
             drawWall(i,type==WallType::Door ? IM_COL32(70,210,225,255) :
                 type==WallType::Exterior ? IM_COL32(245,180,95,255) : IM_COL32(215,225,235,255),
-                type==WallType::Door ? 6.0f : 3.0f);
+                type==WallType::Door ? 6.0f : 3.0f,type==WallType::Door && isOpen(i));
     }
-    if ((mode==EditMode::Wall || mode==EditMode::Door) && ImGui::IsItemHovered() && wall) {
-        const bool valid=mode!=EditMode::Door || level.canPlaceDoor(*wall);
-        drawWall(*wall,valid ? IM_COL32(100,255,140,255) : IM_COL32(255,100,100,255),5.0f);
+    if ((mode==EditMode::Wall || mode==EditMode::Door) && ImGui::IsItemHovered() && wall
+        && (!doorControlsEnabled || hoveredDoor)) {
+        const bool valid=doorControlsEnabled || mode!=EditMode::Door || level.canPlaceDoor(*wall);
+        drawWall(*wall,valid ? IM_COL32(100,255,140,255) : IM_COL32(255,100,100,255),5.0f,
+            level.walls()[*wall].type==WallType::Door && isOpen(*wall));
     }
     const std::optional<DeckCellCoord> under =
         cellAt(origin, cell, level, io.MousePos);
@@ -142,6 +154,15 @@ DeckPointerEvent drawDeckGrid(const char* id,
         event.phase = DeckPointerPhase::Press;
         event.cell = under;
         event.erase = mode==EditMode::Door && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+        if (mode==EditMode::Door && !event.erase && io.KeyShift) {
+            // Shift-click never falls back to authoring, even before Play or
+            // when the nearest edge is not actually under the pointer.
+            event.phase=DeckPointerPhase::None;
+            if (doorControlsEnabled && hoveredDoor && !io.KeyCtrl && !io.KeyAlt && !io.KeySuper) {
+                event.phase=DeckPointerPhase::Press;
+                event.toggleDoor=true;
+            }
+        }
     } else if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         event.phase = DeckPointerPhase::Drag;
         event.cell = under;
@@ -166,5 +187,7 @@ DeckPointerEvent drawDeckGrid(const char* id,
                    level.interiorCount(), level.cellCount());
     }
 
+    if (mode==EditMode::Door && hoveredDoor && doorControlsEnabled)
+        ImGui::SetTooltip("%s — Shift+left-click to %s",isOpen(*wall) ? "Open" : "Closed",isOpen(*wall) ? "close" : "open");
     return event;
 }

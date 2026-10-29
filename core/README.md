@@ -49,7 +49,8 @@ checks for solid collinear Walls at both ends and no Door sharing either
 endpoint. Doors block Sector flood fill and retain ordinary wall thermal
 coupling. Edits that invalidate existing Doors are rejected transactionally,
 including Cell edits that remove their supports. YAML stores the `Door` Wall
-value; loading validates its placement. There is no open/closed state yet.
+value; loading validates its placement. Open/closed state belongs to the runtime
+preview, not the authored geometry: every Door starts closed on Reset/load.
 
 Sectors are flood-filled connected components of same-type Cells across None
 Walls. Changes rebuild components and cached areas. The largest surviving

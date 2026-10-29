@@ -32,6 +32,36 @@ std::array<double, 4> pressures(const station::AtmosphereSettings& a) {
             result[i], molarMasses[i], a.volumeM3, a.startingTemperatureC);
     return result;
 }
+void doorExpansion() {
+    using namespace nsi::systems;
+    Installation i(5,5); const auto g=i.level(0);
+    require(expandDoors(i).empty(),"Inferred Door from ordinary adjacency");
+    for (unsigned x=0;x<5;++x) i.toggleWall(0,g.horizontalWall(x,2));
+    i.setDoor(0,g.horizontalWall(2,2),true);
+    i.setDoor(0,g.horizontalWall(2,0),true);
+    auto doors=expandDoors(i);
+    require(doors.size()==2,"Missing Door controls");
+    station::StationSystemsSettings settings; settings.enabled=true;
+    settings.atmospheres=expandInstallation(i);
+    for (const auto& d:doors) {
+        require(d.pathway.has_value(),"Valid Door has no gas pathway");
+        require(d.pathway->openFraction==0,"Door did not start closed");
+        near(d.pathway->areaM2,6.0);
+        settings.atmospherePathways.push_back(*d.pathway);
+    }
+    require(doors[0].pathway->aAtmosphereId==station::StationExteriorAtmosphereId,"Exterior Door not wired to vacuum");
+    require(doors[1].pathway->aAtmosphereId!=doors[1].pathway->bAtmosphereId,"Interior Door wired to itself");
+    std::string diagnostic;
+    require(station::validateStationSystemsSettings(settings,diagnostic),diagnostic.c_str());
+    // Missing Interior atmosphere is not an exterior vacuum boundary.
+    auto text=i.serialize(); text.replace(text.find("Earth-like"),10,"Void");
+    Installation missing; missing.deserialize(text);
+    for (const auto& d:expandDoors(missing)) require(!d.pathway,"Void preset fabricated a gas endpoint");
+    Installation loop(5,5); const auto l=loop.level(0);
+    for (unsigned x:{1,3}) loop.toggleWall(0,l.horizontalWall(x,2));
+    loop.setDoor(0,l.horizontalWall(2,2),true);
+    require(expandDoors(loop).size()==1 && !expandDoors(loop)[0].pathway,"Same-room Door fabricated self-pathway");
+}
 void thermalExpansion() {
     using namespace nsi::systems;
     auto scene=[](Installation i) {
@@ -262,6 +292,6 @@ void check() {
 }
 }
 int main() {
-    try { check(); exteriorSkinGeometry(); thermalExpansion(); }
+    try { check(); exteriorSkinGeometry(); thermalExpansion(); doorExpansion(); }
     catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

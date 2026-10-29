@@ -11,6 +11,8 @@ not on the bridge, simulation, or Lua.
 
 station::StationSystemsSettings settings;
 settings.atmospheres = nsi::systems::expandInstallation(installation);
+for (const auto& door : nsi::systems::expandDoors(installation))
+    if (door.pathway) settings.atmospherePathways.push_back(*door.pathway);
 auto thermal = nsi::systems::expandThermal(installation);
 settings.hull = std::move(thermal.hull);
 settings.thermalLinks = std::move(thermal.links);
@@ -21,6 +23,16 @@ settings.solarCycle = std::move(thermal.solarCycle);
 Void geometry or a Void atmosphere preset returns no compartment. Expansion
 via `expandInstallation` returns only atmospheres. IDs are
 `sector-<levelIndex>-<uid>`.
+
+`expandDoors` returns one control binding per explicitly authored Door, keyed by
+Level and Wall index, with an optional initially closed `AtmospherePathwaySettings`.
+Pathway ids are `door-<level>-<wall>`; area is one Cell edge × one Level high
+(6 m²), independent of Sector height. The runtime changes `openFraction` directly
+between 0 and 1, without rebuilding compartments. Exterior/geometry-Void
+endpoints map to `$exterior`; an Interior Void atmosphere preset is absence,
+not vacuum, so it does not generate a pathway. Same-compartment endpoints also
+have no pathway. Both cases still permit visual Door operation. Ordinary
+adjacency never creates a pathway, and Door state is not written into geometry.
 
 Earth-like is intensive: 101.325 kPa total, 20 °C, 40% RH, dry O₂ fraction
 0.2095 and CO₂ fraction 0.0004. The spec's listed dry fractions total 0.9907;
@@ -55,7 +67,8 @@ area is one quarter, and panel heat capacity is 0.4 kJ/(K·m²) times that area.
 Optical properties use the jointly calibrated core presets (ADR-0002). Solar
 profile level is constant zero: absorbed power is exactly zero with positive
 optical coefficients. No hull is emitted without a drain, and no hull choice
-means no links. No atmosphere pathway is ever inferred.
+means no links. Thermal expansion never emits atmosphere pathways; only
+explicitly authored Doors can create them through `expandDoors`.
 
 When a Partition type is present, shared Interior Walls conduct between
 pressurised Sectors on the same Level. Each edge contributes its length times

@@ -541,20 +541,24 @@ int runEditor() {
         std::optional<int> selected_sector;
         if (mode==EditMode::Sector && selected_cell && grid.contains(selected_cell->x,selected_cell->y))
             selected_sector=grid.cellData(selected_cell->x,selected_cell->y).sector;
-        // Sector selection remains available for inspection during playback.
-        ImGui::BeginDisabled(!session.editingEnabled() && mode!=EditMode::Sector);
+        // Runtime Door controls are separate from locked geometry authoring.
+        const bool door_controls=mode==EditMode::Door && simulation.playing();
+        ImGui::BeginDisabled(!session.editingEnabled() && mode!=EditMode::Sector && !door_controls);
         const auto snapshot = simulation.snapshotFor(session.installation());
         std::vector<station::editor::SectorColour> thermal_colours;
         if (render_settings.mode == station::editor::InstallationRenderMode::Thermal)
             thermal_colours = station::editor::sectorRenderColours(session.installation(),active_level,
                 render_settings,snapshot ? &*snapshot : nullptr);
-        const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector,thermal_colours);
+        const auto open_doors=simulation.openDoors(active_level);
+        const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector,thermal_colours,door_controls,open_doors);
         ImGui::EndDisabled();
         const bool stroke_event=session.strokeActive() &&
             (pointer.phase==DeckPointerPhase::Release ||
              (pointer.phase==DeckPointerPhase::Drag &&
               ((mode==EditMode::Cell && pointer.cell) || (mode==EditMode::Wall && pointer.wall))));
-        if ((session.editingEnabled() || mode==EditMode::Sector) &&
+        if (door_controls && pointer.toggleDoor && pointer.wall)
+            edit([&]{ simulation.toggleDoor(active_level,*pointer.wall); });
+        else if ((session.editingEnabled() || mode==EditMode::Sector) &&
             (pointer.phase==DeckPointerPhase::Press || stroke_event)) edit([&]{
             if (pointer.phase==DeckPointerPhase::Press) {
                 if (mode==EditMode::Wall && pointer.wall) {

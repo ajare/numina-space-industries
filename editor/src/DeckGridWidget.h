@@ -35,9 +35,12 @@ struct DeckPointerEvent {
     std::optional<DeckCellCoord> cell;
     std::optional<std::size_t> wall;
     bool erase = false; // Right-click in Door mode.
+    bool toggleDoor = false; // Shift+left-click on a hovered runtime Door.
 };
 
 DeckPointerEvent drawDeckGrid(const char* id, const station::editor::Level& level,
                               EditMode mode = EditMode::Cell,
                               std::optional<int> selectedSector = std::nullopt,
-                              std::span<const station::editor::SectorColour> thermalColours = {});
+                              std::span<const station::editor::SectorColour> thermalColours = {},
+                              bool doorControlsEnabled = false,
+                              std::span<const std::size_t> openDoors = {});

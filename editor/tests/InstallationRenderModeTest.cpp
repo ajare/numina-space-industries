@@ -124,10 +124,13 @@ void doorInput() {
     installation.toggleWall(0,installation.level(0).horizontalWall(1,2));
     installation.toggleWall(0,installation.level(0).horizontalWall(3,2));
     ImVec2 origin;
+    bool running=false;
+    EditMode mode=EditMode::Door;
+    std::vector<std::size_t> open;
     auto frame=[&]() {
         ImGui::NewFrame(); ImGui::SetNextWindowPos({40,40}); ImGui::SetNextWindowSize({700,600});
         ImGui::Begin("Door input"); origin=ImGui::GetCursorScreenPos();
-        const auto event=drawDeckGrid("Doors",installation.level(0),EditMode::Door);
+        const auto event=drawDeckGrid("Doors",installation.level(0),mode,std::nullopt,{},running,open);
         ImGui::End(); ImGui::Render(); return event;
     };
     frame(); frame();
@@ -145,6 +148,37 @@ void doorInput() {
     installation.setDoor(0,*event.wall,!event.erase);
     require(installation.level(0).walls()[door].type==I::WallType::None,"Right-click did not clear Door");
     io.AddMouseButtonEvent(ImGuiMouseButton_Right,false); frame();
+    installation.setDoor(0,door,true);
+    io.AddKeyEvent(ImGuiMod_Shift,true); frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true); event=frame();
+    require(event.phase==DeckPointerPhase::None && !event.toggleDoor,"Shift-click authored Door before Play");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
+    running=true; frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true); event=frame();
+    require(event.phase==DeckPointerPhase::Press && event.toggleDoor && event.wall==door,
+        "Running Shift-click did not toggle hovered Door");
+    open={door}; event=frame();
+    require(!event.toggleDoor,"Holding Shift-click repeatedly toggled Door");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
+    // Nearest is not the same as hovered: a click away from the line refuses.
+    io.AddMousePosEvent(origin.x+2.5f*34,origin.y+2.4f*34); frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true); event=frame();
+    require(event.phase==DeckPointerPhase::None && !event.toggleDoor,"Off-Door Shift-click toggled nearest edge");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
+    io.AddMousePosEvent(origin.x+0.5f*34,origin.y+0.5f*34); frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true); event=frame();
+    require(!event.toggleDoor && event.phase==DeckPointerPhase::None,"Shift-click on empty space operated Door");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
+    io.AddMousePosEvent(origin.x+2.5f*34,origin.y+2*34); frame();
+    mode=EditMode::Wall;
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true); event=frame();
+    require(!event.toggleDoor,"Door toggle escaped Door mode");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
+    mode=EditMode::Door;
+    io.AddKeyEvent(ImGuiMod_Shift,false); frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true); event=frame();
+    require(!event.toggleDoor,"Unmodified click toggled running Door");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
     ImGui::DestroyContext();
 }
 void gridRendering() {

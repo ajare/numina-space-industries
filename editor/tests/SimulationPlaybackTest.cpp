@@ -13,6 +13,80 @@ void near(double a, double b) {
     require(std::abs(a - b) < 1e-6, "Unexpected simulation time");
 }
 
+void doorControls() {
+    using namespace station::editor;
+    using I=nsi::core::Installation;
+    EditorSession session; session.newDocument(5,5);
+    const auto wall=session.installation().level(0).horizontalWall(2,0);
+    session.setHullType(std::nullopt);
+    session.setDoor(0,wall,true);
+    const auto authored=session.installation();
+    const auto dirty=session.unsavedChanges();
+    const auto canUndo=session.canUndo(), canRedo=session.canRedo();
+    SimulationPlayback p;
+    require(!p.toggleDoor(0,wall),"Door operated without runtime");
+    p.reset(authored);
+    require(!p.doorOpen(0,wall) && p.openDoors(0).empty(),"Door did not start closed");
+    require(!p.toggleDoor(0,wall),"Door operated before Play");
+    const auto initial=p.runtime()->snapshot();
+    require(initial.atmospherePathways.size()==1 && initial.atmospherePathways[0].openFraction==0,
+        "Door pathway not initially closed");
+    p.togglePlaying();
+    for (int n=0;n<10;++n) p.update(0.1);
+    near(p.runtime()->snapshot().atmospheres[0].oxygenKg,initial.atmospheres[0].oxygenKg);
+    const auto before=p.runtime()->snapshot();
+    require(!p.toggleDoor(0,0) && !p.toggleDoor(1,wall),"Non-Door target operated");
+    require(p.toggleDoor(0,wall) && p.doorOpen(0,wall),"Running Door failed to open");
+    const auto open=p.runtime()->snapshot();
+    require(open.atmospherePathways[0].openFraction==1,"Opening was not instantaneous");
+    near(open.elapsedSeconds,before.elapsedSeconds);
+    near(open.atmospheres[0].oxygenKg,before.atmospheres[0].oxygenKg);
+    require(p.openDoors(0)==std::vector<std::size_t>{wall} && p.openDoors(1).empty(),"Open Door display state incorrect");
+    p.synchronize(authored);
+    require(p.doorOpen(0,wall),"Unchanged document reset Door");
+    p.update(0.1);
+    const auto vented=p.runtime()->snapshot();
+    require(vented.healthy && vented.atmospheres[0].oxygenKg<before.atmospheres[0].oxygenKg,"Open Door did not vent gas");
+    p.togglePlaying();
+    require(!p.toggleDoor(0,wall) && p.doorOpen(0,wall),"Paused Door operated");
+    p.togglePlaying();
+    require(p.toggleDoor(0,wall) && !p.doorOpen(0,wall),"Door failed to close");
+    require(p.runtime()->snapshot().atmospherePathways[0].openFraction==0,"Closing was not instantaneous");
+    p.update(0.1);
+    near(p.runtime()->snapshot().atmospheres[0].oxygenKg,vented.atmospheres[0].oxygenKg);
+    p.toggleDoor(0,wall);
+    p.reset(authored);
+    require(!p.doorOpen(0,wall) && p.openDoors(0).empty(),"Reset retained open Door");
+    require(session.installation()==authored && session.unsavedChanges()==dirty
+        && session.canUndo()==canUndo && session.canRedo()==canRedo,"Runtime Door modified authoring/history");
+    p.togglePlaying(); p.toggleDoor(0,wall); p.synchronize(nullptr);
+    require(!p.doorOpen(0,wall) && p.openDoors(0).empty(),"Closed document retained Door state");
+    // A Door whose two sides lead around into the same room still operates.
+    I loop(5,5); const auto g=loop.level(0); const auto gap=g.horizontalWall(2,2);
+    for (unsigned x:{1,3}) loop.toggleWall(0,g.horizontalWall(x,2));
+    loop.setDoor(0,gap,true);
+    p.reset(loop); p.togglePlaying();
+    require(p.runtime()->snapshot().atmospherePathways.empty(),"Same-room Door created self-pathway");
+    require(p.toggleDoor(0,gap) && p.doorOpen(0,gap),"Same-room Door would not operate");
+    loop.setName("New document"); p.synchronize(loop);
+    require(!p.doorOpen(0,gap),"Document replacement retained open Door");
+    // An explicit interior Door exchanges gas only after opening.
+    I pair(5,5); pair.setHullType(std::nullopt); const auto pg=pair.level(0);
+    for (unsigned x=0;x<5;++x) pair.toggleWall(0,pg.horizontalWall(x,2));
+    pair.setDoor(0,gap,true);
+    auto yaml=pair.serialize(); const auto preset=yaml.find("atmosphere: Earth-like");
+    const auto line=yaml.rfind('\n',preset)+1;
+    yaml.insert(yaml.find('\n',preset),"\n"+std::string(preset-line,' ')+"atmosphereLoads: {leakRateKgPerS: 0.1}");
+    pair.deserialize(yaml); p.reset(pair); p.togglePlaying();
+    for (int n=0;n<10;++n) p.update(0.1);
+    require(p.runtime()->snapshot().atmospherePathways[0].netTransferredKg[1]==0,"Closed Door mixed gas");
+    p.toggleDoor(0,gap); p.update(0.1);
+    const auto mixed=p.runtime()->snapshot();
+    require(mixed.healthy && mixed.atmospherePathways[0].netTransferredKg[1]!=0,"Open interior Door did not exchange gas");
+    p.toggleDoor(0,gap); p.update(0.1);
+    near(p.runtime()->snapshot().atmospherePathways[0].netTransferredKg[1],mixed.atmospherePathways[0].netTransferredKg[1]);
+}
+
 void editingLockout() {
     using namespace station::editor;
     using I = nsi::core::Installation;
@@ -236,6 +310,7 @@ int main() {
     try {
         using namespace station::editor;
         editingLockout();
+        doorControls();
         documentAvailability();
         hullPlayback();
         temperatureHistory();
