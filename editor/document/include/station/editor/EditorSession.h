@@ -25,6 +25,9 @@ public:
     FileResult open(FileDialogs& dialogs, DocumentFiles& files);
     FileResult save(FileDialogs& dialogs, DocumentFiles& files);
     FileResult saveAs(FileDialogs& dialogs, DocumentFiles& files);
+    // The host supplies playback policy; locking finishes any in-flight stroke.
+    void setEditingEnabled(bool enabled);
+    bool editingEnabled() const noexcept { return mEditingEnabled; }
     void toggleCell(std::size_t level, std::uint32_t x, std::uint32_t y);
     void beginStroke(std::size_t level, std::uint32_t x, std::uint32_t y);
     bool strokeActive() const noexcept { return mStroke.has_value(); }
@@ -44,8 +47,8 @@ public:
     void setPartitionType(std::optional<Installation::PartitionType> type);
     void undo();
     void redo();
-    bool canUndo() const noexcept { return !mUndoHistory.empty(); }
-    bool canRedo() const noexcept { return !mRedoHistory.empty(); }
+    bool canUndo() const noexcept { return mEditingEnabled && !mUndoHistory.empty(); }
+    bool canRedo() const noexcept { return mEditingEnabled && !mRedoHistory.empty(); }
 private:
     // Full snapshots preserve Sector identities/metadata and automatically
     // changed Walls exactly, rather than attempting to invert flood fills.
@@ -55,6 +58,7 @@ private:
     FileResult saveTo(const FileSelection& selection, DocumentFiles& files);
     Installation mStation, mBaseline;
     bool mHasDocument = false;
+    bool mEditingEnabled = true;
     std::filesystem::path mPath;
     std::size_t mStrokeLevel = 0;
     SectorType mStrokeState = SectorType::Void;

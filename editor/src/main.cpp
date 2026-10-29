@@ -247,6 +247,8 @@ int runEditor() {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
+        session.setEditingEnabled(simulation.editingAllowed());
+
         // Undo/redo hotkeys, handled here rather than as menu shortcuts so
         // one press fires exactly one step whether or not the Edit menu is
         // open (a MenuItem shortcut would fire again from the menu).
@@ -334,17 +336,17 @@ int runEditor() {
             toolbar_min,
             ImVec2(toolbar_min.x + toolbar_width, toolbar_min.y + toolbar_height),
             ImGui::GetColorU32(ImGuiCol_Border));
-        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, !session.canUndo());
+        ImGui::BeginDisabled(!session.canUndo());
         if (ImGui::Button(ICON_FA_UNDO " Undo")) {
             session.undo();
         }
-        ImGui::PopItemFlag();
+        ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, !session.canRedo());
+        ImGui::BeginDisabled(!session.canRedo());
         if (ImGui::Button(ICON_FA_REDO " Redo")) {
             session.redo();
         }
-        ImGui::PopItemFlag();
+        ImGui::EndDisabled();
 
         try { simulation.synchronize(session.hasDocument() ? &session.installation() : nullptr); }
         catch (const std::exception& error) { file_status = error.what(); }
@@ -368,6 +370,7 @@ int runEditor() {
         catch (const std::exception& error) { file_status = error.what(); }
         ImGui::SameLine();
         ImGui::Text("%.1f s", simulation.runtime() ? simulation.runtime()->snapshot().elapsedSeconds : 0.0);
+        session.setEditingEnabled(simulation.editingAllowed());
 
         // Plain-letter shortcuts must not consume text-field input or chords.
         if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt && !io.KeySuper && !io.KeyShift &&
@@ -436,6 +439,9 @@ int runEditor() {
             if (ImGui::InputText(label,buffer.data(),buffer.size()))
                 edit([&]{ commit(std::string(buffer.data())); });
         };
+        if (!session.editingEnabled())
+            ImGui::TextWrapped("Reset the simulation to the start before editing the Installation.");
+        ImGui::BeginDisabled(!session.editingEnabled());
         textField("Installation name",session.installation().getName(),
                   [&](std::string name){ session.setName(std::move(name)); });
         using HullType = nsi::core::Installation::HullType;
@@ -452,6 +458,7 @@ int runEditor() {
         if (ImGui::Combo("Partition type", &partitionIndex, partitionNames, 4))
             edit([&]{ session.setPartitionType(partitionIndex == 0 ? std::nullopt
                 : std::optional(static_cast<PartitionType>(partitionIndex - 1))); });
+        ImGui::EndDisabled();
         const auto level_label="Level "+std::to_string(active_level);
         if (ImGui::BeginCombo("Level",level_label.c_str())) {
             for (std::size_t l=0;l<session.installation().levelCount();++l) {
@@ -464,6 +471,7 @@ int runEditor() {
         }
         const auto inspected=session.installation().level(active_level);
         ImGui::Text("Size: %u x %u",inspected.width(),inspected.depth());
+        ImGui::BeginDisabled(!session.editingEnabled());
         int offsets[2]={inspected.offsetX(),inspected.offsetY()};
         if (ImGui::InputInt2("Offset",offsets))
             edit([&]{ session.setOffset(active_level,offsets[0],offsets[1]); });
@@ -507,6 +515,7 @@ int runEditor() {
                 }
             }
         }
+        ImGui::EndDisabled();
         ImGui::End();
 
         // --- Grid input ----------------------------------------------------
@@ -515,12 +524,16 @@ int runEditor() {
         std::optional<int> selected_sector;
         if (mode==EditMode::Sector && selected_cell && grid.contains(selected_cell->x,selected_cell->y))
             selected_sector=grid.cellData(selected_cell->x,selected_cell->y).sector;
+        // Sector selection remains available for inspection during playback.
+        ImGui::BeginDisabled(!session.editingEnabled() && mode!=EditMode::Sector);
         const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector);
+        ImGui::EndDisabled();
         const bool stroke_event=session.strokeActive() &&
             (pointer.phase==DeckPointerPhase::Release ||
              (pointer.phase==DeckPointerPhase::Drag &&
               ((mode==EditMode::Cell && pointer.cell) || (mode==EditMode::Wall && pointer.wall))));
-        if (pointer.phase==DeckPointerPhase::Press || stroke_event) edit([&]{
+        if ((session.editingEnabled() || mode==EditMode::Sector) &&
+            (pointer.phase==DeckPointerPhase::Press || stroke_event)) edit([&]{
             if (pointer.phase==DeckPointerPhase::Press) {
                 if (mode==EditMode::Wall && pointer.wall) {
                     session.beginWallStroke(active_level,*pointer.wall);

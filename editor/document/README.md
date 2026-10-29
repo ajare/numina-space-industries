@@ -39,6 +39,21 @@ undo/redo history. Snapshots restore automatically changed Walls and Sector
 metadata exactly; an inverse Cell edit would not suffice. New/Open reset history;
 saving preserves it. Rendering, native dialogs and file I/O remain adapters.
 
+## Simulation edit lock
+
+Installation editing is disabled while playback is playing (even at time zero)
+or elapsed simulation time is non-zero (even when paused). Reset returns to the
+start and re-enables editing. The inspector explains why editing is unavailable.
+This covers names, Hull and Partition types, Cells, Walls, Sector properties,
+Level operations and undo/redo, including keyboard shortcuts. Level and Sector
+selection remain available for inspection; saving is still allowed.
+
+The host applies `SimulationPlayback::editingAllowed()` through
+`EditorSession::setEditingEnabled()`. Session commands refuse mutations while
+locked, and locking finishes an in-flight stroke as one undo step. New/Open
+replace the scenario and reset playback, rather than mutate the running scenario;
+cancelled or failed actions preserve the existing lock and preview.
+
 ## Files and unsaved changes
 
 New, Open, Save, Save As and Exit retain the shared guarded action path. Dirty

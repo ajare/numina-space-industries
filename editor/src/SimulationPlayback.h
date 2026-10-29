@@ -18,6 +18,9 @@ public:
     void reset(const nsi::core::Installation& installation);
     void togglePlaying() noexcept { if (runtime_) playing_ = !playing_; }
     bool playing() const noexcept { return playing_; }
+    bool editingAllowed() const {
+        return !playing_ && (!runtime_ || runtime_->snapshot().elapsedSeconds == 0.0);
+    }
     void setSpeedIndex(int index);
     int speedIndex() const noexcept { return speedIndex_; }
     void update(double wallSeconds);

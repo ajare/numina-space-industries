@@ -56,6 +56,7 @@ void EditorSession::replaceDocument(Installation station) {
     mStation = std::move(station);
     mBaseline = mStation;
     mHasDocument = true;
+    mEditingEnabled = true; // New/Open replace the scenario rather than edit a run.
     mPath.clear();
 }
 
@@ -104,12 +105,18 @@ FileResult EditorSession::saveTo(const FileSelection& selection, DocumentFiles& 
     }
 }
 
+void EditorSession::setEditingEnabled(bool enabled) {
+    if (!enabled) endStroke();
+    mEditingEnabled = enabled;
+}
+
 void EditorSession::commit(Installation before) {
     if (mStation == before) return;
     mUndoHistory.push_back(std::move(before));
     mRedoHistory.clear();
 }
 void EditorSession::edit(const std::function<void(Installation&)>& operation) {
+    if (!mEditingEnabled) return;
     endStroke();
     auto next=mStation;
     operation(next);
@@ -122,13 +129,14 @@ void EditorSession::toggleCell(std::size_t l,std::uint32_t x,std::uint32_t y) {
     beginStroke(l,x,y); paintStroke(x,y); endStroke();
 }
 void EditorSession::beginStroke(std::size_t l,std::uint32_t x,std::uint32_t y) {
+    if (!mEditingEnabled) return;
     endStroke();
     auto type=mStation.level(l).cell(x,y);
     mStrokeState=type==SectorType::Interior ? SectorType::Void : SectorType::Interior;
     mStrokeLevel=l; mStroke=mStation;
 }
 void EditorSession::paintStroke(std::uint32_t x,std::uint32_t y) {
-    if (!mStroke || mWallStrokeState.has_value() || !mStation.level(mStrokeLevel).contains(x,y)) return;
+    if (!mEditingEnabled || !mStroke || mWallStrokeState.has_value() || !mStation.level(mStrokeLevel).contains(x,y)) return;
     try { mStation.setCell(mStrokeLevel,x,y,mStrokeState); }
     catch (...) { cancelStroke(); throw; }
 }
@@ -150,6 +158,7 @@ void EditorSession::toggleWall(std::size_t l,std::size_t w) {
     endStroke();
 }
 void EditorSession::beginWallStroke(std::size_t l,std::size_t w) {
+    if (!mEditingEnabled) return;
     endStroke();
     const auto walls=mStation.level(l).walls();
     if (w>=walls.size()) throw std::out_of_range("Wall outside Level");
@@ -159,7 +168,7 @@ void EditorSession::beginWallStroke(std::size_t l,std::size_t w) {
     mWallStrokeState=add;
 }
 void EditorSession::paintWallStroke(std::size_t w) {
-    if (!mStroke || !mWallStrokeState.has_value()) return;
+    if (!mEditingEnabled || !mStroke || !mWallStrokeState.has_value()) return;
     const auto walls=mStation.level(mStrokeLevel).walls();
     if (w>=walls.size()) return;
     const bool present=walls[w].type!=Installation::WallType::None;
@@ -189,11 +198,13 @@ void EditorSession::setPartitionType(std::optional<Installation::PartitionType> 
     edit([&](auto& i){ i.setPartitionType(type); });
 }
 void EditorSession::undo() {
+    if (!mEditingEnabled) return;
     endStroke(); if (mUndoHistory.empty()) return;
     mRedoHistory.push_back(std::move(mStation));
     mStation=std::move(mUndoHistory.back()); mUndoHistory.pop_back();
 }
 void EditorSession::redo() {
+    if (!mEditingEnabled) return;
     endStroke(); if (mRedoHistory.empty()) return;
     mUndoHistory.push_back(std::move(mStation));
     mStation=std::move(mRedoHistory.back()); mRedoHistory.pop_back();

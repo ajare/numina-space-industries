@@ -13,6 +13,87 @@ void near(double a, double b) {
     require(std::abs(a - b) < 1e-6, "Unexpected simulation time");
 }
 
+void editingLockout() {
+    using namespace station::editor;
+    using I = nsi::core::Installation;
+    EditorSession session;
+    session.newDocument(2, 2);
+    session.setName("Before");
+    session.setName("After");
+    session.undo(); // Keep both undo and redo history to exercise both paths.
+    SimulationPlayback playback;
+    playback.synchronize(session.installation());
+    auto policy = [&] { session.setEditingEnabled(playback.editingAllowed()); };
+    auto blocked = [&] {
+        policy();
+        require(!session.editingEnabled(), "Playback did not lock editing");
+        require(!session.canUndo() && !session.canRedo(), "Locked history controls enabled");
+        const auto before = session.installation();
+        const auto dirty = session.unsavedChanges();
+        session.setHullType(I::HullType::BareSkin);
+        require(session.installation() == before, "Hull selector bypassed lock");
+        session.setPartitionType(I::PartitionType::BarePartition);
+        require(session.installation() == before, "Partition selector bypassed lock");
+        session.setName("Blocked");
+        session.setSector(0, 0, "Blocked", 2);
+        session.setOffset(0, 1, 2);
+        session.addLevel(3, 3);
+        session.removeTopLevel();
+        session.toggleCell(0, 0, 0);
+        session.beginStroke(0, 0, 0);
+        session.paintStroke(1, 0);
+        session.endStroke();
+        session.toggleWall(0, 0);
+        session.beginWallStroke(0, 0);
+        session.paintWallStroke(0);
+        session.endStroke();
+        session.undo();
+        session.redo();
+        require(session.installation() == before && session.unsavedChanges() == dirty,
+                "Installation mutation bypassed playback lock");
+        require(!session.strokeActive(), "Locked input started a stroke");
+        playback.synchronize(session.installation());
+    };
+    policy();
+    require(session.editingEnabled(), "Paused at start was locked");
+    playback.togglePlaying();
+    blocked(); // Playing at time zero is locked, even before the first update.
+    require(playback.playing(), "Blocked edit reset playback");
+    playback.togglePlaying();
+    policy();
+    require(session.editingEnabled(), "Pause at time zero stayed locked");
+    playback.togglePlaying();
+    playback.update(0.1);
+    blocked();
+    playback.togglePlaying();
+    blocked(); // Pausing after advancing does not unlock authoring.
+    require(playback.runtime()->snapshot().elapsedSeconds > 0, "Blocked edit reset time");
+    playback.reset(session.installation());
+    policy();
+    require(session.editingEnabled() && session.canUndo() && session.canRedo(),
+            "Reset did not restore editing and history");
+    session.redo();
+    require(session.installation().getName() == "After", "Lock damaged redo history");
+    session.undo();
+    require(session.installation().getName() == "Before", "Lock damaged undo history");
+    session.setHullType(I::HullType::BareSkin);
+    session.setPartitionType(I::PartitionType::BarePartition);
+    require(session.installation().hullType() == I::HullType::BareSkin &&
+            session.installation().partitionType() == I::PartitionType::BarePartition,
+            "Reset did not unlock assembly selectors");
+    const auto beforeStroke = session.installation();
+    session.beginStroke(0, 0, 0);
+    session.paintStroke(0, 0);
+    session.setEditingEnabled(false);
+    const auto afterStroke = session.installation();
+    session.paintStroke(1, 0);
+    require(!session.strokeActive() && session.installation() == afterStroke,
+            "Lock did not finish in-flight stroke");
+    session.setEditingEnabled(true);
+    session.undo();
+    require(session.installation() == beforeStroke, "Lock lost in-flight stroke history");
+}
+
 void hullPlayback() {
     using I=nsi::core::Installation;
     auto temperature=[](I::HullType type) {
@@ -96,6 +177,7 @@ void documentAvailability() {
 int main() {
     try {
         using namespace station::editor;
+        editingLockout();
         documentAvailability();
         hullPlayback();
         EditorSession session;
@@ -155,6 +237,8 @@ int main() {
         require(playback.runtime()->snapshot().worldTick == 2, "Speed switch reset or subdivided preview");
         playback.synchronize(session.installation());
         require(playback.playing(), "Unchanged document reset playback");
+        // Geometry edits now require an explicit reset of the running preview.
+        playback.reset(session.installation());
         session.toggleCell(0, 0, 0);
         playback.synchronize(session.installation());
         require(!playback.playing(), "Geometry edit did not pause");
