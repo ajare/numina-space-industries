@@ -31,6 +31,22 @@ A Sector's starting atmosphere condition, independent of its size: Earth-like sp
 **Wall**:
 A shared edge between neighbouring Cells, or an edge at a Level's boundary. A present Wall is Interior between two Interior Cells and Exterior between Interior and Void or outside the grid; an absent Wall is None.
 
+**Hull type**:
+An Installation-wide choice of exterior thermal assembly, characterised by thermal transmittance and radiative properties. The Hull is the physical skin enclosing the Installation, not the empty space outside or an individual geometric edge.
+_Avoid_: Void (empty space or the no-compartment atmosphere preset), Exterior Wall (a geometric edge, not the Hull), per-Sector hull
+
+**Partition type**:
+An Installation-wide choice of internal thermal assembly for shared Walls and floors between Sectors, characterised by thermal transmittance.
+_Avoid_: Wall (a geometric edge, not an assembly type), Hull type (the exterior assembly), per-Wall material
+
+**Exterior skin**:
+The surface area of a Sector facing void, comprising its sides, roof and exposed floor underside, measured in square metres. It includes surfaces facing internal voids, not just the Installation's outer perimeter.
+_Avoid_: Exterior Wall (only an edge contributing to side area), Hull (the physical assembly, not an area), perimeter
+
+**Thermal transmittance (U-value)**:
+Heat flow per unit surface area per unit temperature difference through a hull or partition assembly, measured in W/(m²·K).
+_Avoid_: Thermal conductivity (a material property), conductance (the whole-surface value after multiplying by area), insulation rating
+
 **Floor Layer**, **Wiring Layer**, **Piping Layer**:
 The floor, electrical wiring, and piping content associated with a Cell, respectively.
 
