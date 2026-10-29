@@ -81,7 +81,8 @@ else()
 endif()
 
 # Headless playback adapter keeps simulation dependencies out of the document model.
-add_library(editor-simulation STATIC src/SimulationPlayback.cpp src/SectorThermal.cpp)
+add_library(editor-simulation STATIC
+    src/SimulationPlayback.cpp src/SectorThermal.cpp src/InstallationRenderMode.cpp)
 target_include_directories(editor-simulation PUBLIC src)
 target_link_libraries(editor-simulation PUBLIC nsi::systemsBridge)
 
@@ -90,6 +91,7 @@ add_executable(editor
     src/NativeFileDialogs.cpp
     src/EditorFonts.cpp
     src/DeckGridWidget.cpp
+    src/InstallationRenderControls.cpp
     src/SectorThermalPanel.cpp
 )
 target_compile_features(editor PRIVATE cxx_std_20)
@@ -127,6 +129,14 @@ add_custom_target(editor-font-assets
 add_dependencies(editor editor-font-assets)
 
 if(BUILD_TESTING)
+    add_executable(editor-installation-render-mode-test
+        tests/InstallationRenderModeTest.cpp src/DeckGridWidget.cpp src/InstallationRenderControls.cpp)
+    target_link_libraries(editor-installation-render-mode-test PRIVATE
+        editor-simulation editor::document editor::imgui)
+    add_test(NAME editor-installation-render-mode COMMAND editor-installation-render-mode-test)
+    set_tests_properties(editor-installation-render-mode PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
     add_executable(editor-sector-thermal-panel-test
         tests/SectorThermalPanelTest.cpp src/SectorThermalPanel.cpp)
     target_link_libraries(editor-sector-thermal-panel-test PRIVATE editor-simulation editor::implot)

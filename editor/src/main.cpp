@@ -7,6 +7,7 @@
 // lives in the headless station::editor::EditorSession; this file only
 // draws, forwards input, and supplies native-dialog and storage adapters.
 
+#include "InstallationRenderControls.h"
 #include "imgui.h"
 #include "implot.h"
 #include "imgui_internal.h"  // DockBuilder* (initial dock layout) is internal API
@@ -186,6 +187,7 @@ int runEditor() {
     // own, it only renders and drives what the session reports.
     station::editor::EditorSession session;
     station::editor::SimulationPlayback simulation;
+    station::editor::InstallationRenderSettings render_settings;
     SdlUnsavedChangesPrompt unsaved_prompt(window);
     std::string file_status;
     auto report = [&](const station::editor::FileResult& result) {
@@ -391,6 +393,8 @@ int runEditor() {
         ImGui::SetNextItemWidth(140);
         if (ImGui::Combo("Mode", &mode_index, "Cell (C)\0Wall (W)\0Sector (S)\0")) session.endStroke();
         const auto mode=static_cast<EditMode>(mode_index);
+        ImGui::SameLine();
+        station::editor::drawInstallationRenderModeCombo(render_settings);
         active_level=std::min(active_level,session.installation().levelCount()-1);
         if (ImGui::FindWindowSettingsByID(ImHashStr(kGridTitle)) == nullptr) {
             // Add the grid to existing user layouts without rebuilding them.
@@ -432,6 +436,10 @@ int runEditor() {
             (session.unsavedChanges() ? " *" : "");
         SDL_SetWindowTitle(window, title.c_str());
 
+        // One live snapshot for this frame's thermal colours and inspection.
+        const auto snapshot = simulation.runtime()
+            ? std::optional{simulation.runtime()->snapshot()} : std::nullopt;
+
         // --- Installation and Sector inspector (left) ---------------------
         ImGui::Begin(kPanelTitle);
         if (ImGuiWindow* panel = ImGui::GetCurrentWindow(); panel->DockNode)
@@ -442,6 +450,7 @@ int runEditor() {
             if (ImGui::InputText(label,buffer.data(),buffer.size()))
                 edit([&]{ commit(std::string(buffer.data())); });
         };
+        station::editor::drawThermalRenderControls(render_settings);
         if (!session.editingEnabled())
             ImGui::TextWrapped("Reset the simulation to the start before editing the Installation.");
         ImGui::BeginDisabled(!session.editingEnabled());
@@ -529,7 +538,11 @@ int runEditor() {
             selected_sector=grid.cellData(selected_cell->x,selected_cell->y).sector;
         // Sector selection remains available for inspection during playback.
         ImGui::BeginDisabled(!session.editingEnabled() && mode!=EditMode::Sector);
-        const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector);
+        std::vector<station::editor::SectorColour> thermal_colours;
+        if (render_settings.mode == station::editor::InstallationRenderMode::Thermal)
+            thermal_colours = station::editor::sectorRenderColours(session.installation(),active_level,
+                render_settings,snapshot ? &*snapshot : nullptr);
+        const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector,thermal_colours);
         ImGui::EndDisabled();
         const bool stroke_event=session.strokeActive() &&
             (pointer.phase==DeckPointerPhase::Release ||
@@ -557,8 +570,6 @@ int runEditor() {
 
         ImGui::Begin("Sector");
         if (selected_sector) {
-            const auto snapshot = simulation.runtime()
-                ? std::optional{simulation.runtime()->snapshot()} : std::nullopt;
             const auto thermal = station::editor::sectorThermal(
                 session.installation(), active_level, *selected_sector,
                 snapshot ? &*snapshot : nullptr);

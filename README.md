@@ -34,6 +34,20 @@ the executable, not the working directory. Font licenses are recorded in
 `resources/FontAwesome-LICENSE.txt`; the icon header's license is alongside it
 under `editor/include/imgui/`.
 
+## Installation render modes
+
+The toolbar's **Render mode** combo switches between **Default** (the existing
+floor/void view) and **Thermal** (live Sector atmosphere temperatures). In Thermal
+mode, expand **Thermal rendering** in the left panel to adjust minimum, maximum
+and reference temperatures in Celsius (defaults: -273, 100 and 20). The scale
+interpolates blue → green → red, with pure green at the reference temperature;
+values outside the scale saturate at blue/red. Sliders keep minimum < reference
+< maximum within -273 to 1000 °C. Sectors without live atmosphere data keep their
+Default appearance. Thermal selection/hover uses outlines, preserving fill colours.
+
+Render settings are editor-only: they do not modify saved Installations or the
+simulation and remain adjustable during playback.
+
 ## Sector thermal inspection
 
 In the Editor, choose Sector mode and select a Cell. The **Sector** panel's
