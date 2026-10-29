@@ -101,6 +101,16 @@ add_test(NAME station-cell-thermal COMMAND station-cell-thermal-consumer)
 set_tests_properties(station-cell-thermal PROPERTIES LABELS "station;functional;validation-fast" TIMEOUT 30)
 add_dependencies(station-configuration-consumer station-cell-thermal-consumer)
 
+# Research-only refinement of a fixed physical two-room geometry. Not a
+# production resolution option or a wall-clock/physical-fidelity CTest claim.
+add_executable(station-cell-fluid-resolution-study CellFluidResolutionStudy.cpp)
+target_link_libraries(station-cell-fluid-resolution-study PRIVATE StationSystems::StationSystems)
+
+add_executable(station-cell-fluid-correctness CellFluidCorrectness.cpp)
+target_link_libraries(station-cell-fluid-correctness PRIVATE StationSystems::StationSystems)
+add_test(NAME station-cell-fluid-correctness COMMAND station-cell-fluid-correctness)
+set_tests_properties(station-cell-fluid-correctness PROPERTIES LABELS "station;functional;validation-fast" TIMEOUT 30)
+
 add_executable(station-cell-fluid-consumer CellFluidConsumer.cpp)
 target_link_libraries(station-cell-fluid-consumer PRIVATE StationSystems::StationSystems)
 add_test(NAME station-cell-fluid COMMAND station-cell-fluid-consumer)

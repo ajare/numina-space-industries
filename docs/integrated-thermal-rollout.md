@@ -284,6 +284,17 @@ account precision review remains part of the pending owner decision.
   YAML, numerical error bounds and fidelity are unchanged. #20/#21 remain open.
 - Whitespace checks pass. No claim of a passed rollout gate is made.
 
+## Subsequent gas-solver accuracy audit
+
+The owner's two-Door S0 investigation found a separate spatial-fidelity concern:
+[gas-solver correctness audit](cell-fluid-correctness-audit.md). Independent HLLE
+flux, conservation, symmetry and activity checks pass, but numerical momentum
+diffusion dominates local advection and corner pressure/load estimates are
+strongly resolution-dependent. This is not a validated physical stagnation result
+or a passed force-prediction accuracy gate. No production solver change was made;
+142/142 Release tests pass with the added audit test. The existing rollout
+measurements above remain historical evidence, not accuracy approval.
+
 ## Requested rollout decision
 
 **Measurement recommendation: no-go for production default enablement; retain
