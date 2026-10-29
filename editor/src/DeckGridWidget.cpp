@@ -211,6 +211,15 @@ DeckPointerEvent drawDeckGrid(const char* id,
         event.cell = under;
     }
 
+    // A hold must begin in Injector mode on this grid. Sampling is per frame,
+    // never a persistent source left enabled after release/mode/focus changes.
+    ImGui::PushID(id);const auto injectorGesture=ImGui::GetID("InjectorGesture");ImGui::PopID();
+    auto* storage=ImGui::GetStateStorage();
+    if (ImGui::IsItemActivated()) storage->SetBool(injectorGesture,mode==EditMode::Injector && ImGui::IsMouseClicked(ImGuiMouseButton_Left));
+    if (mode!=EditMode::Injector || !ImGui::IsItemActive() || !ImGui::IsMouseDown(ImGuiMouseButton_Left) || io.AppFocusLost)
+        storage->SetBool(injectorGesture,false);
+    event.injectHeld=storage->GetBool(injectorGesture) && ImGui::IsItemHovered() && under.has_value();
+
     if (mode==EditMode::Door && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
         event.phase=DeckPointerPhase::Release;
     event.wall=wall;

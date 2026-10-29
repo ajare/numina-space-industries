@@ -17,7 +17,7 @@ void SimulationPlayback::synchronize(const nsi::core::Installation* installation
         pressureHistory_.clear();
         atmosphereHistory_.clear();
         source_.reset();
-        remainder_ = 0;pendingStepSeconds_.reset();
+        remainder_ = 0;pendingStepSeconds_.reset();pendingInjection_.reset();injected_=false;
     } else if (!source_ || *source_ != *installation) reset(*installation);
 }
 
@@ -30,7 +30,7 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     pressureHistory_.clear();
     atmosphereHistory_.clear();
     source_ = installation;
-    remainder_ = 0;pendingStepSeconds_.reset();
+    remainder_ = 0;pendingStepSeconds_.reset();pendingInjection_.reset();injected_=false;
     runtime_=std::make_unique<CellPlaybackRuntime>(installation,observationOptions_,lifecycleSource_);
     for (const auto& door:runtime_->model().geometry().doors)
         doors_.emplace(std::pair{door.level,door.wall},DoorState{});
@@ -78,12 +78,14 @@ std::span<const StructuralSample> SimulationPlayback::structuralHistory(std::siz
     return it==structuralHistory_.end() ? std::span<const StructuralSample>{} : it->second;
 }
 
-void SimulationPlayback::recordAtmosphereHistory() {
+void SimulationPlayback::recordAtmosphereHistory(bool instantaneous) {
     const auto& snapshot = runtime_->snapshot();
     auto record=[&](auto& samples, auto sample) {
         // Sample on simulation time, not frame time: slow playback must not
         // create an unbounded number of points within the one-minute window.
-        if (samples.empty() || snapshot.elapsedSeconds - samples.back().seconds
+        if (!samples.empty() && samples.back().seconds==sample.seconds)
+            samples.back()=sample; // paused injection replaces, never duplicates time
+        else if (instantaneous || samples.empty() || snapshot.elapsedSeconds - samples.back().seconds
                 >= historySampleIntervalSeconds - 1e-9)
             samples.push_back(sample);
         const auto first = std::lower_bound(samples.begin(), samples.end(),
@@ -120,22 +122,38 @@ void SimulationPlayback::setSpeedIndex(int index) {
     speedIndex_ = index;
 }
 
-void SimulationPlayback::update(double wallSeconds) {
+void SimulationPlayback::update(double wallSeconds,std::optional<GasInjector> injection) {
     if (!std::isfinite(wallSeconds) || wallSeconds < 0)
         throw std::invalid_argument("Invalid simulation frame duration");
-    if (!playing_ || !runtime_) return;
+    if (!runtime_) return;
+    if (injection && !runtime_->canInject(*injection)) injection.reset();
+    if (!playing_) {
+        // A failed running update must retry its exact source and duration;
+        // do not mutate that checkpoint through paused input in the meantime.
+        if (!pendingStepSeconds_ && injection && injection->kgPerS>0 && wallSeconds>0) {
+            if (!runtime_->inject(*injection,wallSeconds)) {
+                const auto diagnostics=runtime_->diagnostics();
+                throw std::runtime_error(diagnostics.empty() ? "Gas injection failed" : diagnostics.front().message);
+            }
+            injected_=true;recordAtmosphereHistory(true);
+        }
+        return;
+    }
     try {
         const double debt=remainder_+wallSeconds;
         if (!std::isfinite(debt)) throw std::invalid_argument("Simulation time debt exceeds finite range");
         remainder_=debt;
         for (int i=0;i<maxCatchUpUpdates && remainder_+1e-9>=updateIntervalSeconds;++i) {
-            if (!pendingStepSeconds_) pendingStepSeconds_=updateIntervalSeconds*speeds[speedIndex_];
-            if (!runtime_->update(*pendingStepSeconds_)) {
+            if (!pendingStepSeconds_) {
+                pendingStepSeconds_=updateIntervalSeconds*speeds[speedIndex_];pendingInjection_=injection;
+            }
+            if (!runtime_->update(*pendingStepSeconds_,4096,4096,pendingInjection_)) {
                 const auto diagnostics = runtime_->diagnostics();
                 throw std::runtime_error(diagnostics.empty() ? "Simulation advance failed"
                                                             : diagnostics.front().message);
             }
-            remainder_=std::max(0.0,remainder_-updateIntervalSeconds);pendingStepSeconds_.reset();
+            if (pendingInjection_ && pendingInjection_->kgPerS>0) injected_=true;
+            remainder_=std::max(0.0,remainder_-updateIntervalSeconds);pendingStepSeconds_.reset();pendingInjection_.reset();
             recordAtmosphereHistory();
         }
     } catch (...) {

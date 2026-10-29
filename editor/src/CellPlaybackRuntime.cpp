@@ -67,16 +67,41 @@ CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installa
         s.residualKJ=0;
     }
 }
-bool CellPlaybackRuntime::update(double seconds,std::size_t acousticBudget,std::size_t thermalBudget) {
+std::optional<nsi::systems::CellGasInjection> CellPlaybackRuntime::resolveInjector(const GasInjector& source) const {
+    const auto& indices=model_.geometry().cellIndices;
+    if (source.level>=indices.size() || source.gridIndex>=indices[source.level].size()
+        || indices[source.level][source.gridIndex]==SIZE_MAX || source.gas>=4
+        || !std::isfinite(source.kgPerS) || source.kgPerS<0) return std::nullopt;
+    return nsi::systems::CellGasInjection{indices[source.level][source.gridIndex],source.gas,source.kgPerS,293.15};
+}
+bool CellPlaybackRuntime::inject(const GasInjector& source,double seconds) {
+    diagnostics_.clear();const auto injection=resolveInjector(source);
+    if (!injection || !model_.inject(*injection,seconds)) {
+        snapshot_.healthy=false;
+        diagnostics_.push_back({snapshot_.worldTick,"native-gas-injector",ScriptExecutionFailure::None,
+            injection ? model_.diagnostic() : "Invalid gas injector target/rate"});return false;
+    }
+    snapshot_.healthy=true;publish(0);return true;
+}
+bool CellPlaybackRuntime::update(double seconds,std::size_t acousticBudget,std::size_t thermalBudget,
+    std::optional<GasInjector> injection) {
     if (seconds==0) return true;
     diagnostics_.clear();
+    std::optional<nsi::systems::CellGasInjection> source;
+    if (injection) {
+        source=resolveInjector(*injection);
+        if (!source) {
+            snapshot_.healthy=false;
+            diagnostics_.push_back({snapshot_.worldTick,"native-gas-injector",ScriptExecutionFailure::None,"Invalid gas injector target/rate"});return false;
+        }
+    }
     for (std::size_t i=0;i<previous_.size();++i) previous_[i]=model_.sectors()[i].ledger;
     const auto start=std::chrono::steady_clock::now();
     if (!lifecycle_.prepare(seconds)) {
         snapshot_.healthy=false;diagnostics_=lifecycle_.diagnostics();return false;
     }
     const auto luaEnd=std::chrono::steady_clock::now();
-    if (!model_.advance(seconds,{},acousticBudget,thermalBudget)) {
+    if (!model_.advance(seconds,{},acousticBudget,thermalBudget,source)) {
         snapshot_.healthy=false;diagnostics_.push_back({snapshot_.worldTick,"native-cell-fluid",ScriptExecutionFailure::None,model_.diagnostic()});return false;
     }
     const auto solverEnd=std::chrono::steady_clock::now();

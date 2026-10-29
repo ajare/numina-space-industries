@@ -29,6 +29,12 @@ struct CellAtmosphereExpansion {
 // facing geometric Void/outside breach; unmodelled Interior never becomes vacuum.
 CellAtmosphereExpansion expandCellAtmosphere(const core::Installation&,bool localStructure=true);
 
+// One external source, at rest. Rate is integrated over simulated seconds;
+// explicit inject() calls may instead supply a paused wall-time interval.
+struct CellGasInjection {
+    std::size_t cell{},gas{}; // native fluid Cell index; O2/N2/CO2/vapour
+    double kgPerS{0.1},temperatureK{293.15};
+};
 struct CellAtmosphereLedger {
     std::array<double,4> sourceKg{},transportedKg{},exteriorLostKg{},leakedKg{};
     std::array<double,2> sourceMomentumKgMS{};
@@ -80,7 +86,10 @@ public:
         :CellAtmosphereTransport(expandCellAtmosphere(installation,mode==CellThermalMode::LocalStructure),mode) {}
     // Source/phase splitting is bounded to 0.1 s, including accelerated updates.
     // At most 4096 source slices and maxSubsteps acoustic steps per whole call.
-    bool advance(double seconds,std::span<const double> heatJ={},std::size_t maxSubsteps=4096,std::size_t maxThermalIterations=4096);
+    bool advance(double seconds,std::span<const double> heatJ={},std::size_t maxSubsteps=4096,std::size_t maxThermalIterations=4096,
+        std::optional<CellGasInjection> injection=std::nullopt);
+    // Atomic source-only control: no transport, phase/thermal solve or clock step.
+    bool inject(const CellGasInjection&,double seconds);
     const station::CellFluidWork& work() const {return work_;}
     bool setDoorOpen(std::size_t level,std::size_t wall,bool open);
     const std::string& diagnostic() const {return diagnostic_;}
@@ -118,6 +127,8 @@ private:
     std::vector<std::vector<std::size_t>> cavitySurfaces_, bodyContacts_;
     std::map<StructuralSurfaceId,std::size_t> surfaceBodies_;
     std::vector<std::pair<std::size_t,unsigned>> surfaceSlots_; // assembly/side in body order
+    bool validInjection(const CellGasInjection&,double seconds) const;
+    void applyInjection(const CellGasInjection&,double seconds);
     void sources(double seconds);
     void publish();
     void structuralStep(double seconds,double midpoint,std::size_t maxWork);

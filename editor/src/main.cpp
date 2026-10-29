@@ -8,6 +8,7 @@
 // draws, forwards input, and supplies native-dialog and storage adapters.
 
 #include "InstallationRenderControls.h"
+#include "GasInjectorControls.h"
 #include "imgui.h"
 #include "implot.h"
 #include "SimulationTimingPanel.h"
@@ -197,6 +198,7 @@ int runEditor() {
     station::editor::StructuralPanelState structural_view;
     station::editor::SectorSystemsView sector_view;
     station::editor::InstallationRenderSettings render_settings;
+    station::editor::GasInjectorSettings injector_settings;
     SdlUnsavedChangesPrompt unsaved_prompt(window);
     std::string file_status;
     auto report = [&](const station::editor::FileResult& result) {
@@ -388,9 +390,6 @@ int runEditor() {
         ImGui::SameLine();observations_changed=ImGui::Checkbox("Object forces",&observation_options.objectForces) || observations_changed;
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Calculate one-way drag and pressure-gradient loads. Uses solver velocity independently of wind diagnostics; no rigid-body motion.");
         if (observations_changed) simulation.setObservationOptions(observation_options);
-        // Do not erase an earlier diagnostic on every successful frame.
-        try { simulation.update(io.DeltaTime); }
-        catch (const std::exception& error) { file_status = error.what(); }
         ImGui::SameLine();
         ImGui::Text("%.1f s", simulation.runtime() ? simulation.runtime()->snapshot().elapsedSeconds : 0.0);
         session.setEditingEnabled(simulation.editingAllowed());
@@ -403,6 +402,7 @@ int runEditor() {
             else if (ImGui::IsKeyPressed(ImGuiKey_W, false)) requested_mode = static_cast<int>(EditMode::Wall);
             else if (ImGui::IsKeyPressed(ImGuiKey_S, false)) requested_mode = static_cast<int>(EditMode::Sector);
             else if (ImGui::IsKeyPressed(ImGuiKey_D, false)) requested_mode = static_cast<int>(EditMode::Door);
+            else if (ImGui::IsKeyPressed(ImGuiKey_I, false)) requested_mode = static_cast<int>(EditMode::Injector);
             if (requested_mode != mode_index) {
                 session.endStroke();
                 mode_index = requested_mode;
@@ -410,7 +410,7 @@ int runEditor() {
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(140);
-        if (ImGui::Combo("Mode", &mode_index, "Cell (C)\0Wall (W)\0Sector (S)\0Door (D)\0")) session.endStroke();
+        if (ImGui::Combo("Mode", &mode_index, "Cell (C)\0Wall (W)\0Sector (S)\0Door (D)\0Injector (I)\0")) session.endStroke();
         const auto mode=static_cast<EditMode>(mode_index);
         ImGui::SameLine();
         station::editor::drawInstallationRenderModeCombo(render_settings);
@@ -473,6 +473,8 @@ int runEditor() {
         ImGui::TextWrapped("LocalStructure performance target is not yet met; accelerated updates may refuse.");
         station::editor::drawThermalRenderControls(render_settings);
         station::editor::drawPressureRenderControls(render_settings);
+        station::editor::drawAtmosphereRenderControls(render_settings);
+        if (mode==EditMode::Injector) station::editor::drawGasInjectorControls(injector_settings);
         if (!session.editingEnabled())
             ImGui::TextWrapped("Reset the simulation to the start before editing the Installation.");
         ImGui::BeginDisabled(!session.editingEnabled());
@@ -561,7 +563,7 @@ int runEditor() {
             selected_sector=grid.cellData(selected_cell->x,selected_cell->y).sector;
         // Runtime Door controls are separate from locked geometry authoring.
         const bool door_controls=mode==EditMode::Door && simulation.playing();
-        ImGui::BeginDisabled(!session.editingEnabled() && mode!=EditMode::Sector && !door_controls);
+        ImGui::BeginDisabled(!session.editingEnabled() && mode!=EditMode::Sector && mode!=EditMode::Injector && !door_controls);
         const auto snapshot = simulation.snapshotFor(session.installation());
         std::vector<station::editor::SectorColour> thermal_colours;
         if (render_settings.mode != station::editor::InstallationRenderMode::Default)
@@ -600,6 +602,18 @@ int runEditor() {
             else if (pointer.phase==DeckPointerPhase::Release) session.endStroke();
         });
         ImGui::End();
+
+        // Input is sampled before the update: releasing the mouse, switching
+        // tools/Levels or opening a popup cannot leave yesterday's source live.
+        std::optional<station::editor::GasInjector> injection;
+        if (mode==EditMode::Injector && pointer.injectHeld && pointer.cell && snapshot)
+            injection=station::editor::GasInjector{active_level,std::size_t(pointer.cell->y)*grid.width()+pointer.cell->x,
+                static_cast<std::size_t>(injector_settings.gas),injector_settings.kgPerS};
+        try {
+            simulation.synchronize(session.hasDocument() ? &session.installation() : nullptr);
+            simulation.update(io.DeltaTime,injection);
+        } catch (const std::exception& error) { file_status=error.what(); }
+        session.setEditingEnabled(simulation.editingAllowed());
 
         // Preserve the node configuration viewer alongside Thermal and the
         // thermal Systems graph in the selected Sector's dock tab.

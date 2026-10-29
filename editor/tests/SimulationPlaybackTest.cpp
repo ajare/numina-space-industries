@@ -476,6 +476,68 @@ void localStructuralPlayback() {
         require(runtime.update(duration) && runtime.snapshot().elapsedSeconds==before.elapsedSeconds+duration,"Local facade retry failed");
     }
 }
+void injectorPlayback() {
+    using namespace station::editor;using I=nsi::core::Installation;
+    I scene(4,1);scene.setHullType(std::nullopt);const auto authored=scene.serialize();
+    SimulationPlayback p;p.reset(scene);const auto initial=p.runtime()->snapshot();
+    const GasInjector source{0,0,2,.2};const auto id=initial.atmospheres[0].id;
+    require(p.editingAllowed(),"Fresh Reset locked authoring");
+    p.update(.25,source);p.update(.25,source);
+    near(p.runtime()->snapshot().cellAtmospheres[0].massKg[2],initial.cellAtmospheres[0].massKg[2]+.1);
+    require(p.runtime()->snapshot().cellAtmospheres[1].massKg==initial.cellAtmospheres[1].massKg,"Paused injector diffused gas");
+    require(p.runtime()->snapshot().elapsedSeconds==0 && p.runtime()->snapshot().worldTick==0,"Paused injection ran physics/Lua");
+    require(!p.editingAllowed(),"Injected state at t=0 did not require Reset before geometry edits");
+    require(p.atmosphereHistory(id).size()==1 && p.atmosphereHistory(id).back().seconds==0,"Paused injection duplicated simulation-time history");
+    require(p.atmosphereHistory(id).back().wetMoleBoundsPercent!=atmosphereSample(0,initial.atmospheres[0]).wetMoleBoundsPercent,"Paused injection left stale composition history");
+    const auto paused=p.runtime()->snapshot();p.update(.5);
+    require(p.runtime()->snapshot()==paused,"Released paused injector kept adding gas");
+    p.togglePlaying();p.update(.1,source);
+    near(p.runtime()->model().sectors()[0].ledger.sourceKg[2],.12);
+    require(p.runtime()->snapshot().cellAtmospheres[1].massKg[2]>initial.cellAtmospheres[1].massKg[2],"Playing injector did not spread within Sector");
+    p.update(.1);near(p.runtime()->model().sectors()[0].ledger.sourceKg[2],.12);
+    near(p.runtime()->snapshot().atmospheres[0].carbonDioxideKg,initial.atmospheres[0].carbonDioxideKg+.12);
+    p.togglePlaying();const auto count=p.atmosphereHistory(id).size();p.update(.5,source);
+    near(p.runtime()->model().sectors()[0].ledger.sourceKg[2],.22);near(p.runtime()->snapshot().elapsedSeconds,.2);
+    require(p.atmosphereHistory(id).size()==count,"Paused injection appended duplicate timestamps");
+    p.reset(scene);require(p.editingAllowed() && p.runtime()->snapshot()==initial,"Reset retained injected gas/energy or lockout");
+    for (const int speed:{0,2,4}) {
+        p.reset(scene);p.setSpeedIndex(speed);p.togglePlaying();p.update(.1,source);
+        near(p.runtime()->model().sectors()[0].ledger.sourceKg[2],.1*SimulationPlayback::speeds[speed]*source.kgPerS);
+    }
+    p.togglePlaying();const auto before=p.runtime()->model().sectors()[0].ledger.sourceKg[2];p.update(.2,source);
+    near(p.runtime()->model().sectors()[0].ledger.sourceKg[2]-before,.04); // pause ignores 10x speed
+    require(scene.serialize()==authored,"Injector changed saved geometry");
+
+    I voidCell(2,1);voidCell.setCell(0,1,0,I::SectorType::Void);p.reset(voidCell);
+    const auto untouched=p.runtime()->snapshot();p.update(.2,GasInjector{0,1,0,.1});
+    require(p.runtime()->snapshot()==untouched && p.editingAllowed(),"Geometric Void acquired gas");
+    p.update(.2,GasInjector{20,0,0,.1});require(p.runtime()->snapshot()==untouched,"Invalid Level acquired gas");
+    auto yaml=scene.serialize();yaml.replace(yaml.find("Earth-like"),10,"Void");I absent;absent.deserialize(yaml);
+    p.reset(absent);p.update(.2,source);require(p.runtime()->snapshot().cellAtmospheres.empty() && p.editingAllowed(),"Void atmosphere preset acquired gas");
+
+    I levels(std::vector<I::Level>{I::Level(2,1),I::Level(1,1)});levels.setHullType(std::nullopt);p.reset(levels);
+    const auto lower=p.runtime()->snapshot().cellAtmospheres[0].massKg;
+    const auto upper=p.runtime()->snapshot().cellAtmospheres[2].massKg[1];
+    p.update(.1,GasInjector{1,0,1,.1});
+    require(p.runtime()->snapshot().cellAtmospheres[0].massKg==lower,"Injector hit wrong Level");
+    near(p.runtime()->snapshot().cellAtmospheres[2].massKg[1],upper+.01);
+    const std::string lifecycleFailure=R"lua(return function(name)
+        return {advance=function(self,tick) error('injector lifecycle refusal') end}
+    end)lua";
+    CellPlaybackRuntime refused(scene,{},lifecycleFailure);const auto baseline=refused.snapshot();
+    require(!refused.update(.1,4096,4096,source) && refused.snapshot().cellAtmospheres==baseline.cellAtmospheres
+        && refused.model().sectors()[0].ledger==nsi::systems::CellAtmosphereLedger{},"Lifecycle refusal committed injection");
+
+    p.reset(scene);p.togglePlaying();bool failed=false;
+    try {p.update(.1,GasInjector{0,0,0,1e308});} catch (const std::runtime_error&) {failed=true;}
+    require(failed && !p.playing() && p.runtime()->snapshot().cellAtmospheres==initial.cellAtmospheres,"Failed injection changed committed gas");
+    p.update(.2,source);require(p.runtime()->snapshot().cellAtmospheres==initial.cellAtmospheres,"Paused source mutated a failed-step checkpoint");
+    p.setSpeedIndex(0);p.togglePlaying();failed=false;
+    try {p.update(0,GasInjector{0,1,1,.01});} catch (const std::runtime_error&) {failed=true;}
+    require(failed && p.runtime()->snapshot().worldTick==0,"Retry discarded/rescaled the refused injector or duration");
+    p.reset(scene);p.update(.1,source);near(p.runtime()->model().sectors()[0].ledger.sourceKg[2],.02);
+    p.synchronize(nullptr);p.update(.1,source);require(!p.runtime() && p.editingAllowed(),"Retired document retained injector state");
+}
 void failedPlaybackDebt() {
     using namespace station::editor;using I=nsi::core::Installation;
     I scene(5,5);scene.setHullType(std::nullopt);const auto g=scene.level(0);const auto door=g.horizontalWall(2,2);
@@ -564,6 +626,7 @@ int main() {
         nativeSnapshots();
         localStructuralPlayback();
         failedPlaybackDebt();
+        injectorPlayback();
         doorControls();
         documentAvailability();
         hullPlayback();

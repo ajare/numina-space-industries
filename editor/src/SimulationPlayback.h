@@ -30,11 +30,13 @@ public:
     void togglePlaying() noexcept { if (runtime_) playing_ = !playing_; }
     bool playing() const noexcept { return playing_; }
     bool editingAllowed() const {
-        return !playing_ && (!runtime_ || runtime_->snapshot().elapsedSeconds == 0.0);
+        return !playing_ && !injected_ && (!runtime_ || runtime_->snapshot().elapsedSeconds == 0.0);
     }
     void setSpeedIndex(int index);
     int speedIndex() const noexcept { return speedIndex_; }
-    void update(double wallSeconds);
+    // Supply the grid's current owned left-button hold each frame. Injection
+    // uses simulated seconds while playing, wall seconds while paused (no flow).
+    void update(double wallSeconds,std::optional<GasInjector> injection=std::nullopt);
     void setObservationOptions(CellObservationOptions options);
     CellObservationOptions observationOptions() const {return observationOptions_;}
     // Runtime-only, instantaneous controls. Paused/missing/non-Door targets refuse.
@@ -53,7 +55,7 @@ public:
     std::span<const PressureSample> pressureHistory(const std::string& atmosphereId) const;
     std::span<const AtmosphereSample> atmosphereHistory(const std::string& atmosphereId) const;
 private:
-    void recordAtmosphereHistory();
+    void recordAtmosphereHistory(bool instantaneous=false);
     struct DoorState { bool open=false; };
     std::map<std::pair<std::size_t,std::size_t>, DoorState> doors_;
     std::map<std::size_t, std::vector<StructuralSample>> structuralHistory_;
@@ -68,9 +70,11 @@ private:
     std::optional<nsi::core::Installation> source_;
     std::unique_ptr<CellPlaybackRuntime> runtime_;
     std::optional<double> pendingStepSeconds_;
+    std::optional<GasInjector> pendingInjection_; // frozen with a refused duration
     double remainder_ = 0;
     int speedIndex_ = 2;
     bool playing_ = false;
+    bool injected_ = false; // source-only edits at t=0 still require Reset
     CellObservationOptions observationOptions_{};
     const StationSystemsSource lifecycleSource_;
 };

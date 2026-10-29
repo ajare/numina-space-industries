@@ -151,6 +151,15 @@ void loadsAndPhase() {
     require(condensing.advance(0.1,heat),"Localized external heat failed");near(condensing.sectors()[right].ledger.externalHeatJ,100);
     closes(warm,condensing.sectors()[right]);
 }
+void allocationFreeInjector() {
+    I room(2,1);room.setHullType(std::nullopt);CellAtmosphereTransport gas(room);
+    const CellGasInjection source{0,2,.1,293.15};allocations=0;
+    trackAllocations=true;const bool injected=gas.inject(source,.1);trackAllocations=false;
+    require(injected && allocations==0,"Paused native injection allocated memory");
+    trackAllocations=true;const bool advanced=gas.advance(.1,{},4096,4096,source);trackAllocations=false;
+    require(advanced && allocations==0,"Running native injection allocated memory");
+    near(gas.sectors()[0].ledger.sourceKg[2],.02);
+}
 void rollback() {
     I scene(3,2);scene.setHullType(std::nullopt);scene.toggleWall(0,scene.level(0).horizontalWall(1,0));
     auto e=expandCellAtmosphere(scene);e.atmospheres[0].occupants=1;e.atmospheres[0].oxygenUsePerOccupantKgPerS=0.001;
@@ -170,5 +179,5 @@ void rollback() {
     for (std::size_t i=0;i<before.size();++i) require(before[i].q==gas.fluid().states()[i].q,"Late failure changed gas");
 }
 }
-int main() {try {prolongedDecompression();geometry();doors();loadsAndPhase();rollback();std::cout<<"Cell atmosphere bridge passed\n";return 0;}
+int main() {try {prolongedDecompression();geometry();doors();loadsAndPhase();allocationFreeInjector();rollback();std::cout<<"Cell atmosphere bridge passed\n";return 0;}
 catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

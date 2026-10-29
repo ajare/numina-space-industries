@@ -208,6 +208,32 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
     }
     publish();momentum_.starting=momentum_.current;
 }
+bool CellAtmosphereTransport::validInjection(const CellGasInjection& source,double seconds) const {
+    return source.cell<fluid_.states().size() && source.gas<4 && std::isfinite(seconds) && seconds>=0
+        && std::isfinite(source.kgPerS) && source.kgPerS>=0 && std::isfinite(source.kgPerS*seconds)
+        && std::isfinite(source.temperatureK) && source.temperatureK>=0;
+}
+void CellAtmosphereTransport::applyInjection(const CellGasInjection& source,double seconds) {
+    const double kg=source.kgPerS*seconds;if (kg==0) return;
+    auto& ledger=ledger_[fluid_.mesh().cells[source.cell].atmosphere];
+    const double energy=fluid_.addSpecies(source.cell,source.gas,kg,source.temperatureK);
+    const double mass=ledger.sourceKg[source.gas]+kg,inventory=ledger.inventoryEnergyJ+energy;
+    if (!std::isfinite(mass) || !std::isfinite(inventory)) throw std::invalid_argument("Gas injection ledger exceeds finite range");
+    ledger.sourceKg[source.gas]=mass;ledger.inventoryEnergyJ=inventory;
+    // Added at rest: no source momentum. Thermal energy is inventory-carried,
+    // not heat double-booked into the thermal solver or occupant ledger.
+}
+bool CellAtmosphereTransport::inject(const CellGasInjection& source,double seconds) {
+    diagnostic_.clear();
+    if (!validInjection(source,seconds)) {diagnostic_="Invalid Cell gas injection";return false;}
+    if (seconds==0 || source.kgPerS==0) return true;
+    std::copy(fluid_.states().begin(),fluid_.states().end(),checkpoint_.begin());
+    const auto group=fluid_.mesh().cells[source.cell].atmosphere;const auto ledger=ledger_[group];
+    try {applyInjection(source,seconds);publish();return true;}
+    catch (const std::exception& e) {
+        diagnostic_=e.what();fluid_.restore(checkpoint_);ledger_[group]=ledger;return false;
+    }
+}
 void CellAtmosphereTransport::sources(double seconds) {
     for (const auto i:sourceCells_) {
         const auto& cell=fluid_.mesh().cells[i];const auto& a=geometry_.atmospheres[cell.atmosphere];auto& ledger=ledger_[cell.atmosphere];
@@ -264,11 +290,13 @@ bool CellAtmosphereTransport::setDoorOpen(std::size_t level,std::size_t wall,boo
     }
     return true;
 }
-bool CellAtmosphereTransport::advance(double seconds,std::span<const double> heatJ,std::size_t maxSubsteps,std::size_t maxThermalIterations) {
+bool CellAtmosphereTransport::advance(double seconds,std::span<const double> heatJ,std::size_t maxSubsteps,std::size_t maxThermalIterations,
+    std::optional<CellGasInjection> injection) {
     diagnostic_.clear();
     if (!std::isfinite(seconds) || seconds<0 || !std::isfinite(elapsed_+seconds)
         || (!heatJ.empty() && heatJ.size()!=fluid_.states().size())) {diagnostic_="Invalid Cell atmosphere update";return false;}
     for (const double heat:heatJ) if (!std::isfinite(heat) || (seconds==0 && heat!=0)) {diagnostic_="Invalid Cell atmosphere heat input";return false;}
+    if (injection && !validInjection(*injection,seconds)) {diagnostic_="Invalid Cell gas injection";return false;}
     if (seconds==0) return true;
     if (elapsed_+seconds==elapsed_) {diagnostic_="Cell atmosphere duration below clock resolution";return false;}
     const double slices=std::ceil(seconds/0.1);
@@ -289,6 +317,7 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
         work_.resting=true;double remaining=seconds;
         for (std::size_t slice=0;slice<count;++slice) {
             const double dt=slice+1==count ? remaining : seconds/count;remaining-=dt;
+            if (injection) applyInjection(*injection,dt/2);
             sources(dt/2);
             const bool advanced=fluid_.advance(dt,maxSubsteps-work_.substeps);
             work_.substeps+=fluid_.work().substeps;work_.faceEvaluations+=fluid_.work().faceEvaluations;
@@ -311,6 +340,7 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
                 else for (int axis=0;axis<2;++axis) momentum_.exteriorLost[axis]+=transfers[f].q[4+axis];
             }
             sources(dt/2);
+            if (injection) applyInjection(*injection,dt/2);
             if (mode_==CellThermalMode::LocalStructure)
                 structuralStep(dt,elapsed_+seconds-remaining-dt/2,maxThermalIterations-structure_.work.work);
             for (std::size_t i=0;i<fluid_.states().size();++i) {

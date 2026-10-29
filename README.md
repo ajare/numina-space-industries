@@ -95,12 +95,42 @@ back the whole update. Catch-up time is retained rather than discarded; a refuse
 simulation duration is retained even after changing speed. Unresolved reservoir
 references refuse native playback rather than silently omitting their heat.
 
+## Runtime gas injector
+
+Choose **Injector (I)** in the Mode combo (alongside Cell, Wall, Sector and Door).
+The left panel's **Gas injector** header selects Oxygen, Nitrogen, Carbon dioxide
+or Water vapour and a rate in **kg/s** (default **Oxygen, 0.1 kg/s**).
+Click and hold the left mouse button on a modelled Interior Cell to inject;
+dragging moves the source to the Cell under the pointer. Release or leave the
+grid to stop. A hold must start on the grid in Injector mode; other widgets,
+right-click, focus loss and switching modes cannot leave an injector running.
+Geometric Void and Interior Void-atmosphere presets do not accept gas.
+
+While playing, each simulation update adds `rate × simulated seconds`, split
+across the existing source intervals, so playback speed changes the real-time
+injection rate. While paused (including before the first Play), injection uses
+wall seconds without advancing transport, thermal/phase evolution, Lua or the
+simulation clock. This lets you preload one Cell and then watch it spread when
+Play resumes. Choose the corresponding constituent Render mode to inspect its
+mass or percentage. Mixing remains the existing coarse native gas model, not
+calibrated molecular diffusion.
+
+Injected gas arrives at rest at **20 °C**. Its species mass and carried thermal
+energy enter the source/inventory ledgers; failed updates roll back injection
+alongside physics and retain the refused source/duration for retry. A pending
+failed update blocks further paused injection until retry or Reset. Snapshots
+and histories refresh after paused injection without duplicating timestamps.
+Injected state is runtime-only: it does not dirty the Installation or create undo
+steps. **Reset** removes it; even injection at time zero requires Reset before
+geometry editing can resume.
+
 ## Installation render modes
 
 The toolbar's **Render mode** combo switches between **Default** (the existing
 floor/void view), **Thermal (gas)** (live Cell atmosphere temperatures),
-**Pressure** (live absolute total pressure in kPa), and **Structure (surfaces)**
-(area-weighted exposed-side temperatures, LocalStructure backend). In Thermal
+**Pressure** (live absolute total pressure in kPa), **Structure (surfaces)**
+(area-weighted exposed-side temperatures, LocalStructure backend), and individual
+**Oxygen**, **Nitrogen**, **Carbon dioxide**, and **Water vapour** views. In Thermal
 mode, expand **Thermal rendering** in the left panel to adjust minimum, maximum
 and reference temperatures in Celsius (defaults: -273, 100 and 20). The scale
 interpolates blue → green → red, with pure green at the reference temperature;
@@ -116,6 +146,17 @@ In Pressure mode, **Pressure rendering** provides minimum/reference/maximum
 pressure sliders (defaults **0 / 101.325 / 150 kPa**) with the same blue/green/red
 interpolation and saturation. Anchors remain strictly ordered and nonnegative,
 within 0–1000 kPa; missing/invalid live data retains Default colours.
+
+Each constituent mode has a collapsible **[Gas name] rendering** header in the
+left panel. **Quantity** switches between **Mass (kg per Cell)** and
+**Percentage (wet mole %)**, which includes water vapour and is not mass
+percentage. Mass covers the Cell's full volume, including Sector height; it is
+not density. Each gas retains separate minimum/reference/maximum colour scales
+for mass and percentage. Blue/green/red mark those anchors, with saturation
+outside the range. Empty/unresolved composition is grey in percentage mode;
+zero mass is a valid blue reading, and retained trace mass remains measurable
+when gas temperature is unresolved. Missing telemetry keeps Default colours.
+The controls remain available while paused or playing and never reset physics.
 
 Hover a Cell to inspect pressure, temperature, humidity, wet composition and
 horizontal velocity, including while playing. **Airflow load arrows** show the

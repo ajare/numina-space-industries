@@ -1,5 +1,6 @@
 #include "InstallationRenderMode.h"
 #include "InstallationRenderControls.h"
+#include "GasInjectorControls.h"
 #include "DeckGridWidget.h"
 #include "SimulationPlayback.h"
 #include <station/StationSystemsRuntime.h>
@@ -87,6 +88,70 @@ void pressureRendering() {
     require(sectorRenderColours(absent,0,settings,&snapshot)==defaults,"Void preset got pressure tint");
     require(i==before,"Pressure rendering changed document");
 }
+void componentRendering() {
+    constexpr std::array modes{InstallationRenderMode::Oxygen,InstallationRenderMode::Nitrogen,
+        InstallationRenderMode::CarbonDioxide,InstallationRenderMode::WaterVapour};
+    const std::array<double,4> masses{1,1,1,1};
+    const std::array<double,4> molar{station::StationMolarMassOxygenKgPerMol,station::StationMolarMassNitrogenKgPerMol,
+        station::StationMolarMassCarbonDioxideKgPerMol,station::StationMolarMassWaterKgPerMol};
+    double totalMoles=0;for (const auto m:molar) totalMoles+=1/m;
+    require(!atmosphereRenderComponent(InstallationRenderMode::Thermal),"Thermal mode mapped to a gas");
+    I scene(std::vector<I::Level>{I::Level(2,1),I::Level(1,1)});
+    const auto authored=scene.serialize();SimulationPlayback playback;playback.reset(scene);
+    auto snapshot=playback.runtime()->snapshot();const auto committed=snapshot;
+    for (auto& cell:snapshot.cellAtmospheres) {cell.massKg=masses;cell.resolvedGas=true;}
+    // Distinct Cells in the same Sector must not use its aggregate inventory.
+    snapshot.cellAtmospheres[1].massKg={2,2,2,2};
+    std::reverse(snapshot.cellAtmospheres.begin(),snapshot.cellAtmospheres.end());
+    InstallationRenderSettings settings;
+    ComponentColourScale scale{0,1,2};
+    colour(componentColour(0,scale),{0,0,1});colour(componentColour(1,scale),{0,1,0});
+    colour(componentColour(2,scale),{1,0,0});colour(componentColour(3,scale),{1,0,0});
+    colour(componentColour(.5,scale),{0,.5f,.5f});
+    require(!componentColour(-1,scale),"Negative mass received a colour");
+    scale.reference=scale.minimum;require(!scale.valid() && !componentColour(1,scale),"Degenerate component scale accepted");
+    for (std::size_t gas=0;gas<modes.size();++gas) {
+        settings.mode=modes[gas];require(atmosphereRenderComponent(settings.mode)==gas,"Wrong constituent mapping");
+        require(settings.atmosphere.mass[gas].valid() && settings.atmosphere.percentage[gas].valid(),"Invalid default component scale");
+        const double percent=100*(1/molar[gas])/totalMoles;
+        near(static_cast<float>(*atmosphereComponentValue(masses,gas,AtmosphereRenderQuantity::Percentage,true)),static_cast<float>(percent));
+        require(std::abs(percent-25)>.01,"Composition accidentally used mass percentage");
+        settings.atmosphere.quantity=AtmosphereRenderQuantity::Mass;settings.atmosphere.mass[gas]={0,1,2};
+        const auto colours=cellRenderColours(scene,0,settings,&snapshot);
+        require(colours[0]==SectorColour{0,1,0} && colours[1]==SectorColour{1,0,0},"Component mass was not local to each Cell");
+        require(cellRenderColours(scene,1,settings,&snapshot)[0]==SectorColour{0,1,0},"Component tint used wrong Level");
+        settings.atmosphere.quantity=AtmosphereRenderQuantity::Percentage;
+        const auto percentages=cellRenderColours(scene,0,settings,&snapshot);
+        require(percentages[0]==percentages[1] && percentages[0]==*componentColour(percent,settings.atmosphere.scale(gas)),"Composition changed when total inventory doubled");
+        auto invalid=snapshot;for (auto& c:invalid.cellAtmospheres) {c.resolvedGas=false;c.massKg={};}
+        require(cellRenderColours(scene,0,settings,&invalid)[0]==unresolvedGasColour(),"Empty gas fabricated a percentage");
+        settings.atmosphere.quantity=AtmosphereRenderQuantity::Mass;
+        require(cellRenderColours(scene,0,settings,&invalid)[0]==SectorColour{0,0,1},"Zero constituent mass was not measurable");
+        for (auto& c:invalid.cellAtmospheres) c.massKg=masses;
+        require(cellRenderColours(scene,0,settings,&invalid)[0]==SectorColour{0,1,0},"Unresolved trace gas hid retained mass");
+        invalid=snapshot;for (auto& c:invalid.cellAtmospheres) ++c.sectorUid;
+        const auto defaults=std::vector<SectorColour>(2,defaultSectorColour(I::SectorType::Interior));
+        require(cellRenderColours(scene,0,settings,&invalid)==defaults,"Stale component telemetry coloured Cell");
+        invalid=snapshot;invalid.enabled=false;
+        require(cellRenderColours(scene,0,settings,&invalid)==defaults && cellRenderColours(scene,0,settings)==defaults,"Missing/disabled component telemetry coloured Cell");
+        settings.atmosphere.quantity=AtmosphereRenderQuantity::Percentage;
+        auto bad=masses;bad[gas]=std::numeric_limits<double>::quiet_NaN();
+        require(!atmosphereComponentValue(bad,gas,settings.atmosphere.quantity,true),"Nonfinite composition accepted");
+        bad=masses;bad[(gas+1)%4]=-1;
+        require(!atmosphereComponentValue(bad,gas,settings.atmosphere.quantity,true),"Negative mixture inventory accepted");
+        // Aggregate fallback uses total constituent inventories, not partial-pressure ratios.
+        auto aggregate=committed;for (auto& a:aggregate.atmospheres) {
+            a.oxygenKg=a.nitrogenKg=a.carbonDioxideKg=a.waterVapourKg=1;
+            a.oxygenPartialPressureKPa=0;a.resolvedGas=true;
+        }
+        std::reverse(aggregate.atmospheres.begin(),aggregate.atmospheres.end());
+        require(sectorRenderColours(scene,0,settings,&aggregate)[0]==*componentColour(percent,settings.atmosphere.scale(gas)),"Sector composition ignored inventories or stable identity");
+        auto absent=scene;auto yaml=absent.serialize();yaml.replace(yaml.find("Earth-like"),10,"Void");absent.deserialize(yaml);
+        require(cellRenderColours(absent,0,settings,&snapshot)==defaults,"Void preset acquired constituent telemetry");
+    }
+    require(!atmosphereComponentValue(masses,4,AtmosphereRenderQuantity::Mass,true),"Invalid species accepted");
+    require(scene.serialize()==authored && playback.runtime()->snapshot()==committed,"Render settings changed authoring or physics");
+}
 void runtimeColours() {
     I installation(std::vector<I::Level>{I::Level(2,1),I::Level(1,1)});
     installation.toggleWall(0,installation.level(0).verticalWall(1,0));
@@ -153,6 +218,49 @@ void runtimeColours() {
     render.mode=InstallationRenderMode::Default;
     require(sectorRenderColours(session.installation(),0,render,&cooled)[0]==
         defaultSectorColour(I::SectorType::Interior),"Switching back failed to restore Default");
+}
+void injectorInput() {
+    ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;
+    io.DisplaySize={1024,768};io.DeltaTime=1/60.f;
+    unsigned char* pixels;int width,height;io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
+    I scene(3,2);const auto authored=scene.serialize();GasInjectorSettings settings;
+    require(settings.gas==0 && settings.kgPerS==.1f,"Unexpected injector defaults");
+    EditMode mode=EditMode::Injector;ImVec2 origin;std::string text;
+    auto frame=[&]() {
+        ImGui::NewFrame();ImGui::SetNextWindowPos({40,40});ImGui::SetNextWindowSize({700,600});
+        ImGui::Begin("Injector input");origin=ImGui::GetCursorScreenPos();
+        const auto event=drawDeckGrid("InjectorGrid",scene.level(0),mode);
+        ImGui::LogToBuffer();if (mode==EditMode::Injector) drawGasInjectorControls(settings);
+        text=ImGui::GetCurrentContext()->LogBuffer.c_str();ImGui::LogFinish();
+        ImGui::End();ImGui::Render();return event;
+    };
+    frame();frame();
+    require(text.find("Gas injector")!=std::string::npos && text.find("Rate (kg/s)")!=std::string::npos && text.find("Oxygen")!=std::string::npos,"Injector header/widgets missing");
+    io.AddMousePosEvent(origin.x+17,origin.y+17);frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);auto event=frame();
+    require(event.injectHeld && event.cell && event.cell->x==0 && event.phase==DeckPointerPhase::Press,"Injector did not acquire grid left-button hold");
+    event=frame();require(event.injectHeld && event.phase==DeckPointerPhase::Drag,"Stationary held mouse did not keep injecting");
+    io.AddMousePosEvent(origin.x+51,origin.y+17);event=frame();
+    require(event.injectHeld && event.cell && event.cell->x==1,"Injector did not follow dragged Cell");
+    io.AddMousePosEvent(origin.x-20,origin.y-20);event=frame();require(!event.injectHeld,"Off-grid hold kept injecting");
+    io.AddMousePosEvent(origin.x+17,origin.y+17);event=frame();require(event.injectHeld,"Returning held gesture did not resume injector");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);event=frame();require(!event.injectHeld,"Released mouse kept injecting");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Right,true);event=frame();require(!event.injectHeld,"Right mouse triggered injector");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Right,false);frame();
+    mode=EditMode::Cell;io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);frame();
+    mode=EditMode::Injector;event=frame();require(!event.injectHeld,"Switching modes inherited an authoring stroke");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);event=frame();require(event.injectHeld,"Fresh Injector gesture refused");
+    mode=EditMode::Sector;event=frame();require(!event.injectHeld,"Switching away from Injector retained source");
+    mode=EditMode::Injector;event=frame();require(!event.injectHeld,"Switching back revived old injector gesture");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);event=frame();require(event.injectHeld,"Focus test setup failed");
+    io.AddFocusEvent(false);event=frame();require(!event.injectHeld,"Focus loss retained injection");
+    io.AddFocusEvent(true);frame();
+    const std::array<const char*,4> names{"Oxygen","Nitrogen","Carbon dioxide","Water vapour"};
+    for (int gas=0;gas<4;++gas) {settings.gas=gas;frame();require(text.find(names[gas])!=std::string::npos,"Injector omitted selected species");}
+    require(scene.serialize()==authored,"Injector pointer gesture modified authoring");
+    ImGui::DestroyContext();
 }
 void doorInput() {
     ImGui::CreateContext();
@@ -330,9 +438,11 @@ void gridRendering() {
     InstallationRenderSettings settings;
     // Default is byte-for-byte the old floor colour. Thermal selection must
     // outline rather than wash the exact reference-green floor with yellow.
-    for (const auto mode:{InstallationRenderMode::Default,InstallationRenderMode::Thermal,InstallationRenderMode::Pressure}) {
+    for (const auto mode:{InstallationRenderMode::Default,InstallationRenderMode::Thermal,InstallationRenderMode::Pressure,
+        InstallationRenderMode::Structure,InstallationRenderMode::Oxygen,InstallationRenderMode::Nitrogen,
+        InstallationRenderMode::CarbonDioxide,InstallationRenderMode::WaterVapour}) {
         settings.mode=mode;
-        const bool thermal=mode==InstallationRenderMode::Thermal;
+        const bool thermal=mode==InstallationRenderMode::Thermal || mode==InstallationRenderMode::Structure;
         const bool heatmap=mode!=InstallationRenderMode::Default;
         for (int frame=0;frame<2;++frame) {
             ImGui::NewFrame(); ImGui::SetNextWindowSize({700,600});
@@ -346,6 +456,17 @@ void gridRendering() {
             drawPressureRenderControls(settings);
             require((ImGui::GetCursorPosY()>pressureCursor)==(mode==InstallationRenderMode::Pressure),"Pressure controls visible in wrong mode");
             require(settings.pressure.valid(),"Pressure slider bounds corrupted scale");
+            const auto component=atmosphereRenderComponent(mode);
+            settings.atmosphere.quantity=frame ? AtmosphereRenderQuantity::Mass : AtmosphereRenderQuantity::Percentage;
+            const auto componentCursor=ImGui::GetCursorPosY();
+            ImGui::LogToBuffer();drawAtmosphereRenderControls(settings);
+            const std::string text=ImGui::GetCurrentContext()->LogBuffer.c_str();ImGui::LogFinish();
+            require((ImGui::GetCursorPosY()>componentCursor)==component.has_value(),"Component controls visible in wrong mode");
+            if (component) {
+                require(settings.atmosphere.scale(*component).valid(),"Component controls corrupted colour scale");
+                require(text.find(frame ? "Minimum mass (kg)" : "Minimum percentage (%)")!=std::string::npos,"Selected component quantity controls missing");
+                require(text.find("rendering")!=std::string::npos && text.find("Quantity")!=std::string::npos,"Component collapsible header/quantity absent");
+            }
             auto* draw=ImGui::GetWindowDrawList(); const auto first=draw->VtxBuffer.Size;
             const std::vector<SectorColour> colours{{0,1,0}};
             drawDeckGrid("Grid",installation.level(0),EditMode::Sector,0,
@@ -360,6 +481,6 @@ void gridRendering() {
 }
 }
 int main() {
-    try { evacuatedThermalRendering(); scaleMapping(); pressureRendering(); runtimeColours(); doorInput(); cellRendering(); gridRendering(); }
+    try { evacuatedThermalRendering(); scaleMapping(); pressureRendering(); componentRendering(); runtimeColours(); injectorInput(); doorInput(); cellRendering(); gridRendering(); }
     catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

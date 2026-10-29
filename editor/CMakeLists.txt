@@ -106,6 +106,7 @@ add_executable(editor
     src/EditorFonts.cpp
     src/DeckGridWidget.cpp
     src/InstallationRenderControls.cpp
+    src/GasInjectorControls.cpp
     src/SectorThermalPanel.cpp
     src/StructuralPanel.cpp
     src/SectorAtmospherePanel.cpp
@@ -160,7 +161,7 @@ if(BUILD_TESTING)
         LABELS "editor;functional;validation-fast" TIMEOUT 30)
 
     add_executable(editor-installation-render-mode-test
-        tests/InstallationRenderModeTest.cpp src/DeckGridWidget.cpp src/InstallationRenderControls.cpp)
+        tests/InstallationRenderModeTest.cpp src/DeckGridWidget.cpp src/InstallationRenderControls.cpp src/GasInjectorControls.cpp)
     target_link_libraries(editor-installation-render-mode-test PRIVATE
         editor-simulation editor::document editor::imgui)
     add_test(NAME editor-installation-render-mode COMMAND editor-installation-render-mode-test)

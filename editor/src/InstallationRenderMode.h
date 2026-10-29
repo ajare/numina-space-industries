@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nsi/core/Installation.h>
+#include <array>
 #include <optional>
 #include <vector>
 
@@ -10,7 +11,25 @@ namespace nsi::systems { class CellAtmosphereTransport; }
 namespace station::editor {
 // Editor view state only: never serialized into an Installation or fed back
 // into the simulation, and independent of the Cell/Wall/Sector editing mode.
-enum class InstallationRenderMode { Default, Thermal, Pressure, Structure };
+enum class InstallationRenderMode { Default, Thermal, Pressure, Structure, Oxygen, Nitrogen, CarbonDioxide, WaterVapour };
+enum class AtmosphereRenderQuantity { Mass, Percentage };
+// Species order matches the native gas inventory: O2, N2, CO2, water vapour.
+std::optional<std::size_t> atmosphereRenderComponent(InstallationRenderMode);
+struct ComponentColourScale {
+    float minimum{}, reference{}, maximum{};
+    bool valid() const;
+};
+struct AtmosphereRenderSettings {
+    AtmosphereRenderQuantity quantity=AtmosphereRenderQuantity::Percentage;
+    std::array<ComponentColourScale,4> mass{{{0,3,6},{0,11,22},{0,0.01f,0.1f},{0,0.1f,0.3f}}};
+    std::array<ComponentColourScale,4> percentage{{{0,21,100},{0,78,100},{0,0.04f,1},{0,1,10}}};
+    ComponentColourScale& scale(std::size_t component) {
+        return quantity==AtmosphereRenderQuantity::Mass ? mass.at(component) : percentage.at(component);
+    }
+    const ComponentColourScale& scale(std::size_t component) const {
+        return quantity==AtmosphereRenderQuantity::Mass ? mass.at(component) : percentage.at(component);
+    }
+};
 
 struct ThermalColourScale {
     float minimumC = -273.0f;
@@ -28,6 +47,7 @@ struct InstallationRenderSettings {
     InstallationRenderMode mode = InstallationRenderMode::Default;
     ThermalColourScale thermal;
     PressureColourScale pressure;
+    AtmosphereRenderSettings atmosphere;
     bool forceArrows=false;
     float forceHalfLengthN=10;
 };
@@ -46,6 +66,11 @@ SectorColour unresolvedGasColour();
 // Values outside the scale saturate; invalid scales/temperatures have no colour.
 std::optional<SectorColour> thermalColour(double temperatureC, const ThermalColourScale&);
 std::optional<SectorColour> pressureColour(double pressureKPa, const PressureColourScale&);
+std::optional<SectorColour> componentColour(double value, const ComponentColourScale&);
+// Mass remains observable even in unresolved gas; percentage is wet mole %,
+// includes water vapour, and is unavailable for unresolved/empty gas.
+std::optional<double> atmosphereComponentValue(const std::array<double,4>& massKg,
+    std::size_t component, AtmosphereRenderQuantity, bool resolvedGas);
 // One colour per Sector on the requested Level, resolved from stable runtime
 // atmosphere ids (not snapshot order or Sector names). Missing data uses Default.
 std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation&,
