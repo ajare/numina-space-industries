@@ -3,12 +3,13 @@
 `station::NativeThermalSolver` (`<station/NativeThermal.h>`) extends the
 [finite-capacity body/contact boundary](native-thermal-api.md). It does **not**
 select a playback backend, replace geometry paths yet, alter standalone
-compartments, enable provisional material defaults or implement cavities.
+compartments or enable provisional material defaults. The #30
+[diffuse radiation extension](diffuse-radiation.md) now supplies real cavities.
 [ADR-0007](adr/0007-native-structural-thermal-contract.md) and #22 remain the
 contract. Integration/whole-playback rollback is #29, actual cavity physics is
 #30, and performance/default rollout remains #35. Public namespaces/targets,
-YAML and `local-structure-v1-candidate` / `C1-v1-provisional` revisions remain
-unchanged.
+YAML and `C1-v1-provisional` presets remain unchanged; the model revision is now
+`local-structure-v2-cavity-candidate`.
 
 ## Inputs, units and publication
 
@@ -80,8 +81,11 @@ low-rank operations. They must allocate nothing, return finite values, leave
 detached gas untouched, and have no committed state changes. `freeze()` returning
 false refuses that attempt. The callback contract is trusted, like contact
 ownership: this layer does not prove passivity of arbitrary external code.
-The fixture exercises a conservative eliminated pair operator; it is **not**
-#30's diffuse cavity/portal implementation or its acceptance evidence.
+The original pair fixture remains; real cavity fixtures and their sparse
+operator/independent portal audit are documented in [diffuse radiation](diffuse-radiation.md).
+Affine sources may be signed to express exact nonlinear offsets. Operators can
+attach to the shared work budget, report failed matrix actions through
+`healthy()`, and supply an independent `boundaryPowerW()` audit.
 
 After a linear solve, coefficients are recomputed at the new trial and the
 nonlinear node energy-equation residual is checked separately from CG's flux
@@ -109,8 +113,8 @@ is bounded per attempted interval; coefficient freezes and CG iterations share
 one deterministic whole-call work budget across all intervals/refinements. Each
 freeze costs one work unit (including fixed operator evaluations), each CG
 iteration costs one. Callback implementations must themselves bound their
-algebraic solve work; #30 must account for that work in its own deterministic
-budget. Default limits are 32 nonlinear iterations, 256 CG iterations, 12
+algebraic solve work; `DiffuseRadiation` charges all nested field solves and
+iterations to this same whole-call counter. Default limits are 32 nonlinear iterations, 256 CG iterations, 12
 refinements, 100,000 whole-call units. Exhaustion, representational time failure,
 invalid Kelvin or energy residual failure refuses the whole call. There is no
 wall-clock criterion, dropped heat/time or automatic fidelity reduction.

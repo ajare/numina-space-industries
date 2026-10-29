@@ -155,13 +155,18 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
         structure_.bodies=topology.bodies;checkpointBodies_=structure_.bodies;
         structuralGas_.resize(fluid_.states().size());
         std::vector<station::ThermalGasContact> gasContacts;
-        std::vector<station::ThermalRadiationContact> radiation;
+        std::vector<station::ThermalRadiationContact> radiation,cavitySurfaces;
+        std::vector<station::ThermalRadiationPortal> portals;
+        std::map<StructuralOwner,std::size_t> ownerCavities(topology.cavityOwners.begin(),topology.cavityOwners.end());
         std::map<StructuralOwner,std::size_t> ownerCells;
         if (geometry_.gasOwners.size()!=fluid_.states().size()) throw std::invalid_argument("Structural gas owner map missing");
         for (std::size_t i=0;i<geometry_.gasOwners.size();++i) ownerCells.emplace(geometry_.gasOwners[i],i);
         for (const auto& assembly:topology.assemblies) for (unsigned side=0;side<2;++side) {
             const auto body=assembly.bodies[side];
             if (const auto& owner=assembly.owners[side]) {
+                const auto material=assembly.surfaceMaterial(side);
+                cavitySurfaces.push_back({body,station::ThermalRadiationBoundary::Cavity,ownerCavities.at(*owner),
+                    assembly.areaM2,material.emissivity,material.absorptivity});
                 const auto found=ownerCells.find(*owner);
                 if (found!=ownerCells.end()) gasContacts.push_back({body,found->second,assembly.areaM2,
                     {assembly.material.gasFilm.continuumWPerM2K,assembly.material.gasFilm.accommodation}});
@@ -172,7 +177,21 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
         }
         structuralExterior_.resize(radiation.size());solarWeights_.reserve(radiation.size());
         for (const auto& face:radiation) solarWeights_.push_back(face.absorptivity*face.areaM2/4.0);
-        if (!structure_.bodies.empty()) structuralSolver_.emplace(structure_.bodies.size(),structuralGas_.size(),topology.contacts,std::move(gasContacts),std::move(radiation));
+        for (const auto& opening:topology.openings) if (!opening.door) {
+            const auto& a=opening.owners[0];const auto& b=opening.owners[1];
+            if (!a && !b) continue;
+            const auto first=ownerCavities.at(a ? *a : *b);
+            const auto second=a && b ? std::optional(ownerCavities.at(*b)) : std::nullopt;
+            const auto space=geometry_.thermal.hull ? geometry_.thermal.hull->sinkTemperatureC+station::StationCelsiusOffset : 3;
+            portals.push_back({first,second,opening.areaM2,space});
+        }
+        if (!structure_.bodies.empty()) {
+            structuralRadiation_.emplace(structure_.bodies.size()+structuralGas_.size(),topology.cavityCount,
+                cavitySurfaces,std::move(portals));
+            radiation.insert(radiation.end(),cavitySurfaces.begin(),cavitySurfaces.end());
+            structuralSolver_.emplace(structure_.bodies.size(),structuralGas_.size(),topology.contacts,
+                std::move(gasContacts),std::move(radiation),topology.cavityCount);
+        }
         for (const auto& body:structure_.bodies) structure_.startingEnergyJ+=body.energyJ();
         for (const auto& state:fluid_.states()) structure_.startingEnergyJ+=state.q[6];
         structure_.currentEnergyJ=structure_.startingEnergyJ;
@@ -373,7 +392,7 @@ void CellAtmosphereTransport::structuralStep(double seconds,double midpoint,std:
         exterior.absorbedSolarW=solarWeights_[i]*irradiance*exposure;
     }
     station::NativeThermalBudget budget;budget.maxWork=maxWork;
-    if (!structuralSolver_->solve(structure_.bodies,structuralGas_,structuralExterior_,seconds,budget))
+    if (!structuralSolver_->solve(structure_.bodies,structuralGas_,structuralExterior_,seconds,budget,&*structuralRadiation_))
         throw std::runtime_error(std::string(structuralSolver_->diagnostic()));
     const auto& report=structuralSolver_->report();auto& work=structure_.work;
     work.work+=report.work;work.intervals+=report.intervals;work.refinements+=report.refinements;

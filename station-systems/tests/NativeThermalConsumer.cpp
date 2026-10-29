@@ -1,4 +1,5 @@
 #include <station/NativeThermal.h>
+#include <station/DiffuseRadiation.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -133,6 +134,77 @@ int main() {
     NativeThermalBudget refuse;refuse.maxNonlinearIterations=0;
     require(!sun.solve(hot,{},solar,1,refuse),"nonlinear exhaustion refuses time");
     near(sun.heatJ()[0],10,1e-10,"nonlinear refusal retains output");
+    // Real diffuse enclosures: analytic fields, reciprocity and implicit heat.
+    constexpr double sigma=5.670374419e-8;
+    std::vector<ThermalRadiationContact> faces{{0,ThermalRadiationBoundary::Cavity,0,10,.8,0},
+        {1,ThermalRadiationBoundary::Cavity,1,5,.6,0}};
+    DiffuseRadiation cavities(2,5,faces,{{0,1,2,3},{2,3,1,3},{4,std::nullopt,1,3},{0,0,10000,3}});
+    std::array<long double,2> temperatures{400,200},diag{},source{},power{};
+    require(cavities.freeze(temperatures,diag,source),"coupled cavity freeze");
+    const double e0=sigma*std::pow(400.,4),e1=sigma*std::pow(200.,4);
+    const double q=(e0-e1)/(1./8+1./2+1./3);
+    near(*cavities.trialIrradiance(0),e0-q/8,1e-10,"hot cavity analytic irradiance");
+    near(*cavities.trialIrradiance(1),e1+q/3,1e-10,"cold cavity analytic irradiance");
+    near(cavities.trialPortalPowerW(0),q,1e-10,"reciprocal portal booked once");
+    near(cavities.trialPortalPowerW(3),0,0,"same Sector portal no sink");
+    require(!cavities.trialIrradiance(2) && !cavities.trialIrradiance(3),"unanchored connected fields unavailable");
+    near(*cavities.trialIrradiance(4),sigma*81,1e-14,"boundary-only field available");
+    cavities.apply(temperatures,power);
+    near(source[0]-power[0],-q,1e-9,"surface to portal hot balance");
+    near(source[1]-power[1],q,1e-9,"surface to portal cold balance");
+    std::array<long double,2> x{1,0},y{0,1},lx{},ly{};
+    cavities.apply(x,lx);cavities.apply(y,ly);
+    near(lx[1],ly[0],1e-12,"frozen eliminated cavity operator symmetric");
+    NativeThermalSolver coupled(2,0,{}, {},faces,5);
+    require(coupled.solve(pair,{},{},.1,{},&cavities),"implicit coupled cavities");audit(coupled);
+    require(coupled.heatJ()[0]<0 && coupled.heatJ()[1]>0,"radiation at every gas pressure including absent gas");
+    NativeThermalBudget cavityLimit;cavityLimit.maxWork=1;
+    const auto committed=coupled.heatJ()[0];
+    require(!coupled.solve(pair,{},{},1,cavityLimit,&cavities),"nested cavity work budget refusal");
+    near(coupled.heatJ()[0],committed,0,"cavity refusal retains publication");
+    require(coupled.report().work==1,"nested work never exceeds whole-call budget");
+    std::vector<ThermalRadiationContact> enclosure{{0,ThermalRadiationBoundary::Cavity,0,100,.8,0}};
+    DiffuseRadiation aperture(1,1,enclosure,{{0,std::nullopt,1.8,3}});
+    std::array<long double,1> room{300},rd{},rs{};
+    require(aperture.freeze(room,rd,rs),"aperture freeze");
+    const double limit=1.8*sigma*(std::pow(300.,4)-81);
+    const auto loss=aperture.trialPortalPowerW(0);
+    near(loss,limit*80/(80+1.8),1e-9,"simple grey enclosure analytic aperture loss");
+    require(loss>0 && loss<limit,"black aperture bound uses clear area not full room area");
+    NativeThermalSolver opening(1,0,{}, {},enclosure,1);
+    std::array roomBody{ThermalBody({1000,300})};
+    require(opening.solve(roomBody,{},{},.1,{},&aperture),"implicit aperture loss");audit(opening);
+    DiffuseRadiation closed(1,1,enclosure,{{0,0,1e6,3}});
+    require(opening.solve(roomBody,{},{},.1,{},&closed),"closed isothermal enclosure");
+    near(opening.heatJ()[0],0,1e-10,"closed isothermal exchange zero");
+    auto reflecting=enclosure;reflecting[0].emissivity=0;
+    DiffuseRadiation mirror(1,1,reflecting,{});
+    require(mirror.freeze(room,rd,rs) && !mirror.trialIrradiance(0),"reflecting faces neither absorb nor invent temperature");
+    tracking=true;
+    const auto cavitySuccess=coupled.solve(pair,{},{},1,{},&cavities);
+    const auto apertureSuccess=opening.solve(roomBody,{},{},1,{},&aperture);
+    tracking=false;
+    require(cavitySuccess && apertureSuccess && allocations==0,"nested sparse radiation allocates nothing on success");
+    // A longer sparse portal chain has the series radiative resistance of
+    // its apertures; no dense surface pair expansion is needed.
+    auto chainFaces=faces;chainFaces[1].cavity=11;
+    std::vector<ThermalRadiationPortal> chainPortals;
+    for(std::size_t i=0;i<11;++i) chainPortals.push_back({i,i+1,2,3});
+    DiffuseRadiation chain(2,12,chainFaces,chainPortals);
+    require(chain.freeze(temperatures,diag,source),"sparse chain fields");
+    near(chain.trialPortalPowerW(5),(e0-e1)/(1./8+11./2+1./3),1e-9,"serial portal resistance");
+    NativeThermalSolver chainSolver(2,0,{}, {},chainFaces,12);
+    require(chainSolver.solve(pair,{},{},.1,{},&chain),"implicit sparse portal chain");audit(chainSolver);
+    auto apertureCooling=[&](double interval) {
+        DiffuseRadiation field(1,1,enclosure,{{0,std::nullopt,1.8,0}});
+        NativeThermalSolver solver(1,0,{}, {},enclosure,1);
+        std::array inventory{ThermalBody({100,1000})};
+        NativeThermalBudget options;options.maxIntervalSeconds=interval;
+        require(solver.solve(inventory,{},{},.1,options,&field),"aperture nonlinear refinement");audit(solver);
+        return solver.temperatureK()[0];
+    };
+    const auto apertureExact=std::pow(std::pow(1000.,-3)+3*sigma*(80*1.8/(80+1.8))*.1/100,-1./3);
+    require(std::abs(apertureCooling(.025)-apertureExact)<std::abs(apertureCooling(.1)-apertureExact),"grey enclosure time refinement converges");
     // Algebraic extension has no zero-capacity cavity node.
     NativeThermalSolver algebraic(2,0,{}, {},{{0,ThermalRadiationBoundary::Cavity,0,1,1,0}},1);
     PairOperator op;

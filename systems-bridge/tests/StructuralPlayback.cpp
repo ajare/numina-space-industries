@@ -57,6 +57,46 @@ void check() {
     for (auto& body:tallGeometry.structure->bodies) body=station::ThermalBody({body.capacityJPerK(),250});
     CellAtmosphereTransport tallRuntime(tallGeometry,CellThermalMode::LocalStructure);advance(tallRuntime,0.1);audit(tallRuntime);
     for (const auto& sector:tallRuntime.sectors()) require(sector.ledger.conductedHeatJ<0,"Tall/offset gas contact lost owner");
+    require(tallGeometry.structure->cavityCount==tallRuntime.sectors().size(),"Tall claims created extra cavity fields");
+    // Isolate radiation from films/conduction/exterior faces, then prove a
+    // closed enclosure redistributes heat without manufacturing a space sink.
+    auto radiationOnly=[](const I& installation) {
+        auto g=expandCellAtmosphere(installation,true);
+        for (auto& cell:g.mesh.cells) cell.initial={};
+        g.structure->contacts.clear();
+        for (auto& assembly:g.structure->assemblies) {
+            if (!assembly.owners[0] || !assembly.owners[1]) assembly.material.secondSide.emissivity=0;
+        }
+        return g;
+    };
+    auto sealed=radiationOnly(room);
+    std::size_t coldSurface=0;
+    for (const auto& a:sealed.structure->assemblies) for (unsigned side=0;side<2;++side)
+        if (a.owners[side]) coldSurface=a.bodies[side];
+    auto& coldBody=sealed.structure->bodies[coldSurface];coldBody=station::ThermalBody({coldBody.capacityJPerK(),200});
+    CellAtmosphereTransport sealedRoom(sealed,CellThermalMode::LocalStructure);
+    const auto sealedStart=solidEnergy(sealedRoom);
+    advance(sealedRoom,.1);audit(sealedRoom);
+    require(sealedRoom.structure().bodies[coldSurface].temperatureK()>200,"Closed cavity failed to warm cold surface");
+    require(std::abs(solidEnergy(sealedRoom)-sealedStart)<1e-7 && std::abs(sealedRoom.structure().exteriorHeatJ)<1e-12,"Closed cavity invented exterior sink");
+    I opaque(2,1);opaque.setHullType(I::HullType::BareSkin);opaque.setPartitionType(std::nullopt);
+    opaque.toggleWall(0,opaque.level(0).verticalWall(1,0));
+    auto isolated=radiationOnly(opaque);
+    require(isolated.structure->cavityCount==2,"Opaque unmodelled partition lost cavity boundary");
+    for (const auto& a:isolated.structure->assemblies) for (unsigned side=0;side<2;++side) if (a.owners[side]) {
+        auto& b=isolated.structure->bodies[a.bodies[side]];
+        b=station::ThermalBody({b.capacityJPerK(),a.owners[side]->worldX==0?400.:200.});
+    }
+    CellAtmosphereTransport opaqueRooms(isolated,CellThermalMode::LocalStructure);
+    const auto isolatedBodies=opaqueRooms.structure().bodies;
+    advance(opaqueRooms,.1);audit(opaqueRooms);
+    for (std::size_t i=0;i<isolatedBodies.size();++i)
+        require(std::abs(opaqueRooms.structure().bodies[i].energyJ()-isolatedBodies[i].energyJ())<1e-9,"Reflecting opaque partition became portal");
+    I breached=room;breached.toggleWall(0,breached.level(0).verticalWall(0,0));
+    auto apertureGeometry=radiationOnly(breached);
+    CellAtmosphereTransport breachedRoom(apertureGeometry,CellThermalMode::LocalStructure);
+    advance(breachedRoom,.1);audit(breachedRoom);
+    require(breachedRoom.structure().exteriorHeatJ<0 && -breachedRoom.structure().exteriorHeatJ<.1*6*5.670374419e-8*std::pow(293.15,4),"Static breach radiation missing or exceeds black aperture bound");
     // Unresolved gas is retained, not replaced by an invented solid/EOS capacity.
     auto trace=empty;trace.mesh.cells[0].initial=station::makeCellFluidState({0,1e-25,0,0},293.15);
     CellAtmosphereTransport unresolved(trace,CellThermalMode::LocalStructure);const auto conserved=unresolved.fluid().states()[0].q;
@@ -122,6 +162,7 @@ void check() {
     room.deserialize(yaml);
     CellAtmosphereTransport unmodelled(room,CellThermalMode::LocalStructure);
     require(unmodelled.fluid().states().empty() && !unmodelled.structure().bodies.empty(),"Interior Void lost structure");
+    require(unmodelled.geometry().structure->cavityCount==1,"Interior Void preset lost its radiation cavity");
     const auto initial=solidEnergy(unmodelled);advance(unmodelled,0.1);require(solidEnergy(unmodelled)<initial,"Gas-free structure did not radiate");audit(unmodelled);
 }
 }

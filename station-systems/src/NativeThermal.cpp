@@ -35,9 +35,11 @@ bool NativeThermalSolver::freeze(ThermalAlgebraicOperator* op) {
     std::fill(diagonal_.begin(),diagonal_.end(),0); std::fill(source_.begin(),source_.end(),0);
     if(op) {
         std::fill(opDiagonal_.begin(),opDiagonal_.end(),0); std::fill(opSource_.begin(),opSource_.end(),0);
-        if(!op->freeze(guess_,opDiagonal_,opSource_)) return false;
+        if(!op->freeze(guess_,opDiagonal_,opSource_)) {
+            diagnostic_="thermal algebraic field solve/work budget exhausted";return false;
+        }
         for(std::size_t i=0;i<capacity_.size();++i) {
-            if(!valid(opDiagonal_[i]) || !valid(opSource_[i]) ||
+            if(!valid(opDiagonal_[i]) || !std::isfinite(opSource_[i]) ||
                 (capacity_[i]==0 && (opDiagonal_[i]!=0 || opSource_[i]!=0))) return false;
             diagonal_[i]=opDiagonal_[i]; source_[i]=opSource_[i];
         }
@@ -72,12 +74,14 @@ bool NativeThermalSolver::freeze(ThermalAlgebraicOperator* op) {
         source_[c.body]+=g*s+b.absorbedSolarW;
     }
     for(std::size_t i=0;i<capacity_.size();++i)
-        if(!valid(diagonal_[i]) || !valid(source_[i])) return false;
+        if(!valid(diagonal_[i]) || !std::isfinite(source_[i])) return false;
     return true;
 }
-void NativeThermalSolver::apply(std::span<const long double> x,std::span<long double> out,ThermalAlgebraicOperator* op) {
+bool NativeThermalSolver::apply(std::span<const long double> x,std::span<long double> out,ThermalAlgebraicOperator* op) {
     std::fill(out.begin(),out.end(),0);
-    if(op) op->apply(x,out);
+    if(op) { op->apply(x,out); if(!op->healthy()) {
+        diagnostic_="thermal algebraic field solve/work budget exhausted";return false;
+    } }
     std::size_t k=0;
     auto edge=[&](std::size_t a,std::size_t b) {
         const auto q=conductance_[k++]*(x[a]-x[b]); out[a]+=q; out[b]-=q;
@@ -85,13 +89,14 @@ void NativeThermalSolver::apply(std::span<const long double> x,std::span<long do
     for(const auto& c:solid_) edge(c.a,c.b);
     for(const auto& c:gas_) edge(c.body,bodies_+c.gasCell);
     for(std::size_t j=0;j<radiation_.size();++j) out[radiation_[j].body]+=radiationG_[j]*x[radiation_[j].body];
+    return true;
 }
 bool NativeThermalSolver::interval(double dt,ThermalAlgebraicOperator* op) {
     start_=current_; guess_=start_;
     for(std::size_t outer=0;outer<budget_.maxNonlinearIterations;++outer) {
         ++report_.nonlinearIterations;
         if(!freeze(op)) return false;
-        apply(start_,scratch_,op);
+        if(!apply(start_,scratch_,op)) return false;
         for(std::size_t i=0;i<capacity_.size();++i) {
             rhs_[i]=dt*(source_[i]-scratch_[i]); delta_[i]=0;
             residual_[i]=rhs_[i];
@@ -106,7 +111,7 @@ bool NativeThermalSolver::interval(double dt,ThermalAlgebraicOperator* op) {
             if(err<=1e-11L+1e-18L*scale) {converged=true;break;}
             if(it==budget_.maxLinearIterations || !tick()) return false;
             ++report_.linearIterations;
-            apply(direction_,product_,op);
+            if(!apply(direction_,product_,op)) return false;
             for(std::size_t i=0;i<capacity_.size();++i) product_[i]=capacity_[i]*direction_[i]+dt*product_[i];
             const auto denom=dot(direction_,product_);
             if(!(denom>0) || !std::isfinite(denom)) return false;
@@ -127,7 +132,7 @@ bool NativeThermalSolver::interval(double dt,ThermalAlgebraicOperator* op) {
             linearResidual=std::max(linearResidual,std::abs(residual_[i]));
         }
         if(!freeze(op)) return false;
-        apply(guess_,scratch_,op);
+        if(!apply(guess_,scratch_,op)) return false;
         long double error=0,scale=0;
         for(std::size_t i=0;i<capacity_.size();++i) {
             power_[i]=source_[i]-scratch_[i];
@@ -140,7 +145,9 @@ bool NativeThermalSolver::interval(double dt,ThermalAlgebraicOperator* op) {
             long double boundary=0;
             if(op) {
                 op->apply(guess_,scratch_);
-                for(std::size_t i=0;i<capacity_.size();++i) boundary+=dt*(opSource_[i]-scratch_[i]);
+                if(!op->healthy()) return false;
+                if(const auto p=op->boundaryPowerW()) boundary+=dt*(*p);
+                else for(std::size_t i=0;i<capacity_.size();++i) boundary+=dt*(opSource_[i]-scratch_[i]);
             }
             std::size_t e=0;
             for(std::size_t j=0;j<radiation_.size();++j) {
@@ -167,6 +174,11 @@ bool NativeThermalSolver::interval(double dt,ThermalAlgebraicOperator* op) {
 bool NativeThermalSolver::solve(std::span<const ThermalBody> bodies,std::span<const NativeThermalGas> gases,
     std::span<const NativeThermalExterior> exterior,double seconds,NativeThermalBudget budget,ThermalAlgebraicOperator* op) {
     report_={}; boundaryHeat_=0; diagnostic_="invalid thermal input"; budget_=budget;
+    if(op) op->setWorkBudget(&report_.work,budget.maxWork);
+    struct DetachWork {
+        ThermalAlgebraicOperator* op;
+        ~DetachWork() { if(op) op->setWorkBudget(nullptr,0); }
+    } detach{op};
     if(bodies.size()!=bodies_ || gases.size()!=gases_ || !valid(seconds) || seconds<=0 ||
         !valid(budget.maxIntervalSeconds) || budget.maxIntervalSeconds<=0 || budget.maxIntervalSeconds>0.1) return false;
     std::size_t count=0;

@@ -61,10 +61,11 @@ StructuralTopology expandStructuralTopology(const I& installation,const Structur
         }
     }
     limit(claims,limits.maxClaimedCells,"claimed-Cell");
-    const auto claimBytes=mul(claims,192); // map node + validation claims, conservative payload allowance
+    const auto claimBytes=mul(claims,320); // map node + validation claims, conservative payload allowance
     limit(claimBytes,limits.maxStorageBytes,"storage-byte");
     installation.validate();
     std::map<Point,Owner> occupied;
+    std::map<const I::Sector*,std::size_t> cavities;
     for (std::size_t base=0;base<installation.levelCount();++base) {
         const auto& l=installation.level(base);
         for (std::size_t c=0;c<l.cellCount();++c) {
@@ -72,9 +73,12 @@ StructuralTopology expandStructuralTopology(const I& installation,const Structur
             if (s.type!=I::SectorType::Interior) continue;
             const auto x=std::int64_t(l.offsetX())+std::int64_t(c%l.width());
             const auto y=std::int64_t(l.offsetY())+std::int64_t(c/l.width());
+            const auto cavity=cavities.emplace(&s,cavities.size()).first;
+            out.cavityOwners.push_back({Owner{base,x,y},cavity->second});
             for (int h=0;h<s.height;++h) occupied.emplace(Point{x,y,std::int64_t(base)+h},Owner{base,x,y});
         }
     }
+    out.cavityCount=cavities.size();
     const auto hull=core::nativeThermalSpec(*installation.hullType());
     const auto partition=installation.partitionType() ? std::optional(core::nativeThermalSpec(*installation.partitionType())) : std::nullopt;
     // Walk canonical faces once: shared faces are owned by the negative Cell.

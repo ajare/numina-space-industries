@@ -17,7 +17,7 @@ template<class F> void rejects(F f) {
     throw std::runtime_error("Invalid thermal body/contact accepted");
 }
 void bodies() {
-    require(NativeThermalModelRevision=="local-structure-v1-candidate");
+    require(NativeThermalModelRevision=="local-structure-v2-cavity-candidate");
     ThermalBody body({200});near(body.temperatureK(),293.15);near(body.energyJ(),200*293.15);
     const auto restored=ThermalBody::fromCarriedEnergy(200,body.energyJ());near(restored.temperatureK(),body.temperatureK());
     body.addHeat(200);near(body.temperatureK(),294.15);

@@ -1,6 +1,7 @@
 #pragma once
 #include <station/ThermalBody.h>
 #include <vector>
+#include <optional>
 
 namespace station {
 // Inventory is supplied by the gas owner, never manufactured by this solver.
@@ -26,15 +27,22 @@ struct NativeThermalReport {
     // Max accepted residuals, plus the last nonlinear trial (also on refusal).
     double nonlinearResidualJ{}, lastTrialNonlinearResidualJ{}, fluxResidualJ{}, energyResidualJ{}, exteriorHeatJ{};
 };
-// Future diffuse cavity implementation: freeze a passive affine operator
+// Algebraic radiation extension: freeze a passive affine operator
 // power = source - L*T at the supplied iterate. L must be symmetric positive
-// semidefinite, with nonpositive off-diagonals; source/boundaries passive.
+// semidefinite, with nonpositive off-diagonals. Affine sources may be signed
+// (nonlinear radiation offsets); the converged physical boundary is passive.
 // Nodes are bodies then gas, NEVER zero-capacity irradiance nodes. Implementations
 // retain sparse cavity fields internally, allocate nothing and have no committed
 // side effects. False refuses this attempt. Calls count toward whole-call work.
 class ThermalAlgebraicOperator {
 public:
     virtual ~ThermalAlgebraicOperator() = default;
+    // Nested algebraic iterations share the solver's whole-call work counter.
+    virtual void setWorkBudget(std::size_t*, std::size_t) {}
+    // Checked after every matrix action; false refuses without publication.
+    virtual bool healthy() const { return true; }
+    // Optional independent boundary audit at the last frozen physical trial.
+    virtual std::optional<long double> boundaryPowerW() const { return std::nullopt; }
     virtual bool freeze(std::span<const long double> temperatureK,
         std::span<long double> diagonal, std::span<long double> sourceW) = 0;
     virtual void apply(std::span<const long double> x, std::span<long double> Lx) const = 0;
@@ -57,7 +65,7 @@ public:
 private:
     bool tick();
     bool freeze(ThermalAlgebraicOperator*);
-    void apply(std::span<const long double>, std::span<long double>, ThermalAlgebraicOperator*);
+    bool apply(std::span<const long double>, std::span<long double>, ThermalAlgebraicOperator*);
     bool interval(double, ThermalAlgebraicOperator*);
     std::size_t bodies_, gases_;
     std::vector<ThermalSolidContact> solid_;

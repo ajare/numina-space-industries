@@ -1,4 +1,5 @@
 #pragma once
+#include <station/DiffuseRadiation.h>
 #include <nsi/systems/Atmosphere.h>
 #include <station/CellFluid.h>
 #include <station/CellThermal.h>
@@ -120,6 +121,7 @@ private:
     CellThermalMode mode_;
     CellStructuralThermalState structure_;
     std::optional<station::NativeThermalSolver> structuralSolver_;
+    std::optional<station::DiffuseRadiation> structuralRadiation_;
     std::vector<station::ThermalBody> checkpointBodies_;
     std::vector<station::NativeThermalGas> structuralGas_;
     std::vector<station::NativeThermalExterior> structuralExterior_;

@@ -4,8 +4,10 @@
 `<nsi/systems/StructuralTopology.h>` is an **opt-in candidate**, consuming #26's
 `C1-v1-provisional` material presets and `station::ThermalBody` API. It implements
 geometry expansion under [ADR-0007](adr/0007-native-structural-thermal-contract.md),
-not the solver (#28), playback integration/rollback (#29), radiation cavities
-(#30), Door pose changes (#31), or default rollout (#35). Existing bridge APIs,
+not the solver (#28), playback integration/rollback (#29), Door pose changes
+(#31), or default rollout (#35). #30 adds a source-Cell-to-geometric-Sector
+`cavityOwners` map and `cavityCount` (including Interior Void presets), consumed
+by the [diffuse radiation extension](diffuse-radiation.md). Existing bridge APIs,
 standalone compartments, native playback defaults and YAML are unchanged.
 
 ```cpp

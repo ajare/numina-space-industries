@@ -121,8 +121,9 @@ labelled diagnostic total for gas pressure, sound speed or composition.
 
 ## Revisions, compatibility and tests
 
-`station::NativeThermalModelRevision = "local-structure-v1-candidate"` identifies
-this body/contact contract. Future integrated snapshots/benchmarks must publish
+`station::NativeThermalModelRevision = "local-structure-v2-cavity-candidate"`
+identifies the current body/contact and [diffuse cavity](diffuse-radiation.md)
+contract (the original #26 revision was `local-structure-v1-candidate`). Future integrated snapshots/benchmarks must publish
 selected backend plus model and preset revision separately from the save schema.
 The calibration executable prints both candidate revision constants now. These
 constants do **not** claim current playback uses the candidate model. Backend

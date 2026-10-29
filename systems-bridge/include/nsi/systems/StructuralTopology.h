@@ -62,6 +62,9 @@ struct StructuralTopology {
     std::vector<station::ThermalBody> bodies;
     std::vector<station::ThermalSolidContact> contacts;
     std::vector<StructuralOpening> openings;
+    // All geometric Interior source Cells, including Void atmosphere presets.
+    std::vector<std::pair<StructuralOwner,std::size_t>> cavityOwners;
+    std::size_t cavityCount{};
     std::size_t predictedStorageBytes{}; // checked conservative payload + scratch bound
 };
 // Opt-in Reset-only candidate. No solver, gas construction or playback changes.
