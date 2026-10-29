@@ -10,7 +10,7 @@ void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSa
     const std::function<void()>& drawConfiguration, std::span<const PressureSample> pressureHistory,
     std::span<const AtmosphereSample> atmosphereHistory) {
     if (!state.hasAtmosphere) ImGui::TextUnformatted("No atmosphere compartment; no thermal links or Hull connection.");
-    else if (state.isolated()) ImGui::TextUnformatted("Thermally isolated");
+    else if (state.isolated()) ImGui::TextUnformatted("Conductively isolated (no thermal links)");
     if (!ImGui::BeginTabBar("SectorSystems")) return;
     if (ImGui::BeginTabItem("Atmosphere")) {
         drawSectorAtmosphere(state,pressureHistory,atmosphereHistory);
@@ -25,10 +25,11 @@ void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSa
             ImGui::Text("Starting thermal energy: %.3f kJ", air.startingEnergyKJ);
             ImGui::Text("Heat capacity: %.3f kJ/K (starting)", air.startingThermalCapacityKJPerK);
             if (air.inventoryThermodynamics)
-                ImGui::TextUnformatted("Door-connected gas: inventory-dependent capacity; energy referenced to absolute zero.");
+                ImGui::TextUnformatted("Gas: inventory-dependent capacity; energy referenced to absolute zero.");
             ImGui::Separator();
             ImGui::TextUnformatted("Live simulation values");
-            ImGui::Text("Temperature: %.3f C", air.temperatureC);
+            if (air.spatial && !air.resolvedGas) ImGui::TextUnformatted("Temperature: unavailable (vacuum/unresolved gas)");
+            else ImGui::Text("Temperature: %.3f C%s",air.temperatureC,air.spatial ? " (capacity-weighted)" : "");
             ImGui::Text("Current heat capacity: %.6g kJ/K",air.thermalCapacityKJPerK);
             if (!history.empty()) {
                 if (ImPlot::BeginPlot("Temperature — last minute###SectorTemperature", ImVec2(-1,180),
@@ -45,8 +46,12 @@ void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSa
                     ImPlot::EndPlot();
                 }
             } else ImGui::TextUnformatted("Temperature history unavailable.");
-            ImGui::Text("Temperature change: %+.3f C", air.temperatureC - air.startingTemperatureC);
+            if (!air.spatial || air.resolvedGas) ImGui::Text("Temperature change: %+.3f C", air.temperatureC - air.startingTemperatureC);
             ImGui::Text("Thermal energy: %.3f kJ", air.currentEnergyKJ);
+            if (air.spatial) {
+                ImGui::Text("Wind kinetic energy: %.6g kJ",air.kineticEnergyKJ);
+                ImGui::TextWrapped("Spatial advection includes pressure work and kinetic energy; the balance accounts for wind energy separately.");
+            }
             ImGui::TextUnformatted("Last-step heat rates (kW; positive adds heat to this Sector)");
             ImGui::Text("Conduction: %+.6f | Reservoir exchange: %+.6f",
                 air.lastConductedKW, air.lastExchangeIntoCompartmentKW);
@@ -68,7 +73,10 @@ void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSa
         ImGui::Text("Exterior skin: %.2f m2 total", state.skin.totalM2());
         ImGui::Text("Side %.2f | Roof %.2f | Exposed floor underside %.2f m2",
             state.skin.sideM2, state.skin.roofM2, state.skin.floorUndersideM2);
-        if (state.drainSeconds) ImGui::Text("Drain timescale: %.2f s", *state.drainSeconds);
+        const bool noGas=state.atmosphere && (state.atmosphere->thermalCapacityKJPerK<=0
+            || (state.atmosphere->spatial && !state.atmosphere->resolvedGas));
+        if (noGas) ImGui::TextUnformatted("Thermal timescales: unavailable (no resolved gas capacity)");
+        else if (state.drainSeconds) ImGui::Text("Drain timescale: %.2f s", *state.drainSeconds);
         else ImGui::TextUnformatted("Drain timescale: infinite (no Hull link)");
         ImGui::TextWrapped("Timescales are local C/G responses with the other endpoint fixed. Ratio = diffusion / drain; not a prediction of nonlinear Hull cooling.");
         ImGui::TextWrapped("Flow is the last simulation step average, signed outward from this Sector. Before a step it is zero; unavailable without a runtime.");
@@ -81,8 +89,8 @@ void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSa
                 ImGui::Text("Heat flow: %+.6f kW (%s)", q,
                     q > 0 ? "Sector -> neighbour" : q < 0 ? "neighbour -> Sector" : "no net flow");
             } else ImGui::TextUnformatted("Heat flow: unavailable");
-            ImGui::Text("%s timescale: %.2f s", link.hull ? "Drain" : "Diffusion", link.timescaleSeconds);
-            if (!link.hull) {
+            if (!noGas) ImGui::Text("%s timescale: %.2f s", link.hull ? "Drain" : "Diffusion", link.timescaleSeconds);
+            if (!noGas && !link.hull) {
                 if (link.diffusionToDrainRatio) ImGui::Text("Diffusion / drain: %.6f", *link.diffusionToDrainRatio);
                 else ImGui::TextUnformatted("Diffusion / drain: 0 (infinite drain timescale)");
             }

@@ -1,5 +1,6 @@
 #pragma once
 #include "StationSystemsDetail.h"
+#include "station/AtmospherePhase.h"
 namespace station
 {
 	struct GeneratorRampIntegral { double endpointKW{}, meanKW{}; };
@@ -60,18 +61,10 @@ uint64_t stationOutageOccurrencesCompleted(double, double, double, double);
 		StationConnectionLedger::Port forward{}, backward{};
 		double leafKJ{}, hubKJ{};
 	};
-	struct VapourThermalCoupling
-	{
-		double temperatureC{0.0};
-		double condensedKg{0.0};
-	};
 	double solvePassiveExchange(std::vector<PassiveExchangeLeaf>& leaves,
 		double reservoirCapacityKJPerK, double reservoirTemperatureC, double dt);
 	double passiveExchangeHeatKJ(PassiveExchangeLeaf const& leaf, double coupledReservoirTemperatureC);
 	void solveTransportExchange(std::vector<PassiveExchangeLeaf> const& leaves,
 		std::vector<TransportExchange>& ports, double hubCapacity, double hubTemperature,
 		double dt, StationConnectionLedger& connections);
-	VapourThermalCoupling solveVapourThermalCoupling(double capacityKJPerK,
-		double startTemperatureC, double externalHeatKW, double vapourKg,
-		double volumeM3, double dt);
 }

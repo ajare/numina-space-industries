@@ -2,9 +2,11 @@
 #include "InstallationRenderControls.h"
 #include "DeckGridWidget.h"
 #include "SimulationPlayback.h"
+#include <station/StationSystemsRuntime.h>
 #include "station/editor/EditorSession.h"
 #include <nsi/systems/Atmosphere.h>
 #include "imgui.h"
+#include "imgui_internal.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -231,6 +233,52 @@ void doorInput() {
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
     ImGui::DestroyContext();
 }
+void cellRendering() {
+    I scene(2,1);SimulationPlayback playback;playback.reset(scene);auto snapshot=playback.runtime()->snapshot();
+    InstallationRenderSettings settings;settings.mode=InstallationRenderMode::Thermal;
+    snapshot.cellAtmospheres[0].temperatureC=settings.thermal.minimumC;snapshot.cellAtmospheres[1].temperatureC=settings.thermal.maximumC;
+    snapshot.cellAtmospheres[0].pressureKPa=0;snapshot.cellAtmospheres[1].pressureKPa=settings.pressure.maximumKPa;
+    auto colours=cellRenderColours(scene,0,settings,&snapshot);
+    require(colours.size()==2 && colours[0]==SectorColour{0,0,1} && colours[1]==SectorColour{1,0,0},"Cells in one Sector did not get independent temperatures");
+    std::reverse(snapshot.cellAtmospheres.begin(),snapshot.cellAtmospheres.end());
+    require(cellRenderColours(scene,0,settings,&snapshot)==colours,"Cell colours depended on snapshot order");
+    auto invalid=snapshot;for (auto& c:invalid.cellAtmospheres) if (c.gridIndex==0) c.sectorUid++;
+    require(cellRenderColours(scene,0,settings,&invalid)[0]==defaultSectorColour(I::SectorType::Interior),"Stale Cell uid coloured geometry");
+    invalid=snapshot;invalid.atmospheres[0].resolvedGas=false;
+    require(sectorRenderColours(scene,0,settings,&invalid)[0]==defaultSectorColour(I::SectorType::Interior),"Legacy aggregate view fabricated unresolved temperature");
+    for (auto& c:invalid.cellAtmospheres) if (c.gridIndex==0) c.resolvedGas=false;
+    require(cellRenderColours(scene,0,settings,&invalid)[0]==defaultSectorColour(I::SectorType::Interior),"Unresolved gas fabricated temperature colour");
+    settings.mode=InstallationRenderMode::Pressure;
+    require(cellRenderColours(scene,0,settings,&invalid)[0]==SectorColour{0,0,1},"Vacuum pressure lost its colour");
+    auto yaml=scene.serialize();yaml.replace(yaml.find("atmosphere: Earth-like"),std::string("atmosphere: Earth-like").size(),"atmosphere: Void");
+    I absent;absent.deserialize(yaml);
+    const auto fallback=defaultSectorColour(I::SectorType::Interior);
+    require(cellRenderColours(absent,0,settings,&snapshot)==std::vector<SectorColour>{fallback,fallback},"Void preset reused Cell atmosphere");
+    I levels(std::vector<I::Level>{I::Level(1,1),I::Level(1,1)});SimulationPlayback multiple;multiple.reset(levels);
+    auto layered=multiple.runtime()->snapshot();layered.cellAtmospheres[0].temperatureC=settings.thermal.minimumC;
+    layered.cellAtmospheres[1].temperatureC=settings.thermal.maximumC;settings.mode=InstallationRenderMode::Thermal;
+    require(cellRenderColours(levels,0,settings,&layered)[0]==SectorColour{0,0,1}
+        && cellRenderColours(levels,1,settings,&layered)[0]==SectorColour{1,0,0},"Cell temperatures crossed Level identities");
+    ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.DisplaySize={900,700};io.DeltaTime=1/60.0f;
+    unsigned char* pixels;int width,height;io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
+    for (auto& c:snapshot.cellAtmospheres) {c.velocityX=10;c.velocityY=0;}
+    int without=0,with=0;std::string text;
+    for (int frame=0;frame<3;++frame) {
+        ImGui::NewFrame();ImGui::SetNextWindowPos({0,0});ImGui::SetNextWindowSize({700,600});ImGui::Begin("Cell observations");
+        const auto origin=ImGui::GetCursorScreenPos();auto* draw=ImGui::GetWindowDrawList();const auto first=draw->VtxBuffer.Size;
+        ImGui::BeginDisabled();ImGui::LogToBuffer();
+        drawDeckGrid("Native",scene.level(0),EditMode::Cell,std::nullopt,{},false,{},colours,snapshot.cellAtmospheres,0,frame==2);
+        text=ImGui::GetCurrentContext()->LogBuffer.c_str();ImGui::LogFinish();ImGui::EndDisabled();
+        for (int v=0;v<4;++v) require(draw->VtxBuffer[first+v].col==IM_COL32(0,0,255,255),"Widget did not use Cell colour");
+        for (int v=4;v<8;++v) require(draw->VtxBuffer[first+v].col==IM_COL32(255,0,0,255),"Widget used uniform Sector colour");
+        if (frame==1) without=draw->VtxBuffer.Size-first;if (frame==2) with=draw->VtxBuffer.Size-first;
+        ImGui::End();ImGui::Render();io.AddMousePosEvent(origin.x+15,origin.y+15);
+    }
+    require(with>without,"Wind arrows did not render");
+    require(text.find("Pressure")!=std::string::npos && text.find("Wind (")!=std::string::npos && text.find("Wet mole")!=std::string::npos,
+        "Read-only playing grid did not expose Cell observations");
+    ImGui::DestroyContext();
+}
 void gridRendering() {
     ImGui::CreateContext();
     auto& io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize={1024,768}; io.DeltaTime=1/60.0f;
@@ -269,6 +317,6 @@ void gridRendering() {
 }
 }
 int main() {
-    try { scaleMapping(); pressureRendering(); runtimeColours(); doorInput(); gridRendering(); }
+    try { scaleMapping(); pressureRendering(); runtimeColours(); doorInput(); cellRendering(); gridRendering(); }
     catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

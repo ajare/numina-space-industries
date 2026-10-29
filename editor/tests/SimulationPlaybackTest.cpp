@@ -288,6 +288,52 @@ void hullPlayback() {
     const auto blanket=temperature(I::HullType::MultiLayerBlanket);
     require(bare<blanket-1.0 && blanket<20.0,"Playback did not wire Hull drain links");
 }
+void nativeSnapshots() {
+    using namespace station::editor;using I=nsi::core::Installation;
+    I scene(5,5);scene.setHullType(std::nullopt);scene.toggleWall(0,scene.level(0).horizontalWall(2,0));
+    const auto authored=scene;SimulationPlayback p;p.reset(scene);
+    const auto initial=p.runtime()->snapshot();
+    require(initial.cellAtmospheres.size()==25 && initial.atmospheres[0].spatial,"Playback did not use native Cell state");
+    p.togglePlaying();p.update(0.1);const auto snapshot=p.runtime()->snapshot();const auto& a=snapshot.atmospheres[0];
+    double mean=0,minimum=1e300,maximum=0,wind=0;std::array<double,4> mass{};
+    for (const auto& c:snapshot.cellAtmospheres) {
+        require(c.level==0 && c.sectorUid==scene.level(0).sectors()[0].uid,"Cell observation lost geometry identity");
+        mean+=c.pressureKPa/25;minimum=std::min(minimum,c.pressureKPa);maximum=std::max(maximum,c.pressureKPa);
+        wind=std::max(wind,std::hypot(c.velocityX,c.velocityY));for (int g=0;g<4;++g) mass[g]+=c.massKg[g];
+        require(!c.resolvedGas || c.relativeHumidity<=1+1e-8,"Cell humidity is supersaturated");
+    }
+    near(mean,a.pressureKPa);near(minimum,a.minCellPressureKPa);near(maximum,a.maxCellPressureKPa);
+    require(minimum<maximum && wind>0,"Native breach stayed uniformly mixed or produced no wind");
+    near(mass[0],a.oxygenKg);near(mass[1],a.nitrogenKg);near(a.residualKJ,0);
+    near((a.currentEnergyKJ+a.kineticEnergyKJ)*1000,p.runtime()->model().sectors()[0].totalEnergyJ);
+    require(a.oxygenKg<initial.atmospheres[0].oxygenKg,"Absent Wall did not act as breach in playback");
+    require(a.belowPressureLimit==(minimum<a.minPressureKPa),"Sector pressure warning ignored local Cell extrema");
+    require(snapshot.atmospherePathways.size()==1 && snapshot.atmospherePathways[0].id.starts_with("breach-"),"Breach telemetry missing");
+    near(snapshot.atmospherePathways[0].netTransferredKg[0],a.exteriorLostKg[0]);
+    require(scene==authored,"Native playback changed authored geometry");
+    const auto history=p.pressureHistory(a.id);require(history.back().minimumKPa && history.back().maximumKPa,"Cell extrema missing from history");
+    near(*history.back().minimumKPa,minimum);near(*history.back().maximumKPa,maximum);
+    CellPlaybackRuntime refused(scene);const auto before=refused.snapshot();
+    require(!refused.update(0.1,0) && !refused.snapshot().healthy && !refused.diagnostics().empty(),"Native failure was not exposed");
+    require(refused.snapshot().worldTick==0 && refused.snapshot().cellAtmospheres==before.cellAtmospheres,"Failed native update committed snapshot state");
+    require(refused.update(0.1) && refused.snapshot().healthy && refused.diagnostics().empty(),"Native retry failed");
+}
+void failedPlaybackDebt() {
+    using namespace station::editor;using I=nsi::core::Installation;
+    I scene(5,5);scene.setHullType(std::nullopt);const auto g=scene.level(0);const auto door=g.horizontalWall(2,2);
+    for (unsigned x=0;x<5;++x) scene.toggleWall(0,g.horizontalWall(x,2));scene.setDoor(0,door,true);
+    auto yaml=scene.serialize();const auto preset=yaml.find("atmosphere: Earth-like");const auto line=yaml.rfind('\n',preset)+1;
+    yaml.insert(yaml.find('\n',preset),"\n"+std::string(preset-line,' ')+"atmosphereLoads: {occupants: 1, sensibleHeatPerOccupantKW: 1e11}");
+    scene.deserialize(yaml);SimulationPlayback p;p.reset(scene);p.togglePlaying();p.toggleDoor(0,door);
+    bool failed=false;try {p.update(0.1);} catch (const std::runtime_error&) {failed=true;}
+    require(failed && !p.playing() && p.runtime()->snapshot().elapsedSeconds==0,"Work refusal did not pause/roll back playback");
+    require(p.temperatureHistory(p.runtime()->snapshot().atmospheres[0].id).size()==1,"Refused update added history");
+    CellPlaybackRuntime shortStep(scene);shortStep.setDoorOpen(0,door,true);
+    require(shortStep.update(0.01),"Short-step control did not isolate pending-time behavior");
+    p.setSpeedIndex(0);p.togglePlaying();failed=false;
+    try {p.update(0);} catch (const std::runtime_error&) {failed=true;}
+    require(failed && !p.playing() && p.runtime()->snapshot().worldTick==0,"Failed simulation-time debt was dropped or rescaled");
+}
 void documentAvailability() {
     using namespace station::editor;
     struct Dialogs : FileDialogs {
@@ -351,6 +397,8 @@ int main() {
     try {
         using namespace station::editor;
         editingLockout();
+        nativeSnapshots();
+        failedPlaybackDebt();
         doorControls();
         documentAvailability();
         hullPlayback();
@@ -427,6 +475,9 @@ int main() {
         playback.update(100); // a dialog/stall must not cause an unbounded catch-up loop
         require(playback.runtime()->snapshot().worldTick == 5, "Catch-up work was not bounded");
         near(playback.runtime()->snapshot().elapsedSeconds, 0.5);
+        playback.update(0);
+        require(playback.runtime()->snapshot().worldTick==10,"Catch-up discarded time debt");
+        near(playback.runtime()->snapshot().elapsedSeconds,1.0);
         std::cout << "Simulation playback passed\n";
         return 0;
     } catch (const std::exception& error) {

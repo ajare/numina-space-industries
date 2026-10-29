@@ -1,5 +1,6 @@
 #include "SectorThermal.h"
 #include "SimulationPlayback.h"
+#include <station/StationSystemsRuntime.h>
 #include <nsi/systems/Atmosphere.h>
 #include <algorithm>
 #include <cmath>
@@ -92,6 +93,9 @@ void check() {
     require(std::abs(*neighbour(l).outwardKW)>0,"Neighbour flow absent");
     near(*neighbour(l).diffusionToDrainRatio,neighbour(l).timescaleSeconds / *l.drainSeconds);
 
+    auto evacuated=snapshot;for (auto& air:evacuated.atmospheres) air.thermalCapacityKJPerK=0;
+    const auto noCapacity=sectorThermal(pair,0,left,&evacuated);
+    require(!neighbour(noCapacity).diffusionToDrainRatio,"Zero capacity fabricated a NaN response ratio");
     I buried(std::vector<I::Level>{I::Level(3,3),I::Level(3,3),I::Level(3,3)});
     buried.setHullType(I::HullType::BareSkin);
     buried.setPartitionType(I::PartitionType::BarePartition);

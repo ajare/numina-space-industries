@@ -14,6 +14,8 @@
 #include <cstdint>
 #include <optional>
 
+namespace station {struct StationCellAtmosphereSnapshot;}
+
 struct DeckCellCoord {
     std::uint32_t x;
     std::uint32_t y;
@@ -43,4 +45,7 @@ DeckPointerEvent drawDeckGrid(const char* id, const station::editor::Level& leve
                               std::optional<int> selectedSector = std::nullopt,
                               std::span<const station::editor::SectorColour> thermalColours = {},
                               bool doorControlsEnabled = false,
-                              std::span<const std::size_t> openDoors = {});
+                              std::span<const std::size_t> openDoors = {},
+                              std::span<const station::editor::SectorColour> cellColours = {},
+                              std::span<const station::StationCellAtmosphereSnapshot> atmosphere = {},
+                              std::size_t levelIndex = 0, bool windArrows = false);

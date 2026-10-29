@@ -249,6 +249,18 @@ void simulationState() {
     const auto rebuilt = playback.snapshotFor(session.installation());
     require(rebuilt && rebuilt->elapsedSeconds == 0, "Edited geometry did not reset live readout");
 }
+void breachGraph() {
+    Installation scene(1,1);scene.toggleWall(0,scene.level(0).horizontalWall(0,0));
+    SimulationPlayback playback;playback.reset(scene);playback.togglePlaying();playback.update(0.1);
+    const auto snapshot=playback.snapshotFor(scene);const auto graph=buildSectorSystemsGraph(scene,0,0,&*snapshot);
+    const auto node=std::find_if(graph.nodes.begin(),graph.nodes.end(),[](const auto& n){return n.type=="Atmosphere pathway";});
+    require(node!=graph.nodes.end() && node->id.starts_with("breach-"),"Missing exterior Wall absent from configuration graph");
+    require(std::any_of(node->simulation.begin(),node->simulation.end(),[](const auto& field){
+        return field.first=="Regime convention" && field.second.find("estimate")!=std::string::npos;
+    }),"Spatial boundary readout implied an analytic nozzle solve");
+    require(snapshot->atmospherePathways.size()==1 && snapshot->atmospherePathways[0].bulkFlowRateKgPerS>0,
+        "Breach graph lost outward flow telemetry");
+}
 void zoomCanvas() {
     Installation i(7,5); const auto g=i.level(0);
     for (unsigned y=0;y<5;++y) {
@@ -410,6 +422,6 @@ void readOnlyCanvas() {
 }
 }
 int main() {
-    try { projection(); simulationState(); connectedGraph(); zoomCanvas(); readOnlyCanvas(); std::cout << "Sector systems graph passed\n"; }
+    try { projection(); simulationState(); connectedGraph(); breachGraph(); zoomCanvas(); readOnlyCanvas(); std::cout << "Sector systems graph passed\n"; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

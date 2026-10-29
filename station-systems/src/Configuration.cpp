@@ -44,6 +44,9 @@ namespace station
 	double stationSaturatedVapourMassKg(double saturationKPa,
 		double volumeM3, double temperatureC)
 	{
+		// Zero saturation has a zero-mass limit, including at absolute zero.
+		// Avoid 0/0 when the spatial ideal-gas model reaches its cold limit.
+		if (saturationKPa == 0.0) return 0.0;
 		// The inverse of the ideal-gas partial pressure at saturation:
 		// the water vapour mass a compartment of this volume holds at
 		// this temperature before the air cannot hold more.

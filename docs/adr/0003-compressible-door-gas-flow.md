@@ -1,5 +1,7 @@
 # Compressible Door flow with inventory-dependent gas energy
 
+[ADR-0004](0004-cell-atmosphere-and-horizontal-momentum.md) governs current spatial Editor playback. This ADR governs the standalone compartment runtime; the two gas/heat runtimes are not run together.
+
 **Status: Accepted.** Explicit Door pathways use compressible ideal-gas orifice flow for both inter-Sector openings and exterior venting, replacing the old diffusion-only bulk law. Raising a diffusion coefficient would not reproduce choking or conserve the energy of a rapidly emptying compartment. The no-inferred-pathways and dependency boundaries of ADR-0001/0002 remain unchanged.
 
 Bulk gas flows from higher to lower absolute pressure. With upstream mixture gamma = cp/cv, it chokes at downstream/upstream ratio `(2/(gamma+1))^(gamma/(gamma-1))`; otherwise the subsonic isentropic orifice relation applies. A Door's clear opening is 0.9 m × 2 m (1.8 m²), not its full Cell-edge Wall surface. A provisional discharge coefficient of 0.7 multiplies open area (allowed range `(0,1]`); it is a per-pathway parameter, not a second area or a calibrated Door specification. Existing Installations keep their authored geometry and default coefficient; Station configuration schema 140 writes the coefficient, and earlier documents load with 0.7. There is no legacy bulk-flow mode.

@@ -27,6 +27,7 @@ struct InstallationRenderSettings {
     InstallationRenderMode mode = InstallationRenderMode::Default;
     ThermalColourScale thermal;
     PressureColourScale pressure;
+    bool windArrows=false;
 };
 struct SectorColour {
     float red, green, blue;
@@ -42,4 +43,8 @@ std::optional<SectorColour> pressureColour(double pressureKPa, const PressureCol
 // atmosphere ids (not snapshot order or Sector names). Missing data uses Default.
 std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation&,
     std::size_t level, const InstallationRenderSettings&, const StationSystemsSnapshot* live = nullptr);
+// One colour per geometric Cell. Native values are matched by Level, Cell
+// index and stable Sector uid; absent/unresolved temperatures use Default.
+std::vector<SectorColour> cellRenderColours(const nsi::core::Installation&,
+    std::size_t level,const InstallationRenderSettings&,const StationSystemsSnapshot* live=nullptr);
 } // namespace station::editor

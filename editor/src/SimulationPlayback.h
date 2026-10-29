@@ -4,7 +4,7 @@
 #include "PressureSample.h"
 #include "SectorAtmosphere.h"
 #include <nsi/core/Installation.h>
-#include <station/StationSystemsRuntime.h>
+#include "CellPlaybackRuntime.h"
 
 #include <array>
 #include <memory>
@@ -35,7 +35,7 @@ public:
     bool toggleDoor(std::size_t level, std::size_t wall);
     bool doorOpen(std::size_t level, std::size_t wall) const;
     std::vector<std::size_t> openDoors(std::size_t level) const;
-    const StationSystemsRuntime* runtime() const noexcept { return runtime_.get(); }
+    const CellPlaybackRuntime* runtime() const noexcept { return runtime_.get(); }
     // Read-only snapshot only when the preview still matches this document.
     // Geometry edits may occur later in the frame than synchronization.
     std::optional<StationSystemsSnapshot> snapshotFor(const nsi::core::Installation& installation) const;
@@ -47,7 +47,7 @@ public:
     std::span<const AtmosphereSample> atmosphereHistory(const std::string& atmosphereId) const;
 private:
     void recordAtmosphereHistory();
-    struct DoorState { bool open=false; std::optional<std::string> pathwayId; };
+    struct DoorState { bool open=false; };
     std::map<std::pair<std::size_t,std::size_t>, DoorState> doors_;
     std::map<std::string, std::vector<TemperatureSample>> temperatureHistory_;
     std::map<std::string, std::vector<PressureSample>> pressureHistory_;
@@ -55,10 +55,11 @@ private:
     static constexpr double historySeconds = 60.0;
     static constexpr double historySampleIntervalSeconds = 0.1;
     static constexpr double updateIntervalSeconds = 0.1;
-    // Bound catch-up after stalls/native dialogs; discard excess wall-time debt.
+    // Bound work after stalls/native dialogs; retain unadvanced wall-time debt.
     static constexpr int maxCatchUpUpdates = 5;
     std::optional<nsi::core::Installation> source_;
-    std::unique_ptr<StationSystemsRuntime> runtime_;
+    std::unique_ptr<CellPlaybackRuntime> runtime_;
+    std::optional<double> pendingStepSeconds_;
     double remainder_ = 0;
     int speedIndex_ = 2;
     bool playing_ = false;

@@ -3,6 +3,7 @@
 #include <nsi/systems/Atmosphere.h>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace station::editor {
@@ -15,7 +16,7 @@ void SimulationPlayback::synchronize(const nsi::core::Installation* installation
         pressureHistory_.clear();
         atmosphereHistory_.clear();
         source_.reset();
-        remainder_ = 0;
+        remainder_ = 0;pendingStepSeconds_.reset();
     } else if (!source_ || *source_ != *installation) reset(*installation);
 }
 
@@ -27,25 +28,10 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     pressureHistory_.clear();
     atmosphereHistory_.clear();
     source_ = installation;
-    remainder_ = 0;
-    StationSystemsSettings settings;
-    settings.enabled = true;
-    settings.systemsStepWorldTicks = 1;
-    settings.observationIntervalSeconds = 1;
-    settings.atmospheres = nsi::systems::expandInstallation(installation);
-    for (const auto& door:nsi::systems::expandDoors(installation)) {
-        DoorState state;
-        if (door.pathway) {
-            state.pathwayId=door.pathway->id;
-            settings.atmospherePathways.push_back(*door.pathway);
-        }
-        doors_.emplace(std::pair{door.level,door.wall},std::move(state));
-    }
-    auto thermal = nsi::systems::expandThermal(installation);
-    settings.hull = std::move(thermal.hull);
-    settings.thermalLinks = std::move(thermal.links);
-    settings.solarCycle = std::move(thermal.solarCycle);
-    runtime_ = std::make_unique<StationSystemsRuntime>(std::move(settings), StationSystemsUpdateMode::Variable);
+    remainder_ = 0;pendingStepSeconds_.reset();
+    runtime_=std::make_unique<CellPlaybackRuntime>(installation);
+    for (const auto& door:runtime_->model().geometry().doors)
+        doors_.emplace(std::pair{door.level,door.wall},DoorState{});
     recordAtmosphereHistory();
 }
 
@@ -55,12 +41,7 @@ bool SimulationPlayback::toggleDoor(std::size_t level,std::size_t wall) {
     if (it==doors_.end()) return false;
     auto& door=it->second;
     const bool open=!door.open;
-    if (door.pathwayId) {
-        std::string diagnostic;
-        if (!runtime_->updateNode<AtmospherePathwaySettings>(*door.pathwayId,
-            [open](auto& path){ path.openFraction=open ? 1.0 : 0.0; },&diagnostic))
-            throw std::runtime_error("Door toggle failed: "+diagnostic);
-    }
+    if (!runtime_->setDoorOpen(level,wall,open)) throw std::runtime_error("Native Door control failed");
     door.open=open;
     return true;
 }
@@ -91,7 +72,7 @@ std::span<const AtmosphereSample> SimulationPlayback::atmosphereHistory(const st
 }
 
 void SimulationPlayback::recordAtmosphereHistory() {
-    const auto snapshot = runtime_->snapshot();
+    const auto& snapshot = runtime_->snapshot();
     auto record=[&](auto& samples, auto sample) {
         // Sample on simulation time, not frame time: slow playback must not
         // create an unbounded number of points within the one-minute window.
@@ -104,8 +85,11 @@ void SimulationPlayback::recordAtmosphereHistory() {
         samples.erase(samples.begin(), first);
     };
     for (const auto& air : snapshot.atmospheres) {
-        record(temperatureHistory_[air.id],TemperatureSample{snapshot.elapsedSeconds,air.temperatureC});
-        record(pressureHistory_[air.id],PressureSample{snapshot.elapsedSeconds,air.pressureKPa});
+        record(temperatureHistory_[air.id],TemperatureSample{snapshot.elapsedSeconds,
+            air.spatial && !air.resolvedGas ? std::numeric_limits<double>::quiet_NaN() : air.temperatureC});
+        record(pressureHistory_[air.id],PressureSample{snapshot.elapsedSeconds,air.pressureKPa,
+            air.spatial ? std::optional<double>(air.minCellPressureKPa) : std::nullopt,
+            air.spatial ? std::optional<double>(air.maxCellPressureKPa) : std::nullopt});
         record(atmosphereHistory_[air.id],atmosphereSample(snapshot.elapsedSeconds,air));
     }
 }
@@ -127,15 +111,17 @@ void SimulationPlayback::update(double wallSeconds) {
         throw std::invalid_argument("Invalid simulation frame duration");
     if (!playing_ || !runtime_) return;
     try {
-        remainder_ = std::min(remainder_ + wallSeconds, maxCatchUpUpdates * updateIntervalSeconds);
-        const int updates = static_cast<int>(std::floor((remainder_ + 1e-9) / updateIntervalSeconds));
-        remainder_ = std::max(0.0, remainder_ - updates * updateIntervalSeconds);
-        for (int i = 0; i < updates; ++i) {
-            if (!runtime_->update(updateIntervalSeconds * speeds[speedIndex_])) {
+        const double debt=remainder_+wallSeconds;
+        if (!std::isfinite(debt)) throw std::invalid_argument("Simulation time debt exceeds finite range");
+        remainder_=debt;
+        for (int i=0;i<maxCatchUpUpdates && remainder_+1e-9>=updateIntervalSeconds;++i) {
+            if (!pendingStepSeconds_) pendingStepSeconds_=updateIntervalSeconds*speeds[speedIndex_];
+            if (!runtime_->update(*pendingStepSeconds_)) {
                 const auto diagnostics = runtime_->diagnostics();
                 throw std::runtime_error(diagnostics.empty() ? "Simulation advance failed"
                                                             : diagnostics.front().message);
             }
+            remainder_=std::max(0.0,remainder_-updateIntervalSeconds);pendingStepSeconds_.reset();
             recordAtmosphereHistory();
         }
     } catch (...) {

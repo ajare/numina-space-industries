@@ -2,6 +2,7 @@
 
 #include "imgui.h"
 #include "station/editor/GridPicking.h"
+#include <station/AtmosphereMetrics.h>
 
 #include <algorithm>
 #include <cmath>
@@ -45,7 +46,10 @@ DeckPointerEvent drawDeckGrid(const char* id,
                              const station::editor::Level& level, EditMode mode,
                              std::optional<int> selectedSector,
                              std::span<const station::editor::SectorColour> thermalColours,
-                             bool doorControlsEnabled, std::span<const std::size_t> openDoors) {
+                             bool doorControlsEnabled, std::span<const std::size_t> openDoors,
+                             std::span<const station::editor::SectorColour> cellColours,
+                             std::span<const station::StationCellAtmosphereSnapshot> atmosphere,
+                             std::size_t levelIndex,bool windArrows) {
     DeckPointerEvent event;
 
     const float available_width = ImGui::GetContentRegionAvail().x;
@@ -61,6 +65,13 @@ DeckPointerEvent drawDeckGrid(const char* id,
 
     const ImVec2 origin = ImGui::GetItemRectMin();
     ImDrawList* draw = ImGui::GetWindowDrawList();
+    const bool mapped=!thermalColours.empty() || !cellColours.empty();
+    auto validCell=[&](const station::StationCellAtmosphereSnapshot& c) {
+        if (c.level!=levelIndex || c.gridIndex>=level.cellCount()) return false;
+        const auto& s=level.sectors()[level.cells()[c.gridIndex].sector];
+        return s.uid==c.sectorUid && s.type==station::editor::SectorType::Interior
+            && s.atmosphere!=nsi::core::Installation::AtmospherePreset::Void;
+    };
 
     for (std::uint32_t y = 0; y < level.depth(); ++y) {
         for (std::uint32_t x = 0; x < level.width(); ++x) {
@@ -73,14 +84,31 @@ DeckPointerEvent drawDeckGrid(const char* id,
                 const auto& thermal = thermalColours[sector];
                 colour = ImGui::ColorConvertFloat4ToU32({thermal.red,thermal.green,thermal.blue,1});
             }
+            const auto index=std::size_t(y)*level.width()+x;
+            if (index<cellColours.size()) {
+                const auto& c=cellColours[index];colour=ImGui::ColorConvertFloat4ToU32({c.red,c.green,c.blue,1});
+            }
             draw->AddRectFilled(a, b, colour);
             if (selectedSector && sector == *selectedSector) {
-                if (thermalColours.empty()) draw->AddRectFilled(a,b,IM_COL32(245,190,60,85));
+                if (!mapped) draw->AddRectFilled(a,b,IM_COL32(245,190,60,85));
                 else draw->AddRect({a.x+2,a.y+2},{b.x-2,b.y-2},IM_COL32(245,190,60,255),0,0,2);
             }
         }
     }
 
+    if (windArrows) for (const auto& c:atmosphere) {
+        if (!validCell(c) || !c.resolvedGas) continue;
+        const double speed=std::hypot(c.velocityX,c.velocityY);
+        if (!std::isfinite(speed) || speed<0.05) continue;
+        const float dx=static_cast<float>(c.velocityX/speed),dy=static_cast<float>(c.velocityY/speed);
+        const float length=cell*0.72f*static_cast<float>(std::clamp(speed/20.0,0.15,1.0));
+        const ImVec2 center{origin.x+cell*(float(c.gridIndex%level.width())+0.5f),origin.y+cell*(float(c.gridIndex/level.width())+0.5f)};
+        const ImVec2 tail{center.x-dx*length/2,center.y-dy*length/2},tip{center.x+dx*length/2,center.y+dy*length/2};
+        const float head=std::min(4.0f,length*0.35f);const auto colour=IM_COL32(255,245,160,240);
+        draw->AddLine(tail,tip,colour,1.5f);
+        draw->AddLine(tip,{tip.x-head*dx+head*dy*0.6f,tip.y-head*dy-head*dx*0.6f},colour,1.5f);
+        draw->AddLine(tip,{tip.x-head*dx-head*dy*0.6f,tip.y-head*dy+head*dx*0.6f},colour,1.5f);
+    }
     const ImU32 grid_colour = IM_COL32(70, 78, 90, 255);
     for (std::uint32_t i = 0; i <= level.width(); ++i) {
         const float x = origin.x + cell * static_cast<float>(i);
@@ -154,7 +182,7 @@ DeckPointerEvent drawDeckGrid(const char* id,
     if (mode!=EditMode::Wall && mode!=EditMode::Door && ImGui::IsItemHovered() && under.has_value()) {
         const ImVec2 a(origin.x + cell * static_cast<float>(under->x),
                       origin.y + cell * static_cast<float>(under->y));
-        if (thermalColours.empty())
+        if (!mapped)
             draw->AddRectFilled(a, ImVec2(a.x + cell, a.y + cell), IM_COL32(255,255,255,46));
         else draw->AddRect({a.x+1,a.y+1},{a.x+cell-1,a.y+cell-1},IM_COL32(255,255,255,255));
     }
@@ -187,13 +215,31 @@ DeckPointerEvent drawDeckGrid(const char* id,
         event.phase=DeckPointerPhase::Release;
     event.wall=wall;
     const std::optional<DeckCellCoord> readout =
-        ImGui::IsItemHovered() ? under : std::nullopt;
+        ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) ? under : std::nullopt;
     if (readout.has_value()) {
         const station::editor::SectorType state =
             level.cell(readout->x, readout->y);
         ImGui::Text("Cell (%u, %u): %s", readout->x, readout->y,
                    state == station::editor::SectorType::Interior ? "Interior"
                                                              : "Void");
+        const auto index=std::size_t(readout->y)*level.width()+readout->x;
+        const auto it=std::find_if(atmosphere.begin(),atmosphere.end(),[&](const auto& c){return c.gridIndex==index && validCell(c);});
+        if (it!=atmosphere.end()) {
+            if (!it->resolvedGas) ImGui::TextUnformatted("Pressure below resolved range (~0 kPa); temperature, composition and wind unavailable.");
+            else {
+                ImGui::Text("Pressure %.6g kPa | Temperature %.3f C | RH %.2f%%",it->pressureKPa,it->temperatureC,100*it->relativeHumidity);
+                ImGui::Text("Wind (%.3f, %.3f) m/s | Speed %.3f m/s",it->velocityX,it->velocityY,std::hypot(it->velocityX,it->velocityY));
+                const double molar[]={station::StationMolarMassOxygenKgPerMol,station::StationMolarMassNitrogenKgPerMol,
+                    station::StationMolarMassCarbonDioxideKgPerMol,station::StationMolarMassWaterKgPerMol};
+                double total=0;for (int g=0;g<4;++g) total+=it->massKg[g]/molar[g];
+                if (total>0) ImGui::Text("Wet mole %%: O2 %.3f | N2 %.3f | CO2 %.3f | H2O %.3f",
+                    100*it->massKg[0]/molar[0]/total,100*it->massKg[1]/molar[1]/total,
+                    100*it->massKg[2]/molar[2]/total,100*it->massKg[3]/molar[3]/total);
+            }
+        } else if (state==station::editor::SectorType::Interior) {
+            ImGui::TextUnformatted(level.sectorAt(readout->x,readout->y).atmosphere==nsi::core::Installation::AtmospherePreset::Void
+                ? "No Cell atmosphere (Void preset)." : "Live Cell atmosphere unavailable.");
+        }
     } else {
         ImGui::Text("%zu Interior Cells of %zu",
                    level.interiorCount(), level.cellCount());

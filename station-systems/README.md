@@ -14,6 +14,86 @@ runtime rules and diagnostics in one implementation, not parallel client copies.
 The atmosphere observation value type and metric catalogue accompany validation
 because they are the authoritative source of valid atmosphere Monitor metrics.
 
+## Native Cell fluid kernel
+
+`station/CellFluid.h` exposes a standalone `station::CellFluidSolver` through
+`StationSystems::StationSystems`. Editor playback uses it through the native
+geometry bridge and `CellPlaybackRuntime`; it does not run the compartment runtime
+alongside it. [ADR-0004](../docs/adr/0004-cell-atmosphere-and-horizontal-momentum.md)
+records the spatial model and its approximation boundaries.
+
+The native finite-volume kernel stores four species masses, horizontal momentum
+and total internal-plus-kinetic energy in contiguous preallocated buffers. Its
+numerical loop calls no Lua and successful stepping allocates no heap memory.
+The four species have the existing O2/N2/CO2/vapour order and calorically perfect
+engineering constants. Kernel quantities are SI (kg, m, s, Pa, K, J), unlike the
+compartment reporting API's kPa, Celsius and kJ. `makeCellFluidState` constructs
+conserved state; `cellFluidPrimitive` derives local conditions. Species additions
+are stationary gas at the supplied temperature, while removals carry local
+momentum and internal/kinetic energy. Heat and source operations update cached
+primitives immediately; heat cannot be deposited into a completely empty Cell.
+
+A mesh must include all four geometrically closed faces of every Cell, including
+solid Walls. Shared faces belong to one Level only. `SIZE_MAX` is an explicit
+exterior-vacuum endpoint, not a way to represent an unmodelled Interior preset.
+Opening fractions and discharge coefficients reduce the full face area; the
+prototype uses aperture-reduced HLLE fluxes, not the standalone analytic Door
+orifice law. Local mixing is conservative numerical diffusion, not calibrated
+molecular diffusion. `condenseVapour` reuses the compartment latent-equilibrium
+solve, removes the liquid's sensible/kinetic energy and momentum, and retains
+explicit mass/energy bookings. The native bridge in `nsi/systems/CellAtmosphere.h`
+now supplies authored topology, localized thermal-contact metadata, per-Cell
+loads, humidity/condensation, aggregate Sector readouts and transactional source
+splitting. Its optional Geometry thermal mode now solves the shared Hull and
+partition contacts. Editor maps and hover readouts consume per-Cell observations;
+Sector panels consume independently aggregated temperature/pressure/inventory.
+
+Adaptive acoustic CFL stepping checks species/internal-energy positivity and
+retries rejected substeps at shorter durations. A deterministic substep limit
+returns `false`, a diagnostic, and the original inventory; it never commits a
+partial duration. Face fluxes and fixed-Wall reaction impulse support conservation
+checks (momentum flux includes pressure stress). Resting regions bypass acoustic
+work within roundoff-scale pressure/composition tolerances. The constant pressure
+reference and species-density background rebase once per advance to a
+median-pressure representative, so uniform sources do not invalidate all resting
+Cells and a localized source is not mistaken for the whole background. This is
+a pressure-gauge/activity optimization, not a sound-speed or time adjustment.
+Trace Cells with both
+mass at most 1e-18 kg and energy at most 1e-10 J retain their conserved quantities
+but have unresolved transport primitives; `resolvedGas == false` means their zero
+temperature/velocity placeholders must not be displayed as physical readings.
+
+Build the Release-only benchmark with:
+
+```sh
+cmake --build build-linux --config Release --target station-cell-fluid-benchmark -j 16
+build-linux/station-systems/tests/station-cell-fluid-benchmark
+```
+
+Representative development-machine results (Ryzen AI MAX+ 395, one thread,
+4,096 Cells/four gases, two warmups and ten measured fresh-start trials, mesh
+construction excluded): mean **0.11 ms** at rest, **5.1 ms** for a pressure pulse,
+**6.7 ms** for four full-face breaches and **7.2 ms** with every Cell disturbed,
+per 0.1 simulated seconds. After one simulated second of preconditioning, the
+sustained-breach case takes **9.3 ms** per 0.1 seconds (observed maximum 9.4 ms).
+The fresh breach scenario takes approximately **15.7 ms** for 0.2 simulated
+seconds and **88.5 ms** for one simulated second (a 10x playback update). These
+are kernel measurements, not integrated playback guarantees or hardware-dependent
+test thresholds. Re-run on the target machine and measure sustained playback
+including runtime snapshot publication via `editor-cell-playback-benchmark`.
+GUI drawing remains excluded. The bridge benchmark also measures the
+coupled source/phase/thermal path.
+
+`station/CellThermal.h` supplies the sparse implicit heat solver: backward Euler
+with exact star elimination (including parallel edges) or preconditioned CG for
+general meshes. It uses preallocated linear-size storage, actual gas capacities
+and no hidden mass on empty/unresolved nodes. Heat increments are recovered from
+capacity times temperature change to avoid cancellation on trace nodes; an
+energy-constraint adjustment on the largest-capacity body is bounded by the
+convergence budget. Link-flux residuals and the adjustment are exposed. Nonlinear
+Hull radiation reuses the compartment integrator. This native Cell solver does
+not replace the standalone compartment thermal implementation.
+
 ## Source integration
 
 ```cmake

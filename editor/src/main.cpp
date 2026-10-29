@@ -548,10 +548,12 @@ int runEditor() {
         const auto snapshot = simulation.snapshotFor(session.installation());
         std::vector<station::editor::SectorColour> thermal_colours;
         if (render_settings.mode != station::editor::InstallationRenderMode::Default)
-            thermal_colours = station::editor::sectorRenderColours(session.installation(),active_level,
+            thermal_colours = station::editor::cellRenderColours(session.installation(),active_level,
                 render_settings,snapshot ? &*snapshot : nullptr);
         const auto open_doors=simulation.openDoors(active_level);
-        const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector,thermal_colours,door_controls,open_doors);
+        const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector,{},door_controls,open_doors,thermal_colours,
+            snapshot ? std::span<const station::StationCellAtmosphereSnapshot>(snapshot->cellAtmospheres) : std::span<const station::StationCellAtmosphereSnapshot>{},
+            active_level,render_settings.windArrows);
         ImGui::EndDisabled();
         const bool stroke_event=session.strokeActive() &&
             (pointer.phase==DeckPointerPhase::Release ||

@@ -43,7 +43,7 @@ SectorThermal sectorThermal(const nsi::core::Installation& installation,
         }
         result.links.push_back(std::move(row));
     }
-    if (result.drainSeconds)
+    if (result.drainSeconds && *result.drainSeconds>0)
         for (auto& row : result.links)
             if (!row.hull) row.diffusionToDrainRatio = row.timescaleSeconds / *result.drainSeconds;
     return result;

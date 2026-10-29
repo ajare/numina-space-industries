@@ -76,9 +76,13 @@ cancelled or failed actions preserve the existing lock and preview.
 Sector selection exposes Atmosphere, Thermal, Systems graph and Configuration
 graph tabs. Atmosphere contains total pressure, humidity, per-species mass/wet
 mole percentage/partial pressure, limit warnings and rolling-minute pressure,
-relative-humidity and stacked wet-mole composition plots. Pressure/humidity
+relative-humidity and stacked wet-mole composition plots. Playback owns native
+Cell gas/heat through `CellPlaybackRuntime`, never a second compartment solver.
+Pressure histories include Cell minima/maxima; means use Cell volume, temperature
+uses current heat capacity, and mole fractions use aggregate species inventory.
+Warnings reflect any Cell outside its limits. Pressure/humidity
 plots sit under their readouts; composition is stacked on a 0–100% axis and
-leaves gaps when fractions are undefined. The Configuration graph includes immediate explicit Door pathways and
+leaves gaps when fractions are undefined. The Configuration graph includes immediate Door/derived breach pathways and
 thermal links with both endpoints, Hull/exterior boundaries and live signed
 outward flows. It never recursively expands the Installation or invents Gas out
 or Heat out wiring. Closed Doors remain visible; absent references stay unresolved.
@@ -89,8 +93,16 @@ Fit view reframes all nodes. These controls never modify the Installation.
 The Pressure render mode uses adjustable minimum/reference/maximum anchors of
 0/101.325/150 kPa by default, coloured blue/green/red. Its controls, like Thermal,
 remain available during playback and are view state only. Missing atmosphere
-data retains Default colours. Histories cover every compartment, preserve the
+data retains Default colours. Thermal/Pressure colours are per Cell, keyed by
+Level/grid index and stable Sector uid. Hover inspection remains active on the
+read-only playing grid and reports composition and horizontal velocity. Optional
+Wind arrows saturate visually at 20 m/s, without changing physics. Unresolved gas
+does not display placeholder temperatures/wind as observations.
+Histories cover every compartment, preserve the
 last committed data while paused and clear on reset or document replacement.
+Refused native advances pause with a diagnostic, retaining the exact unadvanced
+simulation request across speed changes. Bounded catch-up work retains wall-time
+debt rather than silently discarding time.
 
 ## Files and unsaved changes
 

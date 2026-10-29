@@ -57,13 +57,14 @@ positions and panning are transient presentation state, not saved configuration.
 Currently Sector authoring supplies an Atmosphere preset, loads, fire opt-in and
 an optional reservoir coupling. Referenced reservoirs without a definition are
 marked unresolved, not fabricated. Void Sectors/presets explicitly show that no
-compartment exists; no gas pathways are inferred from adjacency. Explicit Doors
-create initially closed pathways, operated with Shift+left-click in Door mode
-during active playback. The **Configuration graph** shows the selected Sector's
-immediate Door pathways, opposite atmosphere/exterior endpoints, thermal links
+compartment exists. Explicit Doors create initially closed openings, operated
+with Shift+left-click in Door mode during active playback. Missing Walls facing
+geometric Void/outside are full-face breaches, not sealed boundaries. Interior
+Void presets never act as vacuum sinks. The **Configuration graph** shows the
+selected Sector's immediate Door/breach pathways, opposite atmosphere/exterior endpoints, thermal links
 and Hull. Closed pathways stay visible. Live state includes signed outward gas
-and heat rates (last-step averages). Flow regime (**sealed / no bulk flow /
-subsonic / choked**), downstream/upstream pressure ratio, bulk mass flow and
+and heat rates (last-step averages). Pressure-based flow regime estimates
+(**sealed / balanced pressures / subsonic / choked**), downstream/upstream pressure ratio, bulk mass flow and
 per-pathway discharge coefficient are also shown. Door links use **Hosted pathways**;
 conduction uses **Thermal links**. **Gas out**/**Heat out** connections appear
 only when actually authored. Unresolved references remain labelled unresolved.
@@ -73,25 +74,31 @@ a configuration/live-state viewer, not a second simulation or a live-state edito
 canvas follows the sibling Flow view; its source/license and small read-only
 extension are tracked in `editor/vendor/imnodes/`.
 
-Door flow is compressible and pressure-driven for both interior and exterior
-openings, with default discharge coefficient 0.7. Gas carries upstream enthalpy;
-connected compartments' heat capacities shrink/grow with gas inventory, with
-Hull/partition heat kept separate. Equal-pressure composition mixing remains a
-separate process. Each Door has a **0.9 m × 2 m clear opening (1.8 m²)**, not
-the full Wall surface. Decompression is consequently slower than the former
-6 m² opening, while retaining volume-dependent compressible flow. See
-[ADR-0003](docs/adr/0003-compressible-door-gas-flow.md) for assumptions and limits.
+Editor playback runs native conservative Cell gas dynamics and Hull/partition
+heat, replacing—not supplementing—the well-mixed compartment runtime. Each Level
+has independent horizontal flow: four gas species, pressure, temperature and wind;
+there is no vertical airflow or force on objects. Cells store 12 m³ × Sector
+height, but full gas faces stay 6 m². Doors use **0.9 m × 2 m (1.8 m²)** openings
+and discharge coefficient 0.7. Restricted-face HLLE flux is a coarse aperture
+model, not the standalone runtime's analytic nozzle law. Mixing is numerical,
+not calibrated molecular diffusion. See [ADR-0004](docs/adr/0004-cell-atmosphere-and-horizontal-momentum.md).
+
+Loads, oxygen starvation, humidity and condensation are local; Sector loads are
+distributed by Cell volume. Work-limit refusals pause with a diagnostic and roll
+back the whole update. Catch-up time is retained rather than discarded; a refused
+simulation duration is retained even after changing speed. Unresolved reservoir
+references refuse native playback rather than silently omitting their heat.
 
 ## Installation render modes
 
 The toolbar's **Render mode** combo switches between **Default** (the existing
-floor/void view), **Thermal** (live Sector atmosphere temperatures), and
+floor/void view), **Thermal** (live Cell atmosphere temperatures), and
 **Pressure** (live absolute total pressure in kPa). In Thermal
 mode, expand **Thermal rendering** in the left panel to adjust minimum, maximum
 and reference temperatures in Celsius (defaults: -273, 100 and 20). The scale
 interpolates blue → green → red, with pure green at the reference temperature;
 values outside the scale saturate at blue/red. Sliders keep minimum < reference
-< maximum within -273 to 1000 °C. Sectors without live atmosphere data keep their
+< maximum within -273 to 1000 °C. Cells without live atmosphere data keep their
 Default appearance. Heatmap selection/hover uses outlines, preserving fill colours.
 
 In Pressure mode, **Pressure rendering** provides minimum/reference/maximum
@@ -99,18 +106,26 @@ pressure sliders (defaults **0 / 101.325 / 150 kPa**) with the same blue/green/r
 interpolation and saturation. Anchors remain strictly ordered and nonnegative,
 within 0–1000 kPa; missing/invalid live data retains Default colours.
 
+Hover a Cell to inspect pressure, temperature, humidity, wet composition and
+horizontal velocity, including while playing. **Wind arrows** optionally show
+direction, with length saturating at 20 m/s. Vacuum/unresolved gas never fabricates
+temperature or velocity observations.
+
 Render settings are editor-only: they do not modify saved Installations or the
 simulation and remain adjustable during playback.
 
 ## Sector atmosphere inspection
 
 Choose Sector mode and select a Cell. The **Atmosphere** tab shows total and
-starting pressure, humidity, O2/N2/CO2/water-vapour masses, wet mole percentages
+starting pressure, Cell pressure minimum/maximum, humidity, O2/N2/CO2/water-vapour masses, wet mole percentages
 and partial pressures, plus pressure/oxygen/CO2 warnings. Percentages include
 water vapour and are undefined at zero pressure; CO is listed separately as a
-hazard inventory. Missing compartments and telemetry are explicitly unavailable.
+hazard inventory. Pressure/partial pressures/RH are volume-weighted Cell means;
+temperature is heat-capacity weighted, and composition uses total mole inventory,
+not mean partial-pressure ratios. Limits warn if any Cell is out of range.
+Missing compartments and telemetry are explicitly unavailable.
 
-The pressure plot sits directly below Pressure; the relative-humidity plot sits
+The pressure plot shows mean/minimum/maximum directly below Pressure; the relative-humidity plot sits
 below its percentage readout. A stacked area plot beneath the composition table
 shows O2/N2/CO2/water-vapour wet mole percentages on a 0–100% axis. Undefined
 composition (such as zero total pressure) leaves gaps, never fabricated bands.
@@ -128,7 +143,8 @@ conductance and signed heat flow for every attached neighbour/Hull link.
 The **Systems graph** tab draws those connections; arrows follow the last
 simulation step's heat flow. Inspection remains available during playback.
 
-Timescales use the selected compartment's geometry-derived air capacity:
+Timescales use the selected atmosphere's current inventory-dependent air capacity
+(authored capacity only before live data exists):
 `diffusion = C / G_neighbour`, `drain = C / G_hull`, in seconds. Each neighbour's
 ratio is `diffusion / drain`. These are local response times with the other
 endpoint held fixed, not two-body equilibration or nonlinear radiative cooling

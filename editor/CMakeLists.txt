@@ -96,7 +96,7 @@ endif()
 
 # Headless playback adapter keeps simulation dependencies out of the document model.
 add_library(editor-simulation STATIC
-    src/SimulationPlayback.cpp src/SectorThermal.cpp src/SectorAtmosphere.cpp src/InstallationRenderMode.cpp)
+    src/SimulationPlayback.cpp src/CellPlaybackRuntime.cpp src/SectorThermal.cpp src/SectorAtmosphere.cpp src/InstallationRenderMode.cpp)
 target_include_directories(editor-simulation PUBLIC src)
 target_link_libraries(editor-simulation PUBLIC nsi::systemsBridge)
 
@@ -172,6 +172,8 @@ if(BUILD_TESTING)
     set_tests_properties(editor-sector-systems PROPERTIES
         LABELS "editor;functional;validation-fast" TIMEOUT 30)
 
+    add_executable(editor-cell-playback-benchmark tests/CellPlaybackBenchmark.cpp)
+    target_link_libraries(editor-cell-playback-benchmark PRIVATE editor-simulation)
     add_executable(editor-simulation-test tests/SimulationPlaybackTest.cpp)
     target_link_libraries(editor-simulation-test PRIVATE editor-simulation editor::document)
     add_test(NAME editor-simulation-playback COMMAND editor-simulation-test)

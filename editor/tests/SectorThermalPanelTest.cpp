@@ -44,6 +44,13 @@ int main() {
         for (std::size_t gas=0;gas<gases.size();++gas)
             if (std::abs((*sampled.wetMoleBoundsPercent)[gas+1]-(*sampled.wetMoleBoundsPercent)[gas]-*gases[gas].wetMolePercent)>1e-8)
                 throw std::runtime_error("Stack band is not the gas wet mole percentage");
+        auto nonuniform=initial;nonuniform.oxygenKg=nonuniform.nitrogenKg=1;
+        nonuniform.carbonDioxideKg=nonuniform.waterVapourKg=0;nonuniform.pressureKPa=50;
+        nonuniform.oxygenPartialPressureKPa=10;nonuniform.nitrogenPartialPressureKPa=40;
+        const double expected=100*(1/station::StationMolarMassOxygenKgPerMol)/
+            (1/station::StationMolarMassOxygenKgPerMol+1/station::StationMolarMassNitrogenKgPerMol);
+        if (std::abs(*atmosphereComposition(nonuniform)[0].wetMolePercent-expected)>1e-9)
+            throw std::runtime_error("Nonuniform Sector composition used mean partial pressure instead of inventory");
         initial.pressureKPa=0;
         if (atmosphereSample(0,initial).wetMoleBoundsPercent)
             throw std::runtime_error("Vacuum fabricated composition stack");

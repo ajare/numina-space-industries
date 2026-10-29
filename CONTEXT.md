@@ -34,11 +34,20 @@ A shared edge between neighbouring Cells, or an edge at a Level's boundary. An o
 **Door**:
 A special Wall occupying one edge, with a clear opening 0.9 m wide and 2 m tall, supported by solid collinear Walls at both ends. Doors cannot share an endpoint and remain Sector boundaries.
 
+**Cell atmosphere**:
+The gas inventory and local condition within one Interior Cell's volume, including the storage volume contributed by its Sector's height.
+
+**Wind**:
+The local horizontal velocity of the gas in a Cell. It is distinct from the movement of objects or people.
+
+**Breach**:
+An absent Wall between an Interior Cell and geometric Void or the outside of its Level's grid, exposing a full horizontal Cell face. It is distinct from a Door and from the absence of a compartment under the Void atmosphere preset.
+
 **Atmosphere pathway**:
-An opening through an authored Door that permits gas and its carried heat to cross between atmosphere compartments, or from a compartment to exterior space. It is distinct from a Thermal link, which conducts heat without transferring gas.
+An opening that permits gas and its carried energy to cross between atmosphere compartments, or from a compartment to exterior space. It is distinct from a Thermal link, which conducts heat without transferring gas.
 
 **Bulk gas flow**:
-Pressure-driven movement of the upstream gas mixture through an open Atmosphere pathway. It is distinct from composition mixing, where species can exchange even at equal total pressure.
+Movement of the gas mixture with its shared velocity, driven by pressure differences and persisting through inertia. It is distinct from composition mixing, where species can exchange even at equal total pressure.
 
 **Choked flow**:
 Bulk gas flow limited by sonic conditions at an opening. Below the critical downstream/upstream absolute-pressure ratio, further lowering downstream pressure does not increase flow for unchanged upstream conditions; above that ratio the flow is subsonic.
@@ -47,7 +56,7 @@ Bulk gas flow limited by sonic conditions at an opening. Below the critical down
 The dimensionless reduction of an opening's ideal mass flow due to real opening losses. It is separate from geometric area and Door openness.
 
 **Pressure**:
-The absolute total gas pressure in a Sector's atmosphere, measured in kPa. A gas's partial pressure is its contribution to that total; its wet mole fraction includes water vapour in the mixture, unlike a dry-gas fraction or mass fraction.
+The absolute total gas pressure at a location or across an atmosphere aggregate, measured in kPa. A gas's partial pressure is its contribution to that total; its wet mole fraction includes water vapour in the mixture, unlike a dry-gas fraction or mass fraction.
 
 **Hull type**:
 An Installation-wide choice of exterior thermal assembly, characterised by thermal transmittance and radiative properties. The Hull is the physical skin enclosing the Installation, not the empty space outside or an individual geometric edge.

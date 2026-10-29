@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 
 namespace station::editor {
@@ -29,19 +30,34 @@ void drawSectorAtmosphere(const SectorThermal& state,std::span<const PressureSam
     ImGui::Text("Starting pressure: %s",value(a.startingPressureKPa,"kPa").c_str());
     ImGui::Separator();
     ImGui::TextUnformatted("Live simulation values");
-    ImGui::Text("Pressure: %s",value(a.pressureKPa,"kPa").c_str());
+    ImGui::Text("Pressure: %s%s",value(a.pressureKPa,"kPa").c_str(),a.spatial ? " (Cell volume-weighted mean)" : "");
+    if (a.spatial) {
+        ImGui::Text("Cell pressure min %.6g | max %.6g kPa",a.minCellPressureKPa,a.maxCellPressureKPa);
+        ImGui::TextWrapped("Pressure, partial pressures and RH are volume-weighted Cell means; composition uses total gas inventory. Limits warn when any Cell is out of range.");
+        if (!a.resolvedGas) ImGui::TextUnformatted("Gas below resolved range; temperature and composition unavailable.");
+    }
     if (history.empty()) ImGui::TextUnformatted("Pressure history unavailable.");
-    else if (ImPlot::BeginPlot("Pressure — last minute###SectorPressure",ImVec2(-1,180),ImPlotFlags_NoLegend)) {
+    else if (ImPlot::BeginPlot("Pressure — last minute###SectorPressure",ImVec2(-1,180),a.spatial ? ImPlotFlags_None : ImPlotFlags_NoLegend)) {
         const double now=history.back().seconds;
         ImPlot::SetupAxes("Simulation time (s)","Pressure (kPa)",ImPlotAxisFlags_None,ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxisLimits(ImAxis_X1,std::max(0.0,now-60.0),std::max(60.0,now),ImGuiCond_Always);
-        ImPlot::PlotLineG("Pressure",[](int index,void* data) {
+        ImPlot::PlotLineG(a.spatial ? "Mean" : "Pressure",[](int index,void* data) {
             const auto& p=(*static_cast<std::span<const PressureSample>*>(data))[index];
             return ImPlotPoint(p.seconds,p.pressureKPa);
         },&history,static_cast<int>(history.size()));
+        if (a.spatial) {
+            ImPlot::PlotLineG("Cell minimum",[](int index,void* data) {
+                const auto& p=(*static_cast<std::span<const PressureSample>*>(data))[index];
+                return ImPlotPoint(p.seconds,p.minimumKPa.value_or(std::numeric_limits<double>::quiet_NaN()));
+            },&history,static_cast<int>(history.size()));
+            ImPlot::PlotLineG("Cell maximum",[](int index,void* data) {
+                const auto& p=(*static_cast<std::span<const PressureSample>*>(data))[index];
+                return ImPlotPoint(p.seconds,p.maximumKPa.value_or(std::numeric_limits<double>::quiet_NaN()));
+            },&history,static_cast<int>(history.size()));
+        }
         ImPlot::EndPlot();
     }
-    ImGui::Text("Relative humidity: %s",value(100*a.relativeHumidity,"%").c_str());
+    ImGui::Text("Relative humidity: %s",a.spatial && !a.resolvedGas ? "unavailable" : value(100*a.relativeHumidity,"%").c_str());
     if (atmosphereHistory.empty()) ImGui::TextUnformatted("Relative humidity history unavailable.");
     else if (ImPlot::BeginPlot("Relative humidity — last minute###SectorHumidity",ImVec2(-1,180),ImPlotFlags_NoLegend)) {
         const double now=atmosphereHistory.back().seconds;

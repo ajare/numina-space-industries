@@ -82,3 +82,17 @@ target_link_libraries(station-configuration-consumer PRIVATE StationSystems::Sta
 add_test(NAME station-library-configuration COMMAND station-configuration-consumer)
 set_tests_properties(station-library-configuration PROPERTIES
     LABELS "station;functional;validation-fast" TIMEOUT 30)
+
+add_executable(station-cell-thermal-consumer CellThermalConsumer.cpp)
+target_link_libraries(station-cell-thermal-consumer PRIVATE StationSystems::StationSystems)
+add_test(NAME station-cell-thermal COMMAND station-cell-thermal-consumer)
+set_tests_properties(station-cell-thermal PROPERTIES LABELS "station;functional;validation-fast" TIMEOUT 30)
+add_dependencies(station-configuration-consumer station-cell-thermal-consumer)
+
+add_executable(station-cell-fluid-consumer CellFluidConsumer.cpp)
+target_link_libraries(station-cell-fluid-consumer PRIVATE StationSystems::StationSystems)
+add_test(NAME station-cell-fluid COMMAND station-cell-fluid-consumer)
+add_dependencies(station-configuration-consumer station-cell-fluid-consumer)
+set_tests_properties(station-cell-fluid PROPERTIES LABELS "station;functional;validation-fast" TIMEOUT 30)
+add_executable(station-cell-fluid-benchmark CellFluidBenchmark.cpp)
+target_link_libraries(station-cell-fluid-benchmark PRIVATE StationSystems::StationSystems)

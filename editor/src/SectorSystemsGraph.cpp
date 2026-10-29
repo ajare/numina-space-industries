@@ -73,28 +73,36 @@ void atmosphereSimulation(SectorSystemNode& node, const station::StationSystemsS
     auto field = [&](const char* label, double value, const char* unit) {
         node.simulation.emplace_back(label, number(value, unit));
     };
-    field("Temperature", a.temperatureC, "C");
+    if (a.spatial && !a.resolvedGas) node.simulation.emplace_back("Temperature / humidity","Unavailable (unresolved gas)");
+    else {field("Temperature",a.temperatureC,"C");field("Relative humidity",a.relativeHumidity*100,"%");}
     field("Pressure", a.pressureKPa, "kPa");
-    field("Relative humidity", a.relativeHumidity * 100, "%");
-    auto gas = [&](const char* label, double kg, double partialPressure) {
-        const auto fraction = std::isfinite(a.pressureKPa) && a.pressureKPa > 0
-            ? number(100 * partialPressure / a.pressureKPa, "%") : "-- %";
+    if (a.spatial) {
+        field("Minimum Cell pressure",a.minCellPressureKPa,"kPa");field("Maximum Cell pressure",a.maxCellPressureKPa,"kPa");
+        field("Wind kinetic energy",a.kineticEnergyKJ,"kJ");
+    }
+    const double totalMoles=a.oxygenKg/StationMolarMassOxygenKgPerMol+a.nitrogenKg/StationMolarMassNitrogenKgPerMol
+        +a.carbonDioxideKg/StationMolarMassCarbonDioxideKgPerMol+a.waterVapourKg/StationMolarMassWaterKgPerMol;
+    auto gas = [&](const char* label, double kg, double partialPressure,double molarMass) {
+        const auto fraction = std::isfinite(a.pressureKPa) && a.pressureKPa > 0 && (!a.spatial || a.resolvedGas)
+            ? number(a.spatial && totalMoles>0 ? 100*(kg/molarMass)/totalMoles : 100*partialPressure/a.pressureKPa,"%") : "-- %";
         node.simulation.emplace_back(label, number(kg, "kg") + " | " + fraction +
             " | " + number(partialPressure, "kPa"));
     };
-    // Ideal-gas partial/total pressure is the wet mole/volume fraction, not
-    // mass fraction. CO is retained hazard inventory, outside these four gases.
+    // Spatial mole fractions use inventory, independently of mean partial
+    // pressures. CO is retained hazard inventory, outside these four gases.
     node.simulation.emplace_back("Gas composition", "mass | wet mole fraction | partial pressure");
-    gas("Oxygen", a.oxygenKg, a.oxygenPartialPressureKPa);
-    gas("Nitrogen", a.nitrogenKg, a.nitrogenPartialPressureKPa);
-    gas("Carbon dioxide", a.carbonDioxideKg, a.carbonDioxidePartialPressureKPa);
-    gas("Water vapour", a.waterVapourKg, a.waterVapourPartialPressureKPa);
+    gas("Oxygen", a.oxygenKg, a.oxygenPartialPressureKPa,StationMolarMassOxygenKgPerMol);
+    gas("Nitrogen", a.nitrogenKg, a.nitrogenPartialPressureKPa,StationMolarMassNitrogenKgPerMol);
+    gas("Carbon dioxide", a.carbonDioxideKg, a.carbonDioxidePartialPressureKPa,StationMolarMassCarbonDioxideKgPerMol);
+    gas("Water vapour", a.waterVapourKg, a.waterVapourPartialPressureKPa,StationMolarMassWaterKgPerMol);
     field("Carbon monoxide", a.carbonMonoxideKg, "kg");
     field("Thermal energy", a.currentEnergyKJ, "kJ");
     field("Current heat capacity",a.thermalCapacityKJPerK,"kJ/K");
     field("Inventory-carried energy",a.inventoryEnergyKJ,"kJ");
     field("Condensed water (total)", a.condensedKg, "kg");
     field("Leaked gas (total)", a.leakedKg, "kg");
+    double exterior=0;for (const auto kg:a.exteriorLostKg) exterior+=kg;
+    field("Exterior gas loss (total)",exterior,"kg");
     field("Occupant heat", a.lastOccupantHeatKW, "kW");
     field("Reservoir exchange (+ into air)", a.lastExchangeIntoCompartmentKW, "kW");
     field("Conduction (+ into air)", a.lastConductedKW, "kW");
@@ -145,6 +153,23 @@ SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& instal
         if (p.aAtmosphereId!=atmosphere->id && p.bAtmosphereId!=atmosphere->id) continue;
         settings.atmospherePathways.push_back(p);
         neighbours.insert(p.aAtmosphereId); neighbours.insert(p.bAtmosphereId);
+    }
+    // Spatial breaches are derived geometry, not serialized Station pathways.
+    const auto& grid=installation.level(level);
+    auto breach=[&](std::int64_t x,std::int64_t y,std::size_t wall,double area) {
+        if (grid.walls()[wall].type!=nsi::core::Installation::WallType::None) return;
+        if (x>=0 && y>=0 && x<grid.width() && y<grid.depth()
+            && grid.cell(x,y)!=nsi::core::Installation::SectorType::Void) return;
+        station::AtmospherePathwaySettings p;p.id="breach-"+std::to_string(level)+"-"+std::to_string(wall);
+        p.aAtmosphereId=atmosphere->id;p.bAtmosphereId=StationExteriorAtmosphereId;p.areaM2=area;p.openFraction=1;p.dischargeCoefficient=1;
+        settings.atmospherePathways.push_back(std::move(p));neighbours.insert(StationExteriorAtmosphereId);
+    };
+    for (std::size_t i=0;i<grid.cellCount();++i) if (grid.cells()[i].sector==int(sector)) {
+        const auto x=std::int64_t(i%grid.width()),y=std::int64_t(i/grid.width());
+        breach(x-1,y,grid.verticalWall(x,y),nsi::core::CellDepthM*nsi::core::LevelHeightM);
+        breach(x+1,y,grid.verticalWall(x+1,y),nsi::core::CellDepthM*nsi::core::LevelHeightM);
+        breach(x,y-1,grid.horizontalWall(x,y),nsi::core::CellWidthM*nsi::core::LevelHeightM);
+        breach(x,y+1,grid.horizontalWall(x,y+1),nsi::core::CellWidthM*nsi::core::LevelHeightM);
     }
     const auto thermal=nsi::systems::expandThermal(installation);
     for (const auto& link:thermal.links) {
@@ -212,7 +237,7 @@ SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& instal
                 const double sign=p.aAtmosphereId==atmosphere->id ? 1 : -1;
                 node.simulation.emplace_back("State",live->openFraction>0 ? "Open" : "Closed");
                 node.simulation.emplace_back("Open fraction",number(live->openFraction));
-                const char* regime="No bulk flow";
+                const char* regime=live->spatialApproximation ? "Balanced local pressures" : "No bulk flow";
                 switch (live->flowRegime) {
                     case StationAtmosphereFlowRegime::Sealed: regime="Sealed"; break;
                     case StationAtmosphereFlowRegime::Subsonic: regime="Subsonic"; break;
@@ -222,7 +247,9 @@ SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& instal
                 node.simulation.emplace_back("Flow regime",regime);
                 node.simulation.emplace_back("Downstream / upstream pressure",number(live->pressureRatio));
                 node.simulation.emplace_back("Bulk gas flow (outward)",number(sign*live->bulkFlowRateKgPerS,"kg/s"));
-                node.simulation.emplace_back("Regime convention","Current state; flow rates are last-step averages");
+                node.simulation.emplace_back("Regime convention",live->spatialApproximation
+                    ? "Cell-face flux; pressure-based regime estimate, not an analytic nozzle solve"
+                    : "Current state; flow rates are last-step averages");
                 const char* gases[]={"Oxygen flow (outward)","Nitrogen flow (outward)","Carbon dioxide flow (outward)","Water vapour flow (outward)"};
                 for (std::size_t gas=0;gas<4;++gas)
                     node.simulation.emplace_back(gases[gas],number(sign*live->flowRateKgPerS[gas],"kg/s"));

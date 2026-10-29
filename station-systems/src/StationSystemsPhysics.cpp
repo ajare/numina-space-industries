@@ -174,6 +174,8 @@ namespace station
 		for (int iteration = 0; iteration < 100; ++iteration)
 		{
 			auto const mid = 0.5 * (low + high);
+			// Adjacent double endpoints cannot advance the bracket further.
+			if (mid == low || mid == high) break;
 			auto const midTemperatureC = freeTemperatureC
 				+ StationLatentHeatVaporizationKJPerKg * mid / capacityKJPerK;
 			if (vapourKg - saturatedMassAt(midTemperatureC) - mid > 0.0) low = mid;

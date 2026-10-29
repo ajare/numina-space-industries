@@ -1545,6 +1545,7 @@ namespace station
 		double dischargeCoefficient{0.7};
 		StationAtmosphereFlowRegime flowRegime{StationAtmosphereFlowRegime::Sealed};
 		double pressureRatio{1.0}; // instantaneous downstream/upstream absolute pressure
+		bool spatialApproximation{false}; // local pressure-based regime estimate, Cell-face flux
 		double bulkFlowRateKgPerS{0.0}; // last-step mean; excludes counterdiffusion
 		// Advected enthalpy (#802): the signed net thermal energy this
 		// pathway has carried with its moving gas since configuration,
@@ -2627,6 +2628,7 @@ namespace station
 		// per-component and thermal ledgers, plus the scheduled airlock
 		// cycle history with the recovered-versus-lost split.
 		std::vector<StationAtmosphereSnapshot> atmospheres;
+		std::vector<StationCellAtmosphereSnapshot> cellAtmospheres;
 		std::vector<StationAtmospherePathwaySnapshot> atmospherePathways;
 		std::vector<StationThermalLinkSnapshot> thermalLinks;
 		std::vector<StationAirlockCycleSnapshot> airlockCycles;

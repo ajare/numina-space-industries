@@ -46,8 +46,10 @@ std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation& ins
     std::size_t level, const InstallationRenderSettings& settings, const StationSystemsSnapshot* live) {
     std::map<std::string,double> values;
     if (settings.mode != InstallationRenderMode::Default && live && live->enabled)
-        for (const auto& air : live->atmospheres)
+        for (const auto& air : live->atmospheres) {
+            if (settings.mode==InstallationRenderMode::Thermal && air.spatial && !air.resolvedGas) continue;
             values.emplace(air.id,settings.mode==InstallationRenderMode::Pressure ? air.pressureKPa : air.temperatureC);
+        }
     const auto sectors = installation.level(level).sectors();
     std::vector<SectorColour> result;
     result.reserve(sectors.size());
@@ -64,6 +66,22 @@ std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation& ins
             }
         }
         result.push_back(colour);
+    }
+    return result;
+}
+std::vector<SectorColour> cellRenderColours(const nsi::core::Installation& installation,
+    std::size_t level,const InstallationRenderSettings& settings,const StationSystemsSnapshot* live) {
+    const auto& grid=installation.level(level);std::vector<SectorColour> result;result.reserve(grid.cellCount());
+    for (const auto& c:grid.cells()) result.push_back(defaultSectorColour(grid.sectors()[c.sector].type));
+    if (!live || !live->enabled || settings.mode==InstallationRenderMode::Default) return result;
+    for (const auto& cell:live->cellAtmospheres) {
+        if (cell.level!=level || cell.gridIndex>=grid.cellCount()) continue;
+        const auto& sector=grid.sectors()[grid.cells()[cell.gridIndex].sector];
+        if (sector.uid!=cell.sectorUid || sector.type!=nsi::core::Installation::SectorType::Interior
+            || !nsi::systems::specFor(sector.atmosphere)) continue;
+        const auto colour=settings.mode==InstallationRenderMode::Pressure ? pressureColour(cell.pressureKPa,settings.pressure)
+            : cell.resolvedGas ? thermalColour(cell.temperatureC,settings.thermal) : std::nullopt;
+        if (colour) result[cell.gridIndex]=*colour;
     }
     return result;
 }

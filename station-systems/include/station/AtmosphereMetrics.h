@@ -2,6 +2,16 @@
 #include "station/Configuration.h"
 namespace station
 {
+	// Runtime-only Cell observation, never authored or serialized. Coordinates
+	// identify geometry; sectorUid prevents stale values colouring a new Sector.
+	struct StationCellAtmosphereSnapshot {
+		std::size_t level{}, gridIndex{};
+		std::int64_t sectorUid{};
+		std::array<double,4> massKg{};
+		double pressureKPa{}, temperatureC{}, relativeHumidity{}, velocityX{}, velocityY{};
+		bool resolvedGas{};
+		bool operator==(StationCellAtmosphereSnapshot const&) const = default;
+	};
 	struct StationAtmosphereSnapshot
 	{
 		std::vector<StationFaultSnapshot> activeFaults;
@@ -31,6 +41,10 @@ namespace station
 		double thermalCapacityKJPerK{0.0};
 		double startingThermalCapacityKJPerK{0.0};
 		bool inventoryThermodynamics{false};
+		// Spatial views: temperature is capacity-weighted, pressure/partials/RH
+		// volume-weighted. They are not an equilibrated compartment EOS state.
+		bool spatial{false}, resolvedGas{true};
+		double minCellPressureKPa{}, maxCellPressureKPa{}, kineticEnergyKJ{};
 		// Sensible internal energy carried by non-pathway inventory changes.
 		double inventoryEnergyKJ{0.0};
 		double exchangerConductanceKWPerK{0.0};
@@ -56,7 +70,8 @@ namespace station
 		double carbonDioxideKg{0.0};
 		double waterVapourKg{0.0};
 		double temperatureC{0.0};
-		// Derived pressures (kPa) at the current inventory and temperature.
+		// Derived pressures (kPa); independent volume-weighted Cell means in
+		// spatial views, otherwise the equilibrated inventory/temperature EOS.
 		double pressureKPa{0.0};       // absolute total, sum of partials
 		double oxygenPartialPressureKPa{0.0};
 		double nitrogenPartialPressureKPa{0.0};
@@ -147,7 +162,7 @@ namespace station
 		// distinct from what a wall did.
 		double lastAdvectedKW{0.0};
 		double advectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + occupant + latent + exchanged + conducted + advected - current
+		double residualKJ{0.0}; // supplied energy incl. inventory minus internal and spatial kinetic energy
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationAtmosphereSnapshot const&) const = default;
 	};

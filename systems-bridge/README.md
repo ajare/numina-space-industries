@@ -93,6 +93,112 @@ The same Partition U-value times summed shared area is converted to kW/K at
 this boundary. A missing Partition type emits no partition links, and no Hull
 suppresses all geometry-authored coupling.
 
+## Native spatial gas layer and Editor playback
+
+`nsi/systems/CellAtmosphere.h` provides `expandCellAtmosphere` and
+`CellAtmosphereTransport`. Editor playback uses this transport in Geometry mode
+as its sole gas/heat runtime. The standalone transport's default `CellThermalMode::Adiabatic` keeps geometry heat disabled;
+`CellThermalMode::Geometry` enables native Hull/partition conduction and radiation.
+Explicit reservoir references have no definitions in Installation expansion and
+refuse Geometry mode instead of silently losing their coupling. The standalone
+compartment APIs above keep their existing behavior.
+
+Expansion produces one gas Cell per modelled Interior Cell at its authored base
+Level, with volume `12 m³ × Sector height`. All four faces are present; ordinary
+Walls close them, missing Walls facing geometric Void/outside breach the full
+6 m² face, and Doors start closed with a 1.8 m² clear aperture and coefficient
+0.7. Faces never join Levels. An Interior Void preset has no Cell and cannot be
+opened as a vacuum sink; same-Sector Doors retain their real adjacent Cell face.
+Door actuation changes native face fractions only, never the authored document.
+The aperture flux is the spatial HLLE prototype, not a second application of the
+standalone compartment orifice flow.
+
+Cell thermal contacts localize the **unchanged** `expandThermal` conductance
+budgets to shared Walls, overlapping floors and exterior skin. Side areas retain
+height scaling, roofs/floors retain world-coordinate coverage rules, and absent
+exterior Walls do not acquire a new thermal skin area. Geometry mode solves these
+contacts after gas transport and source updates, using the **current Cell gas
+capacity**, never stale Sector capacity. Cross-Level heat contacts imply no gas
+exchange. Empty/unresolved gas nodes detach without discarding their inventory.
+
+The transport layer applies configured occupancy, moisture and proportional
+leaks locally by Cell volume. Oxygen availability scales that Cell's CO2 and
+sensible heat, not the entire Sector's metabolism. Sources straddle gas transport;
+heat precedes leakage so departing gas carries its share. Condensation is local
+and uses the existing latent equilibrium, including the sensible/kinetic energy
+and momentum removed with condensate. Source/phase intervals are at most 0.1 s,
+also at accelerated speeds. There is no ignition at startup or plant/fault solver
+in this layer.
+
+`advance(seconds, heatJ)` accepts optional **per-Cell joules for the whole call**
+from an external thermal source. In Adiabatic mode, omission leaves only the
+configured occupant/latent heat; in Geometry mode, these joules are **additional**
+to native Hull/partition heat. Do not supply the same contact flux twice. The
+caller must commit any external body's opposite energy booking only after
+success. A failed acoustic/thermal budget, invalid heat input or numerical refusal
+restores the entire update's gas, Hull, heat-link/source/phase ledgers, momentum
+balance and clock, including all already-completed source slices. The default
+whole-call budgets are 4096 acoustic steps, 4096 thermal iterations/analytical
+star solves and 4096 source slices. A refusal never commits partial time.
+
+The sparse thermal step uses passive backward Euler on the Cell/contact graph,
+with exact star elimination where possible and preconditioned CG otherwise.
+This is first-order temporal conduction (bounded to 0.1 s), not the compartment
+solver's dense second-order extrapolation. It avoids a quadratic matrix and
+maintains the stiff trace-gas limit. Shared links book one signed transfer;
+node heat and link-flux residuals must meet a `1e-7 J + 1e-12 × sum(abs(node heat))`
+convergence budget. A bounded energy-constraint adjustment on the largest-capacity
+body closes summed heat without subtracting large opposing fluxes on trace gas.
+Kelvin/passive bounds are checked, never temperature-clamped. Hull radiation runs
+in half-steps around conduction using the existing nonlinear integrator, with
+midpoint solar exposure. `thermal()` exposes Hull and link energy ledgers.
+
+Sector outputs contain actual species masses, total/kinetic energy, heat-capacity-
+weighted temperature and volume-weighted pressure mean/min/max. Temperature and
+mean pressure are aggregated independently, not inferred by treating a nonuniform
+Sector as one equilibrated compartment. Ledgers separate inventory energy,
+external/occupant/latent/conducted heat, transported energy, exterior losses and retained
+condensate. Global momentum includes source impulse, exterior pressure/momentum
+flux and fixed-Wall reaction. `faceTransfers()` spans the complete call, not just
+its final 0.1 s slice. Successful updates allocate no heap memory.
+
+The Release benchmark includes transport, sources, condensation and aggregation
+for 4096 Cells. `thermal-*` scenarios also include Hull conduction/radiation;
+**GUI and Editor snapshot adaptation are excluded from this transport-only benchmark**:
+
+```sh
+cmake --build build-linux --config Release --target nsi-cell-atmosphere-benchmark -j 16
+build-linux/systems-bridge/nsi-cell-atmosphere-benchmark
+```
+
+On the development Ryzen AI MAX+ 395, two warmups plus ten fresh-start trials
+measured about **5.5 ms** for a wave, **7.0 ms** for four breaches, **9.7 ms** for
+sustained breaches after one simulated second, and **8.0 ms** for breaches with
+4096 occupants' loads, per 0.1 simulated seconds **including geometry heat**.
+Exact star elimination reduces common Hull solve work; rebasing the resting
+background prevents uniform sources from waking the entire gas mesh. Both retain
+the same physical equations and sound speed. These are measurements, not
+integrated playback or scheduling guarantees. Geometry construction is excluded.
+An optional scenario and duration narrow the benchmark, for example
+`nsi-cell-atmosphere-benchmark thermal-loaded-breaches 1` for a 10x update;
+that loaded coupled case measured about **103 ms per simulated second**, so
+higher playback speeds are not a real-time guarantee.
+
+The Editor runtime benchmark additionally publishes Cell/Sector/Hull/pathway
+snapshots, including derived `breach-<level>-<wall>` telemetry. On the same machine,
+two warmups and ten trials measured **0.61 ms** at rest, **9.68 ms** for four
+breaches and **9.78 ms** for sustained breaches per 0.1 simulated seconds.
+A sustained one-simulated-second update measured **94.5 ms** (95.5 ms maximum).
+These include native gas/heat and snapshot publication, but exclude construction,
+controller history/copy costs, GUI rendering and scheduling overhead; accelerated
+playback still has no real-time guarantee.
+
+```sh
+cmake --build build-linux --config Release --target editor-cell-playback-benchmark -j 16
+build-linux/editor/editor-cell-playback-benchmark
+build-linux/editor/editor-cell-playback-benchmark sustained-breaches 1
+```
+
 The runtime consumer follows the station-systems scenario-rig precedent and
 checks isolated temperatures across ticks, active loads/couplings, and pressure
 and gas-quality crossings. Editing-identity coverage is tracked by #9, and
