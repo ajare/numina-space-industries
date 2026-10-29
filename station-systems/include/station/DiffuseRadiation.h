@@ -15,6 +15,10 @@ class DiffuseRadiation final : public ThermalAlgebraicOperator {
 public:
     DiffuseRadiation(std::size_t nodes, std::size_t cavities,
         std::vector<ThermalRadiationContact>, std::vector<ThermalRadiationPortal>);
+    void setSurface(std::size_t index, std::size_t cavity, double areaM2);
+    void setPortalArea(std::size_t index, double areaM2);
+    // Recompute sparse coefficients after a batch of control changes; no allocation.
+    void updateCoefficients();
     void setWorkBudget(std::size_t*, std::size_t) override;
     bool healthy() const override { return healthy_; }
     std::optional<long double> boundaryPowerW() const override;
@@ -32,7 +36,8 @@ private:
     std::vector<ThermalRadiationContact> surfaces_;
     std::vector<ThermalRadiationPortal> portals_;
     std::vector<long double> diagonal_, boundary_, offset_;
-    std::vector<bool> active_;
+    std::vector<bool> active_,anchored_;
+    std::vector<std::size_t> parent_;
     mutable std::vector<long double> rhs_, field_, residual_, direction_, product_, z_;
     std::vector<long double> trial_;
     long double slope_{};

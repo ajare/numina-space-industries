@@ -2,9 +2,9 @@
 
 The opt-in `LocalStructure` backend now uses `station::DiffuseRadiation`
 (`<station/DiffuseRadiation.h>`) under ADR-0007 and #22. The model revision is
-`local-structure-v2-cavity-candidate`; material revision remains
+`local-structure-v3-door-candidate`; material revision remains
 `C1-v1-provisional`. The default backend, standalone compartments and YAML are
-unchanged. Active Door thermal poses/portals remain #31; rollout remains #35.
+unchanged. Energy-preserving Door controls are included under #31; rollout remains #35.
 
 ## Physical approximation
 
@@ -51,7 +51,7 @@ components instead have a determined field and no invented thermal mass.
 
 Let M have diagonal `sum(w) + sum(portal area)` and reciprocal off-diagonal
 `-A`. It is SPD on anchored components; unanchored components are excluded by a
-Reset-time connected-component pass. No all-surface matrix is constructed.
+connected-component pass at Reset and after Door coefficient changes. No all-surface matrix is constructed.
 
 At each nonlinear trial use a **common** nonnegative slope
 `k = 4 sigma max(T_surface)^3` and offsets `b_i = k T_i - sigma T_i^4`.
@@ -96,9 +96,10 @@ Reset constructs the owner map independently of gas inventory, adds each
 interior structural face once, and converts non-Door opening metadata into
 reciprocal or exterior portals. Breaches use their full physical height coverage
 without gas Cd or duplicate radiating panels. No-Hull still opts out completely.
-Door controls currently affect gas only: Reset-time leaf ownership remains and
-no Door radiation portal is activated until #31 implements energy-preserving
-leaf relocation and coefficient updates. This is not the completed parent model.
+Door controls update preallocated gas, surface and portal slots without changing
+body energy, capacity, solid/hinge connections, authored geometry or elapsed time.
+See [Door binary poses](door-thermal-poses.md). The parent observation and rollout
+gates remain separate.
 
 ## Evidence
 

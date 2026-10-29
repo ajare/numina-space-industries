@@ -47,7 +47,7 @@ those assemblies supply stable geometry/side IDs. Bodies expose separate
 capacity, stored energy and temperature. Global solid energy, gas internal and
 kinetic energy, net exterior radiation/solar heat, audit residual and whole-call
 work counts are distinct. Model/preset revision strings identify
-`local-structure-v2-cavity-candidate` / `C1-v1-provisional`, not a save-schema change.
+`local-structure-v3-door-candidate` / `C1-v1-provisional`, not a save-schema change.
 The facade omits legacy Hull/link snapshots for this backend. Richer spatial
 inspection, rate/heat-path breakdowns and rendering remain #32/#33.
 
@@ -92,11 +92,10 @@ mutating authoring.
 ## Deliberate staging
 
 [Diffuse cavities and static breach portals](diffuse-radiation.md) are now
-implemented by #30. Open-leaf thermal pose/portal changes (#31), objects (#21),
-parallelisation (#20), and default rollout (#35) remain separate. Until #31, a
-Door control changes its gas opening but retains the Reset-time solid
-leaf/film/exterior contacts and energy; Door aperture radiation is not yet
-modelled. Missing-Wall apertures radiate without a duplicate solid face.
+implemented by #30. [Energy-preserving Door poses](door-thermal-poses.md) and
+active clear-area portals are implemented by #31. Objects (#21), parallelisation
+(#20), observations (#32–#33) and default rollout (#35) remain separate.
+Missing-Wall apertures radiate without a duplicate solid face.
 Use this candidate for staged integration/tests, not as the completed parent
 thermal model or a performance-approved production default.
 

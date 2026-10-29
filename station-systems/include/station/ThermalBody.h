@@ -6,7 +6,7 @@
 
 namespace station {
 // Identifies this opt-in contract, not the active playback backend or save schema.
-inline constexpr std::string_view NativeThermalModelRevision = "local-structure-v2-cavity-candidate";
+inline constexpr std::string_view NativeThermalModelRevision = "local-structure-v3-door-candidate";
 inline constexpr double ThermalBodyInitialTemperatureK = 293.15;
 // Distinct from legacy machine-casing ThermalBodySettings (kJ/K, Celsius).
 struct NativeThermalBodySettings {

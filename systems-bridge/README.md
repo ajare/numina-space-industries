@@ -4,7 +4,7 @@ The opt-in [local-solid playback backend](../docs/structural-playback.md) (#29)
 connects topology, pressure-dependent gas films and native thermal integration
 with atomic rollback and separate gas/solid observations. Select
 `CellThermalMode::LocalStructure` only at construction/Reset; the Editor default
-remains `Geometry` pending #35. Cavities and Door thermal poses remain #30/#31.
+remains `Geometry` pending #35. Cavities and energy-preserving Door thermal poses are implemented (#30/#31); see `../docs/door-thermal-poses.md`.
 
 The opt-in [reset-time structural topology builder](../docs/structural-topology.md)
 (#27), `<nsi/systems/StructuralTopology.h>`, expands geometry into deduplicated,

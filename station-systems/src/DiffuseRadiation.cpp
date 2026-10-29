@@ -15,10 +15,27 @@ bool valid(double x) {return std::isfinite(x) && x>=0;}
 DiffuseRadiation::DiffuseRadiation(std::size_t nodes,std::size_t cavities,
     std::vector<ThermalRadiationContact> surfaces,std::vector<ThermalRadiationPortal> portals)
     :nodes_(nodes),surfaces_(std::move(surfaces)),portals_(std::move(portals)),
-    diagonal_(cavities),boundary_(cavities),offset_(surfaces_.size()),active_(cavities),
+    diagonal_(cavities),boundary_(cavities),offset_(surfaces_.size()),active_(cavities),anchored_(cavities),parent_(cavities),
     rhs_(cavities),field_(cavities),residual_(cavities),direction_(cavities),product_(cavities),z_(cavities),trial_(cavities) {
     validateThermalContacts(nodes,0,cavities,{},{},surfaces_);
-    std::vector<std::size_t> parent(cavities);std::iota(parent.begin(),parent.end(),0);
+    for(const auto& s:surfaces_) if(s.boundary!=ThermalRadiationBoundary::Cavity)
+        throw std::invalid_argument("Diffuse surface must own a cavity");
+    updateCoefficients();
+}
+void DiffuseRadiation::setSurface(std::size_t index,std::size_t cavity,double area) {
+    if(cavity>=diagonal_.size() || !valid(area)) throw std::invalid_argument("Invalid actuated cavity surface");
+    auto& s=surfaces_.at(index);s.cavity=cavity;s.areaM2=area;
+}
+void DiffuseRadiation::setPortalArea(std::size_t index,double area) {
+    if(!valid(area)) throw std::invalid_argument("Invalid actuated portal area");
+    portals_.at(index).areaM2=area;
+}
+void DiffuseRadiation::updateCoefficients() {
+    const auto cavities=diagonal_.size();
+    trialValid_=false;
+    std::fill(diagonal_.begin(),diagonal_.end(),0);std::fill(boundary_.begin(),boundary_.end(),0);
+    std::fill(active_.begin(),active_.end(),false);std::fill(anchored_.begin(),anchored_.end(),false);
+    auto& parent=parent_;std::iota(parent.begin(),parent.end(),0);
     auto root=[&](std::size_t i) {while(parent[i]!=i) {parent[i]=parent[parent[i]];i=parent[i];}return i;};
     for(const auto& p:portals_) {
         if(p.a>=cavities || (p.b && *p.b>=cavities) || !valid(p.areaM2) || !valid(p.spaceTemperatureK))
@@ -32,7 +49,7 @@ DiffuseRadiation::DiffuseRadiation(std::size_t nodes,std::size_t cavities,
         if(s.boundary!=ThermalRadiationBoundary::Cavity) throw std::invalid_argument("Diffuse surface must own a cavity");
         const long double w=s.areaM2*s.emissivity;diagonal_[s.cavity]+=w;if(w>0) active_[s.cavity]=true;
     }
-    std::vector<bool> anchored(cavities);
+    auto& anchored=anchored_;
     for(std::size_t i=0;i<cavities;++i) if(active_[i]) anchored[root(i)]=true;
     for(std::size_t i=0;i<cavities;++i) {
         active_[i]=anchored[root(i)];

@@ -58,6 +58,9 @@ public:
     bool solve(std::span<const ThermalBody>, std::span<const NativeThermalGas>,
         std::span<const NativeThermalExterior>, double seconds,
         NativeThermalBudget = {}, ThermalAlgebraicOperator* = nullptr);
+    // Reset-built slots only; actuation does not resize topology or touch energy.
+    void setGasContact(std::size_t index, std::size_t gas, double areaM2);
+    void setRadiationArea(std::size_t index, double areaM2);
     std::span<const double> heatJ() const { return heat_; }
     std::span<const double> temperatureK() const { return temperature_; }
     const NativeThermalReport& report() const { return report_; }

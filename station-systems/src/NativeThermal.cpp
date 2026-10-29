@@ -6,6 +6,14 @@
 #include <stdexcept>
 
 namespace station {
+void NativeThermalSolver::setGasContact(std::size_t index,std::size_t gas,double area) {
+    if(gas>=gases_ || !std::isfinite(area) || area<0) throw std::invalid_argument("Invalid actuated gas contact");
+    auto& c=gas_.at(index);c.gasCell=gas;c.areaM2=area;
+}
+void NativeThermalSolver::setRadiationArea(std::size_t index,double area) {
+    if(!std::isfinite(area) || area<0) throw std::invalid_argument("Invalid actuated radiation area");
+    radiation_.at(index).areaM2=area;
+}
 namespace {
 bool valid(long double x) { return std::isfinite(x) && x>=0; }
 long double dot(std::span<const long double> a,std::span<const long double> b) {

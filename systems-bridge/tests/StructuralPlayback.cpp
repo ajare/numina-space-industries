@@ -105,6 +105,111 @@ void check() {
     I pair(2,3);pair.setHullType(I::HullType::BareSkin);pair.setPartitionType(I::PartitionType::BarePartition);
     for (unsigned y=0;y<3;++y) pair.toggleWall(0,pair.level(0).verticalWall(1,y));
     const auto wall=pair.level(0).verticalWall(1,1);pair.setDoor(0,wall,true);
+    // Binary Door poses retain the exact bodies through repeated controls,
+    // including exterior orientation reversal and same-Sector endpoints.
+    auto poseCheck=[&](const I& installation,std::size_t doorWall,bool exterior) {
+        auto g=radiationOnly(installation);
+        if(!exterior) for(const auto& a:g.structure->assemblies) if(a.id.part==StructuralPart::DoorLeaf)
+            for(unsigned side=0;side<2;++side) {
+                auto& b=g.structure->bodies[a.bodies[side]];b=station::ThermalBody({b.capacityJPerK(),side ? 200. : 350.});
+            }
+        const auto authored=installation.serialize();
+        CellAtmosphereTransport closed(g,CellThermalMode::LocalStructure),opened(g,CellThermalMode::LocalStructure);
+        const auto bodies=opened.structure().bodies;
+        tracking=true;
+        for(int i=0;i<100;++i) {opened.setDoorOpen(0,doorWall,true);opened.setDoorOpen(0,doorWall,false);}
+        tracking=false;
+        require(allocations==0,"Door actuation allocated");sameBodies(opened.structure().bodies,bodies);
+        require(opened.elapsedSeconds()==0,"Door control advanced time");
+        // A closed pose after cycles must reproduce the original thermal map,
+        // not just retain the same total energy.
+        advance(closed,.001);advance(opened,.001);
+        sameBodies(opened.structure().bodies,closed.structure().bodies);
+        const auto cycled=opened.structure().bodies;
+        opened.setDoorOpen(0,doorWall,true);
+        sameBodies(opened.structure().bodies,cycled);
+        require(opened.elapsedSeconds()==.001 && installation.serialize()==authored,"Door control advanced time or authored geometry");
+        advance(closed,.001);advance(opened,.001);audit(closed);audit(opened);
+        if(exterior) {
+            const auto loss=-opened.structure().exteriorHeatJ;
+            const auto black=.001*1.8*5.670374419e-8*std::pow(293.15,4);
+            require(loss>black*.7 && loss<black,"Door portal is missing, Cd-adjusted, or exceeds clear area");
+            require(std::abs(closed.structure().exteriorHeatJ)<1e-10,"Closed Door retained aperture");
+        } else require(std::abs(opened.structure().exteriorHeatJ)<1e-10,"Interior Door became space sink");
+        const auto after=opened.structure().bodies;
+        opened.setDoorOpen(0,doorWall,false);sameBodies(opened.structure().bodies,after);
+        opened.setDoorOpen(0,doorWall,true);
+        require(!opened.advance(.1,{},4096,0),"Door refusal fixture accepted");
+        sameBodies(opened.structure().bodies,after);
+        advance(opened,.001);audit(opened);
+    };
+    poseCheck(pair,wall,false);
+    // Independently exercise cavity and gas ownership: both leaf sides must
+    // see the canonical (negative-x, warm) Interior endpoint when parked.
+    for(bool gasOnly:{false,true}) {
+        auto g=expandCellAtmosphere(pair,true);g.structure->contacts.clear();
+        std::size_t positiveLeaf=SIZE_MAX;
+        for(const auto& a:g.structure->assemblies) {
+            for(unsigned side=0;side<2;++side) {
+                const auto owner=a.owners[side];
+                auto& b=g.structure->bodies[a.bodies[side]];
+                b=station::ThermalBody({b.capacityJPerK(),owner && owner->worldX==0 ? 400. : 200.});
+                if(a.id.part==StructuralPart::DoorLeaf) {b=station::ThermalBody({b.capacityJPerK(),300});if(side==1) positiveLeaf=a.bodies[side];}
+            }
+        }
+        for(auto& a:g.structure->assemblies) {
+            if(gasOnly) {a.material.firstSide.emissivity=0;a.material.secondSide.emissivity=0;}
+            else if(!a.owners[0] || !a.owners[1]) a.material.secondSide.emissivity=0;
+        }
+        for(std::size_t i=0;i<g.mesh.cells.size();++i) g.mesh.cells[i].initial=gasOnly
+            ? station::makeCellFluidState({0,1,0,0},g.gasOwners[i].worldX==0 ? 400 : 200) : station::CellFluidState{};
+        CellAtmosphereTransport shut(g,CellThermalMode::LocalStructure),parked(g,CellThermalMode::LocalStructure);
+        parked.setDoorOpen(0,wall,true);advance(shut,.001);advance(parked,.001);
+        require(positiveLeaf!=SIZE_MAX && shut.structure().bodies[positiveLeaf].temperatureK()<300
+            && parked.structure().bodies[positiveLeaf].temperatureK()>300,"Open leaf did not park both sides at deterministic endpoint");
+        audit(shut);audit(parked);
+    }
+    auto noPartition=pair;noPartition.setPartitionType(std::nullopt);
+    poseCheck(noPartition,wall,false);
+    auto transparent=radiationOnly(noPartition);
+    std::size_t coldPanel=SIZE_MAX;
+    for(const auto& a:transparent.structure->assemblies) for(unsigned side=0;side<2;++side) if(a.owners[side]) {
+        auto& b=transparent.structure->bodies[a.bodies[side]];
+        const bool cold=a.owners[side]->worldX==1;
+        b=station::ThermalBody({b.capacityJPerK(),cold ? 200. : 400.});
+        if(cold) coldPanel=a.bodies[side];
+    }
+    CellAtmosphereTransport absentLeaf(transparent,CellThermalMode::LocalStructure);
+    absentLeaf.setDoorOpen(0,wall,true);advance(absentLeaf,.001);audit(absentLeaf);
+    require(coldPanel!=SIZE_MAX && absentLeaf.structure().bodies[coldPanel].temperatureK()>200,
+        "Open unmodelled partition Door failed to activate portal");
+    auto voidYaml=pair.serialize();const auto earth=voidYaml.find("Earth-like");
+    require(earth!=std::string::npos,"Missing atmosphere fixture");voidYaml.replace(earth,10,"Void");
+    I unmodelledEndpoint;unmodelledEndpoint.deserialize(voidYaml);
+    poseCheck(unmodelledEndpoint,wall,false);
+    for(unsigned x:{0u,1u}) {
+        I outside(1,3);outside.setHullType(I::HullType::BareSkin);
+        const auto door=outside.level(0).verticalWall(x,1);outside.setDoor(0,door,true);
+        poseCheck(outside,door,true);
+    }
+    I same(2,5);same.setPartitionType(I::PartitionType::BarePartition);
+    for(unsigned y=1;y<4;++y) same.toggleWall(0,same.level(0).verticalWall(1,y));
+    const auto sameWall=same.level(0).verticalWall(1,2);same.setDoor(0,sameWall,true);
+    require(expandStructuralTopology(same).cavityCount==1,"Same-Sector Door fixture split cavity");
+    poseCheck(same,sameWall,false);
+    I tallDoor(1,3);tallDoor.addLevel(1,3,2,0);tallDoor.setSector(0,0,"Tall",2);
+    const auto tallWall=tallDoor.level(0).verticalWall(0,1);tallDoor.setDoor(0,tallWall,true);
+    poseCheck(tallDoor,tallWall,true);
+    I tallBreach=tallDoor;tallBreach.setDoor(0,tallWall,false);
+    const auto breach=expandStructuralTopology(tallBreach);
+    double breachArea=0;
+    for(const auto& o:breach.openings) if(!o.door && o.face.axis==0 && o.face.origin.x==0 && o.face.origin.y==1) breachArea+=o.areaM2;
+    require(breachArea==12,"Tall breach used fixed hydraulic area");
+    CellAtmosphereTransport tallEscape(radiationOnly(tallBreach),CellThermalMode::LocalStructure);
+    advance(tallEscape,.001);audit(tallEscape);
+    const auto tallBlack=.001*12*5.670374419e-8*std::pow(293.15,4);
+    require(-tallEscape.structure().exteriorHeatJ>tallBlack*.6 && -tallEscape.structure().exteriorHeatJ<tallBlack,
+        "Tall breach radiative loss did not use physical height");
     auto warm=expandCellAtmosphere(pair,true);
     for (std::size_t i=1;i<warm.mesh.cells.size();i+=2) warm.mesh.cells[i].initial={};
     auto cold=warm;

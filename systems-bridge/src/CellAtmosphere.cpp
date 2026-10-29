@@ -67,7 +67,8 @@ CellAtmosphereExpansion expandCellAtmosphere(const I& installation,bool localStr
             const auto left=endpoint(x-(alongX ? 0 : 1),y-(alongX ? 1 : 0)),right=endpoint(x,y);
             const auto type=grid.walls()[w].type;
             const auto door=result.doors.size();
-            if (type==I::WallType::Door) result.doors.push_back({l,w,SIZE_MAX,0});
+            if (type==I::WallType::Door) result.doors.push_back({l,w,SIZE_MAX,0,
+                {{x+grid.offsetX(),y+grid.offsetY(),std::int64_t(l)},alongX ? 1 : 0,StructuralPart::Panel}});
             if (left.cell==SIZE_MAX && right.cell==SIZE_MAX) continue;
             const bool reverse=left.cell==SIZE_MAX;
             const auto a=reverse ? right.cell : left.cell,b=reverse ? SIZE_MAX : right.cell;
@@ -161,29 +162,76 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
         std::map<StructuralOwner,std::size_t> ownerCells;
         if (geometry_.gasOwners.size()!=fluid_.states().size()) throw std::invalid_argument("Structural gas owner map missing");
         for (std::size_t i=0;i<geometry_.gasOwners.size();++i) ownerCells.emplace(geometry_.gasOwners[i],i);
-        for (const auto& assembly:topology.assemblies) for (unsigned side=0;side<2;++side) {
-            const auto body=assembly.bodies[side];
-            if (const auto& owner=assembly.owners[side]) {
-                const auto material=assembly.surfaceMaterial(side);
-                cavitySurfaces.push_back({body,station::ThermalRadiationBoundary::Cavity,ownerCavities.at(*owner),
-                    assembly.areaM2,material.emissivity,material.absorptivity});
-                const auto found=ownerCells.find(*owner);
-                if (found!=ownerCells.end()) gasContacts.push_back({body,found->second,assembly.areaM2,
-                    {assembly.material.gasFilm.continuumWPerM2K,assembly.material.gasFilm.accommodation}});
-            } else {
-                const auto material=assembly.surfaceMaterial(side);
-                radiation.push_back({body,station::ThermalRadiationBoundary::Exterior,0,assembly.areaM2,material.emissivity,material.absorptivity});
+        for (const auto& assembly:topology.assemblies) {
+            if (assembly.id.part==StructuralPart::DoorLeaf) {
+                DoorPose pose;
+                auto id=assembly.id;id.part=StructuralPart::Panel;
+                const auto door=std::find_if(geometry_.doors.begin(),geometry_.doors.end(),[&](const auto& d){return d.structuralId==id;});
+                if(door==geometry_.doors.end()) throw std::logic_error("Structural Door has no control");
+                pose.door=std::size_t(door-geometry_.doors.begin());
+                // Canonical negative-side Interior endpoint wins; no gas required.
+                const auto park=*assembly.owners[assembly.owners[0] ? 0 : 1];
+                pose.parkCavity=ownerCavities.at(park);
+                if(const auto cell=ownerCells.find(park);cell!=ownerCells.end()) pose.parkGas=cell->second;
+                pose.portal=portals.size();
+                const auto& a=assembly.owners[0];const auto& b=assembly.owners[1];
+                portals.push_back({pose.parkCavity,a && b ? std::optional(ownerCavities.at(*b)) : std::nullopt,0,
+                    geometry_.thermal.hull ? geometry_.thermal.hull->sinkTemperatureC+station::StationCelsiusOffset : 3});
+                for(unsigned side=0;side<2;++side) {
+                    const auto body=assembly.bodies[side];const auto material=assembly.surfaceMaterial(side);
+                    const auto& owner=assembly.owners[side];
+                    if(owner) {
+                        pose.closedCavity[side]=ownerCavities.at(*owner);
+                        if(const auto cell=ownerCells.find(*owner);cell!=ownerCells.end()) pose.closedGas[side]=cell->second;
+                    } else {
+                        pose.exterior[side]=radiation.size();
+                        pose.solar[side]=material.absorptivity*assembly.areaM2/4;
+                        radiation.push_back({body,station::ThermalRadiationBoundary::Exterior,0,assembly.areaM2,material.emissivity,material.absorptivity});
+                    }
+                    pose.surface[side]=cavitySurfaces.size();
+                    cavitySurfaces.push_back({body,station::ThermalRadiationBoundary::Cavity,pose.closedCavity[side].value_or(pose.parkCavity),
+                        owner ? assembly.areaM2 : 0,material.emissivity,material.absorptivity});
+                    const auto gas=pose.closedGas[side] ? pose.closedGas[side] : pose.parkGas;
+                    if(gas) {
+                        pose.gas[side]=gasContacts.size();
+                        gasContacts.push_back({body,*gas,pose.closedGas[side] ? assembly.areaM2 : 0,
+                            {assembly.material.gasFilm.continuumWPerM2K,assembly.material.gasFilm.accommodation}});
+                    }
+                }
+                doorPoses_.push_back(pose);
+                continue;
+            }
+            for (unsigned side=0;side<2;++side) {
+                const auto body=assembly.bodies[side];
+                if (const auto& owner=assembly.owners[side]) {
+                    const auto material=assembly.surfaceMaterial(side);
+                    cavitySurfaces.push_back({body,station::ThermalRadiationBoundary::Cavity,ownerCavities.at(*owner),
+                        assembly.areaM2,material.emissivity,material.absorptivity});
+                    const auto found=ownerCells.find(*owner);
+                    if (found!=ownerCells.end()) gasContacts.push_back({body,found->second,assembly.areaM2,
+                        {assembly.material.gasFilm.continuumWPerM2K,assembly.material.gasFilm.accommodation}});
+                } else {
+                    const auto material=assembly.surfaceMaterial(side);
+                    radiation.push_back({body,station::ThermalRadiationBoundary::Exterior,0,assembly.areaM2,material.emissivity,material.absorptivity});
+                }
             }
         }
         structuralExterior_.resize(radiation.size());solarWeights_.reserve(radiation.size());
         for (const auto& face:radiation) solarWeights_.push_back(face.absorptivity*face.areaM2/4.0);
-        for (const auto& opening:topology.openings) if (!opening.door) {
+        for (const auto& opening:topology.openings) {
+            if(opening.door) {
+                const auto door=std::find_if(geometry_.doors.begin(),geometry_.doors.end(),[&](const auto& d){return d.structuralId==opening.face;});
+                if(door==geometry_.doors.end()) throw std::logic_error("Structural portal has no Door control");
+                const auto index=std::size_t(door-geometry_.doors.begin());
+                if(std::any_of(doorPoses_.begin(),doorPoses_.end(),[&](const auto& p){return p.door==index;})) continue;
+                DoorPose pose;pose.door=index;pose.portal=portals.size();doorPoses_.push_back(pose);
+            }
             const auto& a=opening.owners[0];const auto& b=opening.owners[1];
             if (!a && !b) continue;
             const auto first=ownerCavities.at(a ? *a : *b);
             const auto second=a && b ? std::optional(ownerCavities.at(*b)) : std::nullopt;
             const auto space=geometry_.thermal.hull ? geometry_.thermal.hull->sinkTemperatureC+station::StationCelsiusOffset : 3;
-            portals.push_back({first,second,opening.areaM2,space});
+            portals.push_back({first,second,opening.door ? 0 : opening.areaM2,space});
         }
         if (!structure_.bodies.empty()) {
             structuralRadiation_.emplace(structure_.bodies.size()+structuralGas_.size(),topology.cavityCount,
@@ -251,6 +299,25 @@ bool CellAtmosphereTransport::setDoorOpen(std::size_t level,std::size_t wall,boo
         [&](const auto& d){return d.level==level && d.wall==wall;});
     if (found==geometry_.doors.end()) return false;
     if (found->face!=SIZE_MAX) fluid_.setOpening(found->face,open ? found->fullOpenFraction : 0);
+    const auto index=std::size_t(found-geometry_.doors.begin());
+    for(const auto& pose:doorPoses_) if(pose.door==index) {
+        if(!structuralRadiation_) continue;
+        for(unsigned side=0;side<2;++side) {
+            if(pose.surface[side]==SIZE_MAX) continue;
+            structuralRadiation_->setSurface(pose.surface[side],open ? pose.parkCavity : pose.closedCavity[side].value_or(pose.parkCavity),
+                open || pose.closedCavity[side] ? core::DoorOpeningAreaM2 : 0);
+            if(pose.exterior[side]!=SIZE_MAX) {
+                structuralSolver_->setRadiationArea(pose.exterior[side],open ? 0 : core::DoorOpeningAreaM2);
+                solarWeights_[pose.exterior[side]]=open ? 0 : pose.solar[side];
+            }
+            if(pose.gas[side]!=SIZE_MAX) {
+                const auto gas=open ? pose.parkGas : pose.closedGas[side];
+                structuralSolver_->setGasContact(pose.gas[side],gas.value_or(0),gas ? core::DoorOpeningAreaM2 : 0);
+            }
+        }
+        structuralRadiation_->setPortalArea(pose.portal,open ? core::DoorOpeningAreaM2 : 0);
+        structuralRadiation_->updateCoefficients();
+    }
     return true;
 }
 bool CellAtmosphereTransport::advance(double seconds,std::span<const double> heatJ,std::size_t maxSubsteps,std::size_t maxThermalIterations) {

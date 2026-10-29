@@ -12,6 +12,7 @@ namespace nsi::systems {
 struct CellFluidDoor {
     std::size_t level{},wall{},face{SIZE_MAX};
     double fullOpenFraction{}; // Door clear area / full fluid face area
+    StructuralAssemblyId structuralId{};
 };
 struct CellThermalContact {
     std::size_t a{},b{SIZE_MAX},link{}; // b missing: singleton Hull
@@ -126,6 +127,14 @@ private:
     std::vector<station::NativeThermalGas> structuralGas_;
     std::vector<station::NativeThermalExterior> structuralExterior_;
     std::vector<double> solarWeights_;
+    struct DoorPose {
+        std::size_t door{},portal{},parkCavity{};
+        std::optional<std::size_t> parkGas;
+        std::array<std::size_t,2> surface{SIZE_MAX,SIZE_MAX},exterior{SIZE_MAX,SIZE_MAX},gas{SIZE_MAX,SIZE_MAX};
+        std::array<std::optional<std::size_t>,2> closedCavity,closedGas;
+        std::array<double,2> solar{};
+    };
+    std::vector<DoorPose> doorPoses_;
     std::string diagnostic_;
 };
 } // namespace nsi::systems

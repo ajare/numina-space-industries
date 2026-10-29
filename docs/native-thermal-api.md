@@ -121,7 +121,7 @@ labelled diagnostic total for gas pressure, sound speed or composition.
 
 ## Revisions, compatibility and tests
 
-`station::NativeThermalModelRevision = "local-structure-v2-cavity-candidate"`
+`station::NativeThermalModelRevision = "local-structure-v3-door-candidate"`
 identifies the current body/contact and [diffuse cavity](diffuse-radiation.md)
 contract (the original #26 revision was `local-structure-v1-candidate`). Future integrated snapshots/benchmarks must publish
 selected backend plus model and preset revision separately from the save schema.

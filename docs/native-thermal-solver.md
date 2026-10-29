@@ -9,7 +9,7 @@ compartments or enable provisional material defaults. The #30
 contract. Integration/whole-playback rollback is #29, actual cavity physics is
 #30, and performance/default rollout remains #35. Public namespaces/targets,
 YAML and `C1-v1-provisional` presets remain unchanged; the model revision is now
-`local-structure-v2-cavity-candidate`.
+`local-structure-v3-door-candidate`.
 
 ## Inputs, units and publication
 
