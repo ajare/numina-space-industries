@@ -305,6 +305,39 @@ void Installation::setHullType(std::optional<HullType> type) {
     if (type) (void)hullSpec(*type);
     hullType_ = type;
 }
+const Installation::Sector* Installation::interiorAtWorld(
+    std::size_t l, std::int64_t x, std::int64_t y) const {
+    if (l >= levels_.size()) return nullptr;
+    for (std::size_t base = 0; base <= l; ++base) {
+        const auto& grid = levels_[base];
+        // Compare before subtracting so even extreme query coordinates are safe.
+        if (x < grid.offsetX_ || x >= std::int64_t(grid.offsetX_) + grid.width_
+            || y < grid.offsetY_ || y >= std::int64_t(grid.offsetY_) + grid.depth_) continue;
+        const auto& s = grid.sectorAt(static_cast<std::uint32_t>(x - grid.offsetX_),
+                                     static_cast<std::uint32_t>(y - grid.offsetY_));
+        if (s.type == SectorType::Interior && l - base < std::size_t(s.height)) return &s;
+    }
+    return nullptr;
+}
+Installation::ExteriorSkin Installation::exteriorSkin(std::size_t l, std::size_t sector) const {
+    const auto& grid = levels_.at(l);
+    const auto& s = grid.sectors_.at(sector);
+    ExteriorSkin result;
+    if (s.type == SectorType::Void) return result;
+    result.sideM2 = sideExteriorAreaM2(l, sector);
+    for (std::size_t i = 0; i < grid.cells_.size(); ++i) {
+        if (grid.cells_[i].sector != int(sector)) continue;
+        const auto x = std::int64_t(grid.offsetX_) + static_cast<std::int64_t>(i % grid.width_);
+        const auto y = std::int64_t(grid.offsetY_) + static_cast<std::int64_t>(i / grid.width_);
+        if (!interiorAtWorld(l + std::size_t(s.height), x, y))
+            result.roofM2 += CellWidthM * CellDepthM;
+        // A tall Sector below can touch this floor even though its own floor
+        // starts several Levels down. Claimed volume, not just floor, covers it.
+        if (l == 0 || !interiorAtWorld(l - 1, x, y))
+            result.floorUndersideM2 += CellWidthM * CellDepthM;
+    }
+    return result;
+}
 double Installation::sideExteriorAreaM2(std::size_t l, std::size_t sector) const {
     const auto& grid = levels_.at(l);
     const auto& s = grid.sectors_.at(sector);

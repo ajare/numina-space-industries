@@ -42,15 +42,21 @@ adiabatic when no geometry-derived thermal link is present. Fire parameters enab
 they do not ignite a fire at startup. Declared limits report crossings without
 clamping the integrated state.
 
-`expandThermal` maps side exterior skin to one station-wide radiating Hull and
-one drain per pressurised Sector with nonzero side area. Conductance is preset
+`expandThermal` maps total exterior skin to one station-wide radiating Hull and
+one drain per pressurised Sector with nonzero area. Core's `exteriorSkin` reports
+`sideM2`, `roofM2`, and `floorUndersideM2` separately. Roof coverage is tested
+above the entire height claim; underside coverage is tested immediately below
+the floor, including tall claims from lower Levels. `interiorAtWorld` resolves
+Interior volume using world Cell coordinates (Level offset plus Cell position),
+independent of intermediate grid bounds. Internal Void courtyards count as
+exterior just like space. Conductance is preset
 U × area / 1000 in kW/K. Hull emitting area is the sum of linked areas, projected
 area is one quarter, and panel heat capacity is 0.4 kJ/(K·m²) times that area.
 Optical properties use the jointly calibrated core presets (ADR-0002). Solar
 profile level is constant zero: absorbed power is exactly zero with positive
 optical coefficients. No hull is emitted without a drain, and no hull choice
-means no links. No atmosphere pathway is ever inferred. This tracer counts
-side skin only; roof, underside and partition coupling are not implemented yet.
+means no links. No atmosphere pathway is ever inferred. Partition coupling is
+not implemented yet.
 
 The runtime consumer follows the station-systems scenario-rig precedent and
 checks isolated temperatures across ticks, active loads/couplings, and pressure

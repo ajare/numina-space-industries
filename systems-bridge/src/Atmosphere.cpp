@@ -87,7 +87,7 @@ ThermalExpansion expandThermal(const core::Installation& installation) {
         for (std::size_t s = 0; s < installation.level(l).sectors().size(); ++s) {
             auto atmosphere = expandSector(installation, l, s);
             if (!atmosphere) continue;
-            const double area = installation.sideExteriorAreaM2(l, s);
+            const double area = installation.exteriorSkin(l, s).totalM2();
             if (area <= 0.0) continue;
             totalArea += area;
             station::ThermalLinkSettings link;

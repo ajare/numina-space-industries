@@ -51,9 +51,9 @@ void thermalExpansion() {
     auto settings=scene(single);
     require(settings.hull && settings.thermalLinks.size()==1,"One hull and drain");
     near(single.sideExteriorAreaM2(0,0),24.0);
-    near(settings.hull->emittingAreaM2,24.0);
-    near(settings.hull->projectedAreaM2,6.0);
-    near(settings.hull->heatCapacityKJPerK,9.6);
+    near(settings.hull->emittingAreaM2,32.0);
+    near(settings.hull->projectedAreaM2,8.0);
+    near(settings.hull->heatCapacityKJPerK,12.8);
     near(settings.solarCycle->constantLevel,0.0);
     for (auto type : {Installation::HullType::BareSkin, Installation::HullType::StandardInsulated,
                       Installation::HullType::MultiLayerBlanket}) {
@@ -61,39 +61,43 @@ void thermalExpansion() {
         settings=scene(single);
         near(settings.hull->emissivity,spec.emissivity);
         near(settings.hull->absorptivity,spec.absorptivity);
-        near(settings.thermalLinks[0].conductanceKWPerK,spec.transmittanceWPerM2K*24/1000);
+        near(settings.thermalLinks[0].conductanceKWPerK,spec.transmittanceWPerM2K*32/1000);
         require(settings.thermalLinks[0].aAtmosphereId==settings.atmospheres[0].id
             && settings.thermalLinks[0].bKind==station::ThermalNodeKind::Hull
             && settings.thermalLinks[0].bAtmosphereId=="hull","Typed Hull endpoint");
     }
-    const auto twice=scene(Installation(2,2)); // Twice the single Cell perimeter.
-    near(twice.hull->emittingAreaM2,48.0);
-    near(twice.thermalLinks[0].conductanceKWPerK,2*settings.thermalLinks[0].conductanceKWPerK);
+    const auto block=scene(Installation(2,2));
+    near(block.hull->emittingAreaM2,80.0);
+    near(block.thermalLinks[0].conductanceKWPerK,2.5*settings.thermalLinks[0].conductanceKWPerK);
+    // The default Installation now has 2432 m² rather than 384 m² of side skin.
+    near(scene(Installation()).hull->emittingAreaM2,2432.0);
     Installation pair(2,1);
     pair.toggleWall(0,pair.level(0).verticalWall(1,0));
     const auto sharedHull=scene(pair);
     require(sharedHull.hull && sharedHull.thermalLinks.size()==2,"Two Sectors share exactly one Hull");
-    near(sharedHull.hull->emittingAreaM2,36.0);
-    for (const auto& link:sharedHull.thermalLinks) near(link.conductanceKWPerK,0.05*18/1000);
+    near(sharedHull.hull->emittingAreaM2,52.0);
+    for (const auto& link:sharedHull.thermalLinks) near(link.conductanceKWPerK,0.05*26/1000);
     auto partial=pair.serialize();
     partial.replace(partial.find("Earth-like"),10,"Void");
     Installation mixed; mixed.deserialize(partial);
     const auto mixedScene=scene(mixed);
     require(mixedScene.thermalLinks.size()==1,"Void-preset Sector must have no drain");
-    near(mixedScene.hull->emittingAreaM2,18.0);
+    near(mixedScene.hull->emittingAreaM2,26.0);
     Installation courtyard(3,3); courtyard.setCell(0,1,1,Installation::SectorType::Void);
-    near(scene(courtyard).hull->emittingAreaM2,96.0); // Outer 12 + inner 4 edges.
+    near(scene(courtyard).hull->emittingAreaM2,160.0); // Outer 12 + inner 4 edges, plus roof/floor.
     Installation lshape(2,2); lshape.setCell(0,1,1,Installation::SectorType::Void);
-    near(scene(lshape).hull->emittingAreaM2,48.0);
-    Installation buried(3,3);
-    for (auto w : {buried.level(0).horizontalWall(1,1),buried.level(0).horizontalWall(1,2),
-                   buried.level(0).verticalWall(1,1),buried.level(0).verticalWall(2,1)})
-        buried.toggleWall(0,w);
-    auto center=buried.level(0).cellData(1,1).sector;
-    near(buried.sideExteriorAreaM2(0,center),0.0);
+    near(scene(lshape).hull->emittingAreaM2,72.0);
+    Installation buried(std::vector<Installation::Level>{Installation::Level(3,3),
+        Installation::Level(3,3), Installation::Level(3,3)});
+    for (auto w : {buried.level(1).horizontalWall(1,1),buried.level(1).horizontalWall(1,2),
+                   buried.level(1).verticalWall(1,1),buried.level(1).verticalWall(2,1)})
+        buried.toggleWall(1,w);
+    auto center=buried.level(1).cellData(1,1).sector;
+    near(buried.exteriorSkin(1,center).totalM2(),0.0);
     auto enclosed=scene(buried);
-    require(enclosed.atmospheres.size()==2 && enclosed.thermalLinks.size()==1,"Buried Sector has no drain");
-    require(enclosed.thermalLinks[0].aAtmosphereId!=expandSector(buried,0,center)->id,"No zero-area link");
+    require(enclosed.atmospheres.size()==4 && enclosed.thermalLinks.size()==3,"Buried Sector has no drain");
+    for (const auto& link : enclosed.thermalLinks)
+        require(link.aAtmosphereId!=expandSector(buried,1,center)->id,"No zero-area link");
     Installation vacuum(std::vector<Installation::Level>{
         Installation::Level(1,1,Installation::SectorType::Void)});
     require(!scene(vacuum).hull && scene(vacuum).thermalLinks.empty(),"No hull without compartments");
@@ -103,9 +107,61 @@ void thermalExpansion() {
     // Existing geometry can explicitly remove every side Wall.
     Installation open(1,1);
     for (std::size_t w=0;w<open.level(0).walls().size();++w) open.toggleWall(0,w);
-    require(!scene(open).hull && scene(open).thermalLinks.empty(),"No exterior skin means no hull");
+    near(scene(open).hull->emittingAreaM2,8.0); // Roof and underside remain without side Walls.
     single.setHullType(std::nullopt);
     require(!scene(single).hull && scene(single).thermalLinks.empty(),"No hull opts out of links");
+}
+void exteriorSkinGeometry() {
+    using T = Installation::SectorType;
+    auto skin=[](const Installation& i, std::size_t l, std::size_t s,
+                 double side, double roof, double underside) {
+        const auto area=i.exteriorSkin(l,s);
+        near(area.sideM2,side);
+        near(area.roofM2,roof);
+        near(area.floorUndersideM2,underside);
+        near(area.totalM2(),side+roof+underside);
+    };
+    skin(Installation(1,1),0,0,24,4,4);
+    skin(Installation(2,2),0,0,48,16,16);
+    Installation lshape(2,2); lshape.setCell(0,1,1,T::Void);
+    skin(lshape,0,lshape.level(0).cellData(0,0).sector,48,12,12);
+    skin(lshape,0,lshape.level(0).cellData(1,1).sector,0,0,0);
+    Installation courtyard(3,3); courtyard.setCell(0,1,1,T::Void);
+    skin(courtyard,0,courtyard.level(0).cellData(0,0).sector,96,32,32);
+
+    Installation stacked(std::vector<Installation::Level>{Installation::Level(1,1),
+        Installation::Level(1,1),Installation::Level(1,1)});
+    skin(stacked,0,0,24,0,4);
+    skin(stacked,1,0,24,0,0);
+    skin(stacked,2,0,24,4,0);
+    near(nsi::systems::expandThermal(stacked).hull->emittingAreaM2,80);
+
+    // The roof is above the entire claim, not above the Sector's own floor.
+    // Coverage through the middle Level must not depend on that grid's bounds.
+    Installation tall(std::vector<Installation::Level>{Installation::Level(2,1),
+        Installation::Level(1,1,T::Void),Installation::Level(1,1)});
+    tall.setOffset(0,-5,7);
+    tall.setOffset(1,100,-100);
+    tall.setOffset(2,-4,7);
+    tall.setSector(0,0,"Tall",2);
+    skin(tall,0,0,72,4,8);
+    skin(tall,2,0,24,4,0);
+    require(tall.interiorAtWorld(1,-4,7)==&tall.level(0).sectors()[0],
+        "Height claim must cover world position despite intermediate grid offset");
+    require(!tall.interiorAtWorld(3,-4,7),"No volume above Installation");
+    near(nsi::systems::expandThermal(tall).hull->emittingAreaM2,112);
+    tall.setOffset(2,-4,8); // Same local index, no world-coordinate overlap.
+    skin(tall,0,0,72,8,8);
+    skin(tall,2,0,24,4,4);
+
+    // A floored but unpressurised Sector still covers the geometry beneath it.
+    auto yaml=stacked.serialize();
+    const auto preset=yaml.find("Earth-like",yaml.find("Earth-like")+1);
+    yaml.replace(preset,10,"Void");
+    Installation unpressurised; unpressurised.deserialize(yaml);
+    skin(unpressurised,0,0,24,0,4);
+    require(nsi::systems::expandThermal(unpressurised).links.size()==2,
+        "Unpressurised floor covers but emits no drain");
 }
 void check() {
     const auto* spec = nsi::systems::specFor(Installation::AtmospherePreset::EarthLike);
@@ -195,6 +251,6 @@ void check() {
 }
 }
 int main() {
-    try { check(); thermalExpansion(); }
+    try { check(); exteriorSkinGeometry(); thermalExpansion(); }
     catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

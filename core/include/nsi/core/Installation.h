@@ -150,7 +150,17 @@ public:
     void setName(std::string name) { name_ = std::move(name); }
     std::optional<HullType> hullType() const noexcept { return hullType_; }
     void setHullType(std::optional<HullType> type);
-    // Side exterior skin only; roof and underside exposure are not yet modelled.
+    struct ExteriorSkin {
+        double sideM2 = 0.0;
+        double roofM2 = 0.0;
+        double floorUndersideM2 = 0.0;
+        double totalM2() const noexcept { return sideM2 + roofM2 + floorUndersideM2; }
+    };
+    // World coordinates are Cell positions plus Level offsets, not metres.
+    // Returns the Interior Sector claiming this volume (including height claims),
+    // or nullptr for void/outside the Installation. Valid until the document is modified.
+    const Sector* interiorAtWorld(std::size_t level, std::int64_t x, std::int64_t y) const;
+    ExteriorSkin exteriorSkin(std::size_t level, std::size_t sector) const;
     double sideExteriorAreaM2(std::size_t level, std::size_t sector) const;
     std::span<const Level> levels() const noexcept { return levels_; }
     std::size_t levelCount() const noexcept { return levels_.size(); }

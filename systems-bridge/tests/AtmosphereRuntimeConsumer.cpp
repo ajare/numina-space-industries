@@ -121,11 +121,33 @@ void hullCooling() {
     single.setHullType(Installation::HullType::MultiLayerBlanket);
     const double blanket=cooling(single);
     require(bare < blanket-1.0 && blanket < 20.0,"Bare skin must cool measurably faster");
-    // Same air volume; removing two side panels halves the exterior area.
+    // Same air volume; removing two side panels reduces the total exterior area.
     Installation half=single;
     half.toggleWall(0,half.level(0).horizontalWall(0,0));
     half.toggleWall(0,half.level(0).horizontalWall(0,1));
     require(cooling(half)>blanket,"More skin must cool faster at equal air capacity");
+    Installation roofOnly=single;
+    for (std::size_t w=0;w<roofOnly.level(0).walls().size();++w) roofOnly.toggleWall(0,w);
+    const double roofTemperature=cooling(roofOnly);
+    require(roofTemperature<19.999,"Roof and underside alone must cool the compartment");
+
+    // Compare the complete default skin against the previous side-only tracer
+    // through the real runtime, keeping the same air and hull assembly.
+    Installation standard;
+    auto complete=scene(standard);
+    auto sideOnly=complete;
+    const double fraction=standard.sideExteriorAreaM2(0,0)
+        / standard.exteriorSkin(0,0).totalM2();
+    sideOnly.hull->emittingAreaM2*=fraction;
+    sideOnly.hull->projectedAreaM2*=fraction;
+    sideOnly.hull->heatCapacityKJPerK*=fraction;
+    sideOnly.thermalLinks[0].conductanceKWPerK*=fraction;
+    station::StationSystemsRuntime fullRuntime(complete,0.25f), sideRuntime(sideOnly,0.25f);
+    advance(fullRuntime,60); advance(sideRuntime,60);
+    const double fullLoss=20-fullRuntime.snapshot().atmospheres[0].temperatureC;
+    const double sideLoss=20-sideRuntime.snapshot().atmospheres[0].temperatureC;
+    require(fullLoss>5*sideLoss && fullLoss<7*sideLoss,
+        "Roof and underside must increase default cooling roughly sixfold");
     // A genuine v3 load retains the exact previous no-link behaviour.
     auto yaml=single.serialize();
     yaml.replace(yaml.find("version: 4"),10,"version: 3");
