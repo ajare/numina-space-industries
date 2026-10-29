@@ -1542,6 +1542,10 @@ namespace station
 		// totals are signed net mass since configuration, in StationPathwayGases order.
 		std::array<double, 4> flowRateKgPerS{};
 		std::array<double, 4> netTransferredKg{};
+		double dischargeCoefficient{0.7};
+		StationAtmosphereFlowRegime flowRegime{StationAtmosphereFlowRegime::Sealed};
+		double pressureRatio{1.0}; // instantaneous downstream/upstream absolute pressure
+		double bulkFlowRateKgPerS{0.0}; // last-step mean; excludes counterdiffusion
 		// Advected enthalpy (#802): the signed net thermal energy this
 		// pathway has carried with its moving gas since configuration,
 		// positive A to B, and the rate averaged over the last step. It is

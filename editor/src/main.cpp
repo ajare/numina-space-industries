@@ -455,6 +455,7 @@ int runEditor() {
                 edit([&]{ commit(std::string(buffer.data())); });
         };
         station::editor::drawThermalRenderControls(render_settings);
+        station::editor::drawPressureRenderControls(render_settings);
         if (!session.editingEnabled())
             ImGui::TextWrapped("Reset the simulation to the start before editing the Installation.");
         ImGui::BeginDisabled(!session.editingEnabled());
@@ -546,7 +547,7 @@ int runEditor() {
         ImGui::BeginDisabled(!session.editingEnabled() && mode!=EditMode::Sector && !door_controls);
         const auto snapshot = simulation.snapshotFor(session.installation());
         std::vector<station::editor::SectorColour> thermal_colours;
-        if (render_settings.mode == station::editor::InstallationRenderMode::Thermal)
+        if (render_settings.mode != station::editor::InstallationRenderMode::Default)
             thermal_colours = station::editor::sectorRenderColours(session.installation(),active_level,
                 render_settings,snapshot ? &*snapshot : nullptr);
         const auto open_doors=simulation.openDoors(active_level);
@@ -599,7 +600,10 @@ int runEditor() {
                         : std::span<const station::editor::TemperatureSample>{}, [&] {
                             sector_view.draw(station::editor::buildSectorSystemsGraph(
                                 session.installation(),active_level,id,live ? &*live : nullptr));
-                        });
+                        }, thermal.atmosphere ? simulation.pressureHistory(thermal.atmosphere->id)
+                            : std::span<const station::editor::PressureSample>{},
+                            thermal.atmosphere ? simulation.atmosphereHistory(thermal.atmosphere->id)
+                            : std::span<const station::editor::AtmosphereSample>{});
                 }
                 ImGui::End();
             }

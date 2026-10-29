@@ -1,5 +1,6 @@
 #pragma once
 #include "StationSystemsPhysics.h"
+#include "StationGasFlow.h"
 #include "StationClock.h"
 #include "StationProtectionPrediction.h"
 #include "station/support/SimulationStepTiming.h"
@@ -820,6 +821,7 @@ using namespace station_detail;
 			// side, mirroring the conductedKJ discipline of #794.
 			double advectedKJ{0.0};
 			double lastAdvectedKW{0.0};
+			double bulkFlowRateKgPerS{0.0};
 			StationAtmospherePathwayStatus status{StationAtmospherePathwayStatus::Idle};
 		};
 		// The runtime ledger of one authored Thermal link (#794): heat is
@@ -838,6 +840,29 @@ using namespace station_detail;
 		struct AtmosphereState
 		{
 			AtmosphereSettings authored;
+			bool compressibleGas{false};
+			double trackedGasCapacityKJPerK{0.0}, inventoryEnergyKJ{0.0};
+			std::array<double,4> gasMass() const { return {oxygenKg,nitrogenKg,carbonDioxideKg,waterVapourKg}; }
+			double startingThermalCapacity() const {
+				return compressibleGas ? gasMixture({authored.startingOxygenKg,authored.startingNitrogenKg,
+					authored.startingCarbonDioxideKg,authored.startingWaterVapourKg}).capacityKJPerK : authored.thermalCapacityKJPerK;
+			}
+			double thermalCapacity() const {
+				return compressibleGas ? std::max(1e-12,gasMixture(gasMass()).capacityKJPerK) : authored.thermalCapacityKJPerK;
+			}
+			double thermalEnergy() const {
+				return compressibleGas ? gasMixture(gasMass()).capacityKJPerK*(temperatureC+StationCelsiusOffset)
+					: authored.thermalCapacityKJPerK*temperatureC;
+			}
+			double startingThermalEnergy() const {
+				return startingThermalCapacity()*(authored.startingTemperatureC+(compressibleGas ? StationCelsiusOffset : 0));
+			}
+			void syncInventoryEnergy() {
+				if (!compressibleGas) return;
+				const auto capacity=gasMixture(gasMass()).capacityKJPerK;
+				inventoryEnergyKJ+=(capacity-trackedGasCapacityKJPerK)*(temperatureC+StationCelsiusOffset);
+				trackedGasCapacityKJPerK=capacity;
+			}
 			std::optional<StationFaultSnapshot> fire;
 			std::optional<AtmosphereFireSettings> fireParameters;
 			bool firePending{false};

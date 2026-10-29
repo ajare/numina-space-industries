@@ -798,6 +798,20 @@ namespace station
 			entry.bAtmosphereId = pathway.authored.bAtmosphereId;
 			entry.areaM2 = pathway.authored.areaM2;
 			entry.openFraction = pathway.authored.openFraction;
+			entry.dischargeCoefficient=pathway.authored.dischargeCoefficient;
+			entry.bulkFlowRateKgPerS=pathway.bulkFlowRateKgPerS;
+			auto volume=[&](size_t index) {
+				const auto& air=mImpl->atmospheres[index];
+				return GasVolume{air.gasMass(),air.temperatureC+StationCelsiusOffset,air.authored.volumeM3};
+			};
+			const auto a=pathway.aIndex!=SIZE_MAX ? std::optional(volume(pathway.aIndex)) : std::nullopt;
+			const auto b=pathway.bIndex!=SIZE_MAX ? std::optional(volume(pathway.bIndex)) : std::nullopt;
+			double area=std::max(0.0,entry.areaM2)*std::clamp(entry.openFraction,0.0,1.0);
+			for (const auto& cycle:mImpl->airlockCycles)
+				if (cycle.interlockFailure && cycle.breachParameters->pathwayId==entry.id)
+					area=std::max(area,cycle.breachParameters->breachAreaM2);
+			const auto flow=compressibleGasFlow(a ? &*a : nullptr,b ? &*b : nullptr,area,std::clamp(entry.dischargeCoefficient,0.0,1.0));
+			entry.flowRegime=flow.regime; entry.pressureRatio=flow.pressureRatio;
 			entry.flowRateKgPerS = pathway.flowRateKgPerS;
 			entry.netTransferredKg = pathway.netTransferredKg;
 			// Advected enthalpy reported separately from mass flux and
@@ -849,7 +863,10 @@ namespace station
 			atmosphereResult.id = authored.id;
 			atmosphereResult.reservoirId = authored.reservoirId;
 			atmosphereResult.volumeM3 = authored.volumeM3;
-			atmosphereResult.thermalCapacityKJPerK = authored.thermalCapacityKJPerK;
+			atmosphereResult.thermalCapacityKJPerK = compartment.thermalCapacity();
+			atmosphereResult.startingThermalCapacityKJPerK=compartment.startingThermalCapacity();
+			atmosphereResult.inventoryThermodynamics=compartment.compressibleGas;
+			atmosphereResult.inventoryEnergyKJ=compartment.inventoryEnergyKJ;
 			atmosphereResult.exchangerConductanceKWPerK = authored.exchangerConductanceKWPerK;
 			atmosphereResult.occupants = authored.occupants;
 			atmosphereResult.oxygenUsePerOccupantKgPerS = authored.oxygenUsePerOccupantKgPerS;
@@ -931,10 +948,8 @@ namespace station
 			atmosphereResult.lostKg = compartment.lostKg;
 			atmosphereResult.connectionCarbonDioxideLostKg = compartment.connectionCarbonDioxideLostKg;
 			atmosphereResult.connectionWaterVapourLostKg = compartment.connectionWaterVapourLostKg;
-			atmosphereResult.startingEnergyKJ = authored.thermalCapacityKJPerK
-				* authored.startingTemperatureC;
-			atmosphereResult.currentEnergyKJ = authored.thermalCapacityKJPerK
-				* compartment.temperatureC;
+			atmosphereResult.startingEnergyKJ = compartment.startingThermalEnergy();
+			atmosphereResult.currentEnergyKJ = compartment.thermalEnergy();
 			atmosphereResult.occupantHeatEnergyKJ = compartment.occupantHeatKJ;
 			atmosphereResult.crewHeatEnergyKJ = compartment.crewHeatKJ;
 			atmosphereResult.lastCropHeatKW = compartment.lastCropHeatKW;
@@ -953,7 +968,7 @@ namespace station
 				+ compartment.occupantHeatKJ + compartment.crewHeatKJ
 				+ compartment.cropHeatKJ + compartment.algaeHeatKJ + compartment.fixtureHeatKJ
 				+ compartment.latentHeatKJ + compartment.exchangedKJ
-				+ compartment.conductedKJ + compartment.advectedKJ
+				+ compartment.conductedKJ + compartment.advectedKJ + compartment.inventoryEnergyKJ + compartment.hazardHeatKJ
 				- atmosphereResult.currentEnergyKJ;
 			atmosphereResult.status = compartment.status;
 			result.atmospheres.push_back(std::move(atmosphereResult));

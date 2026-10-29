@@ -2359,6 +2359,8 @@ namespace
 			if (!std::isfinite(pathway.openFraction)
 				|| pathway.openFraction < 0.0 || pathway.openFraction > 1.0)
 				return refuse(where + " openFraction must be finite and within [0, 1]");
+			if (!std::isfinite(pathway.dischargeCoefficient) || pathway.dischargeCoefficient<=0 || pathway.dischargeCoefficient>1)
+				return refuse(where + " dischargeCoefficient must be finite and within (0, 1]");
 			// A hatch with both ends unwired is an opening being built, not a
 			// self-loop: the distinctness rule is about two named compartments,
 			// and two empty strings name nothing. Each empty end is refused on

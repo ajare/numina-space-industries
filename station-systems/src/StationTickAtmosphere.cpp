@@ -376,204 +376,47 @@ namespace station
 				else crew.status = StationTransferStatus::Partial;
 			}
 		}
-		// ADR-0026: sequential closed-form pair relaxation, after crew returns
-		// and before saturation. Temperature is held fixed and no heat crosses.
-		// #802: the advected-enthalpy pass below consumes the mass this pass
-		// moves, so each pathway's total moved mass is recorded here for it.
-		std::vector<double> pathwayMovedTotalKg(runtime.atmospherePathways.size(), 0.0);
-		for (size_t pathwayIndex = 0; pathwayIndex < runtime.atmospherePathways.size();
-			++pathwayIndex)
-		{
-			auto& pathway = runtime.atmospherePathways[pathwayIndex];
-			// A negative area or openness inverts the relaxation: the exponent
-			// flips sign, the compartment gains mass it never had, and the loss
-			// ledger runs negative. Neither is a meaningful opening, so the
-			// physical conductance is floored here independently of how the
-			// setting arrived - the live path runs no validation pass, and the
-			// draft gate only guards Apply.
-			auto openArea = std::max(0.0, pathway.authored.areaM2)
-				* std::clamp(pathway.authored.openFraction, 0.0, 1.0);
-			// A failed interlock opens one existing exterior pathway. Parallel
-			// faults on that opening combine by max, never duplicate its solve.
-			for (auto const& cycle : runtime.airlockCycles)
-				if (cycle.interlockFailure && cycle.breachParameters->pathwayId == pathway.authored.id)
-					openArea = std::max(openArea, cycle.breachParameters->breachAreaM2);
-			if (pathway.aIndex == SIZE_MAX || pathway.bIndex == SIZE_MAX)
-			{
-				// Zero-pressure boundary limit of the same diffusion law:
-				// dm/dt = -D * area * openness * T_K/V * m. The exterior
-				// never fills; loss is explicit, not an internal transfer.
-				auto& air = runtime.atmospheres[pathway.aIndex == SIZE_MAX ? pathway.bIndex : pathway.aIndex];
-				auto const weight = (static_cast<long double>(air.temperatureC) + StationCelsiusOffset) / air.authored.volumeM3;
-				std::array<double*, 4> const mass{&air.oxygenKg, &air.nitrogenKg, &air.carbonDioxideKg, &air.waterVapourKg};
-				pathway.status = StationAtmospherePathwayStatus::Idle;
-				for (size_t gas = 0; gas < mass.size(); ++gas)
-				{
-					auto const conductance = static_cast<long double>(StationPathwayDiffusionCoefficients[gas])
-						* openArea;
-					auto const lost = static_cast<double>(*mass[gas] * -std::expm1(-conductance * weight * seconds));
-					*mass[gas] -= lost;
-					air.exteriorLostKg[gas] += lost;
-					auto const signedLoss = pathway.aIndex == SIZE_MAX ? -lost : lost;
-					pathway.flowRateKgPerS[gas] = signedLoss / seconds;
-					pathway.netTransferredKg[gas] += signedLoss;
-					pathwayMovedTotalKg[pathwayIndex] += lost;
-					if (lost != 0.0) pathway.status = StationAtmospherePathwayStatus::Active;
-				}
-				continue;
-			}
-			auto& a = runtime.atmospheres[pathway.aIndex];
-			auto& b = runtime.atmospheres[pathway.bIndex];
-			// Kelvin is mandatory: 0 C is not an empty compartment.
-			auto const wa = (static_cast<long double>(a.temperatureC) + StationCelsiusOffset) / a.authored.volumeM3;
-			auto const wb = (static_cast<long double>(b.temperatureC) + StationCelsiusOffset) / b.authored.volumeM3;
-			auto const sum = wa + wb;
-			std::array<double*, 4> const aMass{&a.oxygenKg, &a.nitrogenKg, &a.carbonDioxideKg, &a.waterVapourKg};
-			std::array<double*, 4> const bMass{&b.oxygenKg, &b.nitrogenKg, &b.carbonDioxideKg, &b.waterVapourKg};
-			pathway.status = StationAtmospherePathwayStatus::Idle;
-			for (size_t gas = 0; gas < aMass.size(); ++gas)
-			{
-				// Evaluate the equilibrium transfer first, independently of k,
-				// so even enormous conductance tends to equilibrium, not inf/inf.
-				auto const conductance = static_cast<long double>(StationPathwayDiffusionCoefficients[gas])
-					* openArea;
-				auto const relaxed = -std::expm1(-conductance * sum * seconds);
-				auto const moved = static_cast<double>((*aMass[gas] * (wa / sum)
-					- *bMass[gas] * (wb / sum)) * relaxed);
-				*aMass[gas] -= moved;
-				*bMass[gas] += moved;
-				a.diffusedKg[gas] -= moved;
-				b.diffusedKg[gas] += moved;
-				pathway.flowRateKgPerS[gas] = moved / seconds;
-				pathway.netTransferredKg[gas] += moved;
-				pathwayMovedTotalKg[pathwayIndex] += moved;
-				if (moved != 0.0) pathway.status = StationAtmospherePathwayStatus::Active;
-			}
+		// Joint bulk-flow, counterdiffusion and enthalpy integration. Gas-only
+		// capacities follow inventory; there is no implied structural heat mass.
+		std::vector<GasVolume> volumes;
+		std::vector<GasOpening> openings;
+		for (auto& air:runtime.atmospheres) {
+			air.syncInventoryEnergy();
+			air.lastAdvectedKW=0;
+			volumes.push_back({air.gasMass(),air.temperatureC+StationCelsiusOffset,air.authored.volumeM3});
 		}
-		// #802: Advected enthalpy - the heat that rides with the gas. The
-		// mass pass above moved gas in closed form against tick-start
-		// temperatures; here that already-moved mass carries thermal energy
-		// with it. Applied after the whole mass pass, never interleaved
-		// with it, so the pathway's constant-coefficient premise is
-		// untouched: this consumes the mass the closed form already moved
-		// and requires no second mass solve. Sequential in declaration
-		// order, the same operator-splitting discipline as the pathway and
-		// Thermal link passes. The term changes temperatures only - no gas
-		// inventory is touched here either - and each transfer is booked
-		// once per side as an exact negation, so the compartment energy
-		// ledger closes on one number per pathway and a missing booking
-		// fails the audit loudly. Advected heat is reported separately
-		// from a Thermal link's conducted heat: what a hatch did stays
-		// distinct from what a wall did.
-		for (size_t pathwayIndex = 0; pathwayIndex < runtime.atmospherePathways.size();
-			++pathwayIndex)
-		{
-			auto& pathway = runtime.atmospherePathways[pathwayIndex];
-			auto const movedTotalKg = pathwayMovedTotalKg[pathwayIndex];
-			if (pathway.aIndex == SIZE_MAX || pathway.bIndex == SIZE_MAX)
-			{
-				// Venting to Exterior vacuum: the sink has no temperature,
-				// so the cooling follows the exact integral of
-				// C dT/dt = -mdot cp T:
-				//   T_new = T_old * exp(-cp * m_vented / C)
-				// the spray-can effect: a compartment cools as it empties,
-				// and the authored capacity decides how sharply - a thin
-				// inflatable goes properly cold while a heavily-built hab
-				// module barely notices. The realism lever is the authored
-				// capacity number, not any derivation from the gas mass.
-				// KELVIN IS MANDATORY here: this is a multiplicative factor
-				// on absolute temperature, because enthalpy is proportional
-				// to absolute temperature. This is the opposite of the
-				// difference form below, where Celsius and Kelvin are
-				// interchangeable - 0 C is not an empty compartment and
-				// 0 C is not zero enthalpy either. Do not apply the wrong
-				// rule to the wrong form.
-				auto& air = runtime.atmospheres[
-					pathway.aIndex == SIZE_MAX ? pathway.bIndex : pathway.aIndex];
-				auto const capacity = static_cast<long double>(
-					air.authored.thermalCapacityKJPerK);
-				auto const specificHeat = static_cast<long double>(
-					air.authored.advectedSpecificHeatKJPerKgK);
-				auto const ventedKg = static_cast<long double>(std::abs(movedTotalKg));
-				auto const beforeC = air.temperatureC;
-				if (ventedKg == 0.0L || capacity <= 0.0L)
-				{
-					air.lastAdvectedKW = 0.0;
-					pathway.lastAdvectedKW = 0.0;
-					continue;
-				}
-				auto const afterC = static_cast<double>(
-					(static_cast<long double>(beforeC) + StationCelsiusOffset)
-					* std::exp(-specificHeat * ventedKg / capacity))
-					- StationCelsiusOffset;
-				air.temperatureC = afterC;
-				// The compartment's thermal energy change is exactly
-				// C * dT, and - because the closed form conserves it -
-				// exactly the enthalpy the vented gas carried away. Booked
-				// as an explicit loss (negative into the compartment)
-				// beside the existing exteriorLostKg mass loss, never a
-				// silent disappearance.
-				auto const advectedTickKJ = static_cast<double>(capacity)
-					* (afterC - beforeC);
-				air.advectedKJ += advectedTickKJ;
-				air.lastAdvectedKW = advectedTickKJ / seconds;
-				// Signed A to B like the mass ledger: the exterior end is
-				// whichever side is SIZE_MAX, and the energy flows from
-				// the compartment toward it.
-				pathway.advectedKJ += pathway.bIndex == SIZE_MAX
-					? -advectedTickKJ : advectedTickKJ;
-				pathway.lastAdvectedKW = pathway.bIndex == SIZE_MAX
-					? -advectedTickKJ / seconds : advectedTickKJ / seconds;
-				continue;
+		for (const auto& path:runtime.atmospherePathways) {
+			double area=std::max(0.0,path.authored.areaM2)*std::clamp(path.authored.openFraction,0.0,1.0);
+			for (const auto& cycle:runtime.airlockCycles)
+				if (cycle.interlockFailure && cycle.breachParameters->pathwayId==path.authored.id)
+					area=std::max(area,cycle.breachParameters->breachAreaM2);
+			openings.push_back({path.aIndex,path.bIndex,area,std::clamp(path.authored.dischargeCoefficient,0.0,1.0)});
+		}
+		const auto transfers=integrateGasOpenings(volumes,openings,seconds);
+		for (std::size_t i=0;i<runtime.atmospheres.size();++i) {
+			auto& air=runtime.atmospheres[i];
+			air.oxygenKg=volumes[i].mass[0]; air.nitrogenKg=volumes[i].mass[1];
+			air.carbonDioxideKg=volumes[i].mass[2]; air.waterVapourKg=volumes[i].mass[3];
+			air.temperatureC=volumes[i].temperatureK-StationCelsiusOffset;
+			air.trackedGasCapacityKJPerK=gasMixture(air.gasMass()).capacityKJPerK;
+		}
+		for (std::size_t i=0;i<runtime.atmospherePathways.size();++i) {
+			auto& path=runtime.atmospherePathways[i]; const auto& moved=transfers[i];
+			path.status=StationAtmospherePathwayStatus::Idle;
+			path.bulkFlowRateKgPerS=moved.bulkMassKg/seconds;
+			path.lastAdvectedKW=moved.energyKJ/seconds; path.advectedKJ+=moved.energyKJ;
+			for (std::size_t gas=0;gas<4;++gas) {
+				path.flowRateKgPerS[gas]=moved.massKg[gas]/seconds;
+				path.netTransferredKg[gas]+=moved.massKg[gas];
+				if (moved.massKg[gas]!=0) path.status=StationAtmospherePathwayStatus::Active;
 			}
-			auto& a = runtime.atmospheres[pathway.aIndex];
-			auto& b = runtime.atmospheres[pathway.bIndex];
-			if (movedTotalKg == 0.0)
-			{
-				a.lastAdvectedKW = 0.0;
-				b.lastAdvectedKW = 0.0;
-				pathway.lastAdvectedKW = 0.0;
-				continue;
+			for (const auto index:{path.aIndex,path.bIndex}) if (index!=SIZE_MAX) {
+				auto& air=runtime.atmospheres[index]; const double sign=index==path.aIndex ? -1 : 1;
+				air.advectedKJ+=sign*moved.energyKJ; air.lastAdvectedKW+=sign*moved.energyKJ/seconds;
+				for (std::size_t gas=0;gas<4;++gas)
+					if (path.aIndex==SIZE_MAX || path.bIndex==SIZE_MAX) air.exteriorLostKg[gas]-=sign*moved.massKg[gas];
+					else air.diffusedKg[gas]+=sign*moved.massKg[gas];
 			}
-			// Difference form: arriving gas shifts the destination by how
-			// much hotter or colder the source was. This is a temperature
-			// *difference*, so Celsius and Kelvin are interchangeable and
-			// the stored Celsius is used directly - unlike the vent form
-			// above. The specific heat is the source compartment's: the
-			// gas that moved left there, and it carries that bulk value.
-			// Zero at equal temperature - mass flow alone is not a heat
-			// source - hot gas visibly warms a cold room, and cold gas
-			// drawn out of a warm one cools it. The sign is carried by
-			// the temperature difference: with the destination always
-			// moving toward the source, the same fixed booking (A loses
-			// what B gains, as an exact negation) lands the right way
-			// for either flow direction, because the direction of the
-			// heat is decided by which side the gas came from and how
-			// warm that side was, both folded into this one number.
-			auto const sourceSpecificHeat = movedTotalKg > 0.0
-			? a.authored.advectedSpecificHeatKJPerKgK
-			: b.authored.advectedSpecificHeatKJPerKgK;
-			auto const carriedKJ = std::abs(movedTotalKg) * sourceSpecificHeat
-			* (a.temperatureC - b.temperatureC);
-			if (carriedKJ == 0.0)
-			{
-				a.lastAdvectedKW = 0.0;
-				b.lastAdvectedKW = 0.0;
-				pathway.lastAdvectedKW = 0.0;
-				continue;
-			}
-			// Signed A to B: positive when the net energy crosses from A
-			// toward B, matching the sign convention of the pathway's own
-			// mass ledger, and booked once per side as the exact
-			// negation, mirroring the conductedKJ discipline of #794.
-			a.temperatureC -= carriedKJ / a.authored.thermalCapacityKJPerK;
-			b.temperatureC += carriedKJ / b.authored.thermalCapacityKJPerK;
-			a.advectedKJ -= carriedKJ;
-			b.advectedKJ += carriedKJ;
-			a.lastAdvectedKW = -carriedKJ / seconds;
-			b.lastAdvectedKW = carriedKJ / seconds;
-			pathway.advectedKJ += carriedKJ;
-			pathway.lastAdvectedKW = carriedKJ / seconds;
 		}
 		// Thermal link conduction (#794): heat conducted between linked
 		// compartments, evaluated against the post-exchanger state before
@@ -617,7 +460,7 @@ namespace station
 			relaxationTemperatureC[index]
 				= static_cast<long double>(compartment.temperatureC)
 				+ static_cast<long double>(atmosphereExchangeKJ[index])
-					/ compartment.authored.thermalCapacityKJPerK;
+					/ compartment.thermalCapacity();
 		}
 		// Body sink legs were booked before this pass. Include their delivered
 		// energy in the provisional sink state without integrating it twice.
@@ -648,7 +491,7 @@ namespace station
 			if (kind == ThermalNodeKind::Hull) return runtime.settings.hull->heatCapacityKJPerK;
 			if (kind == ThermalNodeKind::MachineBody) return runtime.electrolyzers[i].authored.thermalBody->heatCapacityKJPerK;
 			return kind == ThermalNodeKind::Atmosphere
-				? runtime.atmospheres[i].authored.thermalCapacityKJPerK
+				? runtime.atmospheres[i].thermalCapacity()
 				: runtime.reservoirs[i].authored.heatCapacityKJPerK;
 		};
 		auto temperature = [&](ThermalNodeKind kind, size_t i) -> long double& {
@@ -898,8 +741,9 @@ namespace station
 			// heat. A compartment with no booking carries the term as a
 			// plain zero and its solve is unchanged.
 			auto const hazardHeatKW = compartment.pendingHazardKJ / dt;
+			compartment.syncInventoryEnergy();
 			auto const coupled = solveVapourThermalCoupling(
-				compartment.authored.thermalCapacityKJPerK, compartment.temperatureC,
+				compartment.thermalCapacity(), compartment.temperatureC,
 				occupantHeatKW + crewHeatKW + cropHeatKW + algaeHeatKW + compartment.lastFixtureHeatKW + exchangeKW + conductedKW
 					+ hazardHeatKW,
 				compartment.waterVapourKg,
@@ -910,6 +754,7 @@ namespace station
 			compartment.waterVapourKg -= condensedKg;
 			compartment.condensedKg += condensedKg;
 			compartment.temperatureC = coupled.temperatureC;
+			compartment.syncInventoryEnergy(); // sensible energy retained by removed condensate
 			compartment.occupantHeatKJ += occupantHeatKW * dt;
 			compartment.crewHeatKJ += crewHeatKW * dt;
 			compartment.lastCrewHeatKW = crewHeatKW;

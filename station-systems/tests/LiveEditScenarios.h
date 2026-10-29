@@ -58,11 +58,13 @@ inline void liveSettingsSeam()
 	wider.atmospherePathways[0].areaM2 = 25.0;
 	require(runtime.updateSettings(wider, &diagnostic),
 		("parameter update refused: " + diagnostic).c_str());
+	require(runtime.snapshot().atmospherePathways.at(0).netTransferredKg[0]==oxygenBefore,
+		"live transfer totals were reset by the update");
 	runtime.advanceTo(120);
 	auto const hatch1 = runtime.snapshot().atmospherePathways.at(0);
 	require(hatch1.areaM2 == 25.0, "area change did not reach the running scenario");
-	require(hatch1.netTransferredKg[0] >= oxygenBefore,
-		"live transfer totals were reset by the update");
+	// Net transfer is signed: thermal pressure reversals can reduce it.
+	require(hatch1.netTransferredKg[0]!=0,"live transfer ledger vanished");
 	require(runtime.snapshot().stores.at(0).currentQualified == pantryBefore,
 		"live store inventory was disturbed by the update");
 

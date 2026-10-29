@@ -99,11 +99,16 @@ DeckPointerEvent drawDeckGrid(const char* id,
     const auto wall = station::editor::nearestWall(level,
         (io.MousePos.x-origin.x)/cell, (io.MousePos.y-origin.y)/cell);
     const double mouseX=(io.MousePos.x-origin.x)/cell, mouseY=(io.MousePos.y-origin.y)/cell;
+    const auto horizontalCount=std::size_t(level.width())*(std::size_t(level.depth())+1);
+    const bool horizontalHit=wall && *wall<horizontalCount;
+    const double edgeFraction=horizontalHit ? mouseX-std::floor(mouseX) : mouseY-std::floor(mouseY);
+    const double doorWidthFraction=nsi::core::DoorWidthM/(horizontalHit ? nsi::core::CellWidthM : nsi::core::CellDepthM);
     const bool hoveredDoor=ImGui::IsItemHovered() && wall
         && level.walls()[*wall].type==nsi::core::Installation::WallType::Door
+        && std::abs(edgeFraction-0.5)<=doorWidthFraction/2
         && std::min(std::abs(mouseX-std::round(mouseX)),std::abs(mouseY-std::round(mouseY)))*cell<=6.0;
     auto isOpen=[&](std::size_t w) { return std::find(openDoors.begin(),openDoors.end(),w)!=openDoors.end(); };
-    auto drawWall = [&](std::size_t index, ImU32 colour, float thickness, bool open=false) {
+    auto drawWall = [&](std::size_t index, ImU32 colour, float thickness, bool open=false, bool highlight=false) {
         const auto horizontal = std::size_t(level.width())*(std::size_t(level.depth())+1);
         ImVec2 a,b;
         if (index < horizontal) {
@@ -116,10 +121,17 @@ DeckPointerEvent drawDeckGrid(const char* id,
                      origin.y+float(i/(std::size_t(level.width())+1))*cell);
             b=ImVec2(a.x,a.y+cell);
         }
-        if (open) {
+        if (level.walls()[index].type==nsi::core::Installation::WallType::Door) {
+            const float width=static_cast<float>(nsi::core::DoorWidthM/
+                (index<horizontal ? nsi::core::CellWidthM : nsi::core::CellDepthM));
+            const float inset=(1-width)/2;
             const ImVec2 d(b.x-a.x,b.y-a.y);
-            draw->AddLine(a,{a.x+d.x*0.2f,a.y+d.y*0.2f},colour,thickness);
-            draw->AddLine({a.x+d.x*0.8f,a.y+d.y*0.8f},b,colour,thickness);
+            const ImVec2 left(a.x+d.x*inset,a.y+d.y*inset);
+            const ImVec2 right(b.x-d.x*inset,b.y-d.y*inset);
+            const auto wallColour=highlight ? colour : IM_COL32(215,225,235,255);
+            draw->AddLine(a,left,wallColour,highlight ? thickness : 3.0f);
+            draw->AddLine(right,b,wallColour,highlight ? thickness : 3.0f);
+            if (!open) draw->AddLine(left,right,colour,thickness);
         } else draw->AddLine(a,b,colour,thickness);
     };
     using WallType=nsi::core::Installation::WallType;
@@ -134,7 +146,7 @@ DeckPointerEvent drawDeckGrid(const char* id,
         && (!doorControlsEnabled || hoveredDoor)) {
         const bool valid=doorControlsEnabled || mode!=EditMode::Door || level.canPlaceDoor(*wall);
         drawWall(*wall,valid ? IM_COL32(100,255,140,255) : IM_COL32(255,100,100,255),5.0f,
-            level.walls()[*wall].type==WallType::Door && isOpen(*wall));
+            level.walls()[*wall].type==WallType::Door && isOpen(*wall),true);
     }
     const std::optional<DeckCellCoord> under =
         cellAt(origin, cell, level, io.MousePos);

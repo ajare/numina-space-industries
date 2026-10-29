@@ -1202,8 +1202,7 @@ namespace station
 			// conducted and advected terms are the ticket's safety nets: a
 			// missing booking fails the tick loudly rather than drifting
 			// silently.
-			auto const startingEnergyKJ = compartment.authored.thermalCapacityKJPerK
-				* compartment.authored.startingTemperatureC;
+			auto const startingEnergyKJ = compartment.startingThermalEnergy();
 			// Celsius is a valid temperature datum for this relative-energy
 			// ledger, but zero Celsius is not a useful roundoff scale. Bound
 			// closure against every accumulated energy magnitude (including
@@ -1227,7 +1226,9 @@ namespace station
 			includeThermalScale(compartment.conductedKJ);
 			includeThermalScale(compartment.advectedKJ);
 			includeThermalScale(compartment.hazardHeatKJ);
-			includeThermalScale(compartment.authored.thermalCapacityKJPerK * compartment.temperatureC);
+			includeThermalScale(compartment.thermalEnergy());
+			includeThermalScale(compartment.inventoryEnergyKJ);
+			if (!requireFinite(compartment.inventoryEnergyKJ,where+"inventory-carried energy")) return false;
 			auto const thermalBound = StationBalanceTolerance * thermalScale;
 			if (!requireFinite(compartment.conductedKJ, where + "cumulative conducted energy"))
 				return false;
@@ -1240,8 +1241,8 @@ namespace station
 			auto const thermalResidual = startingEnergyKJ + compartment.occupantHeatKJ
 				+ compartment.crewHeatKJ + compartment.cropHeatKJ + compartment.algaeHeatKJ + compartment.fixtureHeatKJ
 				+ compartment.latentHeatKJ + compartment.exchangedKJ + compartment.conductedKJ
-				+ compartment.advectedKJ + compartment.hazardHeatKJ
-				- compartment.authored.thermalCapacityKJPerK * compartment.temperatureC;
+				+ compartment.advectedKJ + compartment.hazardHeatKJ + compartment.inventoryEnergyKJ
+				- compartment.thermalEnergy();
 			if (!std::isfinite(thermalResidual) || std::abs(thermalResidual) > thermalBound)
 			{
 				auto format = [](double value)
@@ -1267,7 +1268,8 @@ namespace station
 		{
 			auto const where = "atmosphere pathway '" + pathway.authored.id + "'";
 			if (!requireFinite(pathway.advectedKJ, where + " cumulative advected energy")
-				|| !requireFinite(pathway.lastAdvectedKW, where + " last-tick advected power")) return false;
+				|| !requireFinite(pathway.lastAdvectedKW, where + " last-tick advected power")
+				|| !requireFinite(pathway.bulkFlowRateKgPerS,where+" bulk mass flow")) return false;
 		}
 		// Thermal link ledger finiteness (#794): the signed flow and the
 		// cumulative net transfer must be finite before the tick commits.

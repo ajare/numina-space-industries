@@ -12,6 +12,8 @@ void SimulationPlayback::synchronize(const nsi::core::Installation* installation
         runtime_.reset();
         doors_.clear();
         temperatureHistory_.clear();
+        pressureHistory_.clear();
+        atmosphereHistory_.clear();
         source_.reset();
         remainder_ = 0;
     } else if (!source_ || *source_ != *installation) reset(*installation);
@@ -22,6 +24,8 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     runtime_.reset();
     doors_.clear();
     temperatureHistory_.clear();
+    pressureHistory_.clear();
+    atmosphereHistory_.clear();
     source_ = installation;
     remainder_ = 0;
     StationSystemsSettings settings;
@@ -42,7 +46,7 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     settings.thermalLinks = std::move(thermal.links);
     settings.solarCycle = std::move(thermal.solarCycle);
     runtime_ = std::make_unique<StationSystemsRuntime>(std::move(settings), StationSystemsUpdateMode::Variable);
-    recordTemperatures();
+    recordAtmosphereHistory();
 }
 
 bool SimulationPlayback::toggleDoor(std::size_t level,std::size_t wall) {
@@ -76,19 +80,33 @@ std::span<const TemperatureSample> SimulationPlayback::temperatureHistory(const 
     return it == temperatureHistory_.end() ? std::span<const TemperatureSample>{} : it->second;
 }
 
-void SimulationPlayback::recordTemperatures() {
+std::span<const PressureSample> SimulationPlayback::pressureHistory(const std::string& id) const {
+    const auto it=pressureHistory_.find(id);
+    return it==pressureHistory_.end() ? std::span<const PressureSample>{} : it->second;
+}
+
+std::span<const AtmosphereSample> SimulationPlayback::atmosphereHistory(const std::string& id) const {
+    const auto it=atmosphereHistory_.find(id);
+    return it==atmosphereHistory_.end() ? std::span<const AtmosphereSample>{} : it->second;
+}
+
+void SimulationPlayback::recordAtmosphereHistory() {
     const auto snapshot = runtime_->snapshot();
-    for (const auto& air : snapshot.atmospheres) {
-        auto& samples = temperatureHistory_[air.id];
+    auto record=[&](auto& samples, auto sample) {
         // Sample on simulation time, not frame time: slow playback must not
         // create an unbounded number of points within the one-minute window.
         if (samples.empty() || snapshot.elapsedSeconds - samples.back().seconds
                 >= historySampleIntervalSeconds - 1e-9)
-            samples.push_back({snapshot.elapsedSeconds, air.temperatureC});
+            samples.push_back(sample);
         const auto first = std::lower_bound(samples.begin(), samples.end(),
             snapshot.elapsedSeconds - historySeconds,
             [](const auto& sample, double time) { return sample.seconds < time; });
         samples.erase(samples.begin(), first);
+    };
+    for (const auto& air : snapshot.atmospheres) {
+        record(temperatureHistory_[air.id],TemperatureSample{snapshot.elapsedSeconds,air.temperatureC});
+        record(pressureHistory_[air.id],PressureSample{snapshot.elapsedSeconds,air.pressureKPa});
+        record(atmosphereHistory_[air.id],atmosphereSample(snapshot.elapsedSeconds,air));
     }
 }
 
@@ -118,7 +136,7 @@ void SimulationPlayback::update(double wallSeconds) {
                 throw std::runtime_error(diagnostics.empty() ? "Simulation advance failed"
                                                             : diagnostics.front().message);
             }
-            recordTemperatures();
+            recordAtmosphereHistory();
         }
     } catch (...) {
         playing_ = false;

@@ -5,4 +5,5 @@ namespace station::editor {
 void drawInstallationRenderModeCombo(InstallationRenderSettings&);
 // Draws nothing in Default mode. View controls stay enabled during playback.
 void drawThermalRenderControls(InstallationRenderSettings&);
+void drawPressureRenderControls(InstallationRenderSettings&);
 } // namespace station::editor

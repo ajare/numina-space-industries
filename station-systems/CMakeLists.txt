@@ -61,6 +61,7 @@ add_library(StationSystems STATIC
     src/StationSystemsLiveSettings.cpp
     src/StationSystemsMonitors.cpp
     src/StationSystemsPhysics.cpp
+    src/StationGasFlow.cpp
     src/StationSystemsSnapshot.cpp
     src/StationSystemsTrends.cpp
     src/StationThermalMetrics.cpp

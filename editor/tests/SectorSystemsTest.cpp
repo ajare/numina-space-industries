@@ -25,6 +25,7 @@ std::string field(const SectorSystemNode& node, const std::string& key) {
 }
 Installation assigned() {
     Installation i(2, 1);
+    i.setHullType(std::nullopt); // This fixture isolates the explicit reservoir coupling.
     i.toggleWall(0, i.level(0).verticalWall(1, 0));
     auto yaml = YAML::Load(i.serialize());
     auto sector = yaml["levels"][0]["sectors"][0];
@@ -101,6 +102,66 @@ std::string liveField(const SectorSystemNode& node, const std::string& key) {
     auto it = std::find_if(node.simulation.begin(), node.simulation.end(), [&](const auto& f) { return f.first == key; });
     require(it != node.simulation.end(), "Missing simulation field");
     return it->second;
+}
+void connectedGraph() {
+    Installation i(7,5); const auto g=i.level(0);
+    for (unsigned y=0;y<5;++y) {
+        i.toggleWall(0,g.verticalWall(2,y)); i.toggleWall(0,g.verticalWall(4,y));
+    }
+    i.setDoor(0,g.verticalWall(2,2),true); i.setDoor(0,g.verticalWall(4,2),true);
+    // Exterior Door on the left Sector's vertical boundary.
+    i.setDoor(0,g.verticalWall(0,2),true);
+    const auto left=i.level(0).cellData(0,0).sector;
+    const auto middle=i.level(0).cellData(2,0).sector;
+    const auto rightId="sector-0-"+std::to_string(i.level(0).sectorAt(6,0).uid);
+    const auto graph=buildSectorSystemsGraph(i,0,left);
+    require(std::count_if(graph.nodes.begin(),graph.nodes.end(),[](const auto& n){return n.type=="Atmosphere pathway";})==2,"Incident Door pathways absent or recursive");
+    require(std::none_of(graph.nodes.begin(),graph.nodes.end(),[&](const auto& n){return n.id==rightId;}),"Graph recursively expanded through neighbour");
+    require(std::any_of(graph.nodes.begin(),graph.nodes.end(),[](const auto& n){return n.type=="Hull" && !n.unresolved;}),"Connected Hull is missing or unresolved");
+    require(std::any_of(graph.nodes.begin(),graph.nodes.end(),[](const auto& n){return n.type=="Exterior";}),"Exterior endpoint absent");
+    auto hasPin=[&](const station::StationPinRef& pin) {
+        for (const auto& n:graph.nodes) for (const auto& p:n.ports) if (p.reference==pin) return true;
+        return false;
+    };
+    for (const auto& link:graph.links) {
+        require(hasPin(link.from) && hasPin(link.to),"Graph connection has no rendered endpoint port");
+        require(link.from.portName!="Gas out","Door incorrectly wired to Gas out instead of Hosted pathways");
+    }
+    require(std::count_if(graph.links.begin(),graph.links.end(),[](const auto& l){return l.to.nodeType=="Atmosphere pathway";})==4,"Door endpoint links incomplete");
+    require(std::any_of(graph.links.begin(),graph.links.end(),[](const auto& l){return l.from.portName=="Thermal links";}),"Thermal links not projected");
+    SimulationPlayback p; p.reset(i); p.togglePlaying();
+    p.toggleDoor(0,g.verticalWall(2,2)); p.toggleDoor(0,g.verticalWall(0,2)); p.update(0.1);
+    const auto snapshot=p.runtime()->snapshot();
+    const auto live=buildSectorSystemsGraph(i,0,left,&snapshot);
+    const auto neighbour=buildSectorSystemsGraph(i,0,middle,&snapshot);
+    for (const auto& node:live.nodes) {
+        if (node.type=="Atmosphere pathway") {
+            require(liveField(node,"State")=="Open","Door live open state missing");
+            require(!liveField(node,"Flow regime").empty(),"Flow regime absent");
+            require(std::isfinite(std::stod(liveField(node,"Bulk gas flow (outward)"))),"Bulk flow absent");
+            if (field(node,"End A")==station::StationExteriorAtmosphereId || field(node,"End B")==station::StationExteriorAtmosphereId) {
+                require(liveField(node,"Flow regime")=="Choked","Exterior flow not shown choked");
+                require(std::stod(liveField(node,"Downstream / upstream pressure"))==0,"Exterior pressure ratio incorrect");
+            }
+            require(!node.simulationStatus.empty(),"Pathway timestamp absent");
+            const auto other=std::find_if(neighbour.nodes.begin(),neighbour.nodes.end(),[&](const auto& n){return n.type==node.type && n.id==node.id;});
+            if (other!=neighbour.nodes.end())
+                require(std::abs(std::stod(liveField(node,"Nitrogen flow (outward)"))+std::stod(liveField(*other,"Nitrogen flow (outward)")))<1e-8,"Gas flow sign did not follow selected Sector");
+        }
+        if (node.type=="Thermal link") require(!liveField(node,"Heat flow (outward)").empty(),"Thermal live heat flow absent");
+    }
+    // Every projected boundary and canonical connection must actually draw.
+    ImGui::CreateContext();
+    {
+        auto& io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize={1400,1000}; io.DeltaTime=1.0f/60; io.Fonts->Build();
+        SectorSystemsView view;
+        for (int frame=0;frame<2;++frame) {
+            ImGui::NewFrame(); ImGui::SetNextWindowSize({1300,900}); ImGui::Begin("Connected graph");
+            view.draw(live); ImGui::End(); ImGui::Render();
+        }
+        require(view.renderedLinkCount()==live.links.size(),"Connected graph silently omitted links");
+    }
+    ImGui::DestroyContext();
 }
 void simulationState() {
     Installation i(2, 1);
@@ -187,6 +248,73 @@ void simulationState() {
     playback.synchronize(session.installation());
     const auto rebuilt = playback.snapshotFor(session.installation());
     require(rebuilt && rebuilt->elapsedSeconds == 0, "Edited geometry did not reset live readout");
+}
+void zoomCanvas() {
+    Installation i(7,5); const auto g=i.level(0);
+    for (unsigned y=0;y<5;++y) {
+        i.toggleWall(0,g.verticalWall(2,y)); i.toggleWall(0,g.verticalWall(4,y));
+    }
+    i.setDoor(0,g.verticalWall(2,2),true); i.setDoor(0,g.verticalWall(4,2),true);
+    const auto graph=buildSectorSystemsGraph(i,0,i.level(0).cellData(2,0).sector);
+    const auto before=i.serialize();
+    ImGui::CreateContext();
+    {
+        auto& io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize={1200,1000}; io.DeltaTime=1.0f/60; io.Fonts->Build();
+        SectorSystemsView view;
+        auto frame=[&](ImVec2 mouse,float wheel=0,bool left=false) {
+            io.MousePos=mouse; io.MouseWheel=wheel; io.MouseDown[0]=left;
+            ImGui::NewFrame(); ImGui::SetNextWindowPos({30,30}); ImGui::SetNextWindowSize({760,700});
+            ImGui::Begin("Zoom canvas");
+            const auto padding=ImGui::GetStyle().FramePadding;
+            const auto fontSize=ImGui::GetFontSize();
+            view.draw(graph);
+            require(ImGui::GetStyle().FramePadding.x==padding.x && ImGui::GetStyle().FramePadding.y==padding.y
+                && ImGui::GetFontSize()==fontSize,"Canvas zoom leaked font/style scale into parent panel");
+            ImGui::End(); ImGui::Render();
+            require(!view.linkCreationStarted() && view.renderedLinkCount()==graph.links.size(),"Zoom changed read-only links");
+        };
+        frame({-100,-100}); frame({-100,-100}); frame({-100,-100});
+        require(view.zoom()<1,"Large graph did not initially zoom out");
+        auto fitted=[&] {
+            const auto origin=view.canvasOrigin(),size=view.canvasSize();
+            for (const auto& n:graph.nodes) {
+                const auto pos=view.nodePosition(n.type,n.id),extent=view.nodeDimensions(n.type,n.id);
+                require(pos && extent,"Zoomed graph lost node geometry");
+                require(pos->x>=origin.x-1 && pos->y>=origin.y-1
+                    && pos->x+extent->x<=origin.x+size.x+1 && pos->y+extent->y<=origin.y+size.y+1,
+                    "Initial fit clipped a node");
+            }
+        };
+        fitted();
+        const auto origin=view.canvasOrigin(),size=view.canvasSize();
+        const ImVec2 anchor(origin.x+size.x*0.5f,origin.y+size.y*0.5f);
+        frame(anchor);
+        const auto& n=graph.nodes.front(); const auto start=*view.nodePosition(n.type,n.id);
+        const float initial=view.zoom();
+        frame(anchor,1);
+        require(view.zoom()>initial,"Mouse wheel did not zoom in over canvas");
+        const auto moved=*view.nodePosition(n.type,n.id); const float ratio=view.zoom()/initial;
+        require(std::abs(moved.x-(anchor.x+(start.x-anchor.x)*ratio))<0.1f
+            && std::abs(moved.y-(anchor.y+(start.y-anchor.y)*ratio))<0.1f,"Wheel zoom drifted away from pointer anchor");
+        frame(anchor,-1);
+        require(std::abs(view.zoom()-initial)<1e-5f,"Wheel down did not zoom out");
+        const auto retained=view.zoom();
+        frame({-100,-100}); frame({-100,-100},3);
+        require(view.zoom()==retained,"Wheel outside canvas changed zoom");
+        // Node dragging must remain in screen-space pixels at non-unit zoom.
+        const auto pos=*view.nodePosition(n.type,n.id);
+        const ImVec2 header(pos.x+20*view.zoom(),pos.y+10*view.zoom());
+        frame(header); frame(header,0,true);
+        frame({header.x+35,header.y+25},0,true); frame({header.x+35,header.y+25});
+        const auto dragged=*view.nodePosition(n.type,n.id);
+        require(std::abs(dragged.x-pos.x-35)<0.1f && std::abs(dragged.y-pos.y-25)<0.1f,"Zoom broke node drag geometry");
+        frame({-100,-100});
+        const auto saved=*view.nodePosition(n.type,n.id);
+        require(std::abs(saved.x-dragged.x)<0.1f && std::abs(saved.y-dragged.y)<0.1f,"Zoomed node placement was not retained");
+        view.fitToView(); frame({-100,-100}); frame({-100,-100}); fitted();
+        require(i.serialize()==before,"Zoom modified Installation");
+    }
+    ImGui::DestroyContext();
 }
 void readOnlyCanvas() {
     ImGui::CreateContext();
@@ -282,6 +410,6 @@ void readOnlyCanvas() {
 }
 }
 int main() {
-    try { projection(); simulationState(); readOnlyCanvas(); std::cout << "Sector systems graph passed\n"; }
+    try { projection(); simulationState(); connectedGraph(); zoomCanvas(); readOnlyCanvas(); std::cout << "Sector systems graph passed\n"; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

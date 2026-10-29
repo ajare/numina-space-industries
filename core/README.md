@@ -43,6 +43,8 @@ Exterior Walls; obsolete Exterior Walls and Void/Void Walls are removed.
 Still-valid authored Interior Walls are preserved. Unrelated Walls are unchanged.
 
 `WallType::Door` is a special present Wall on an Interior or Exterior edge.
+Its clear opening is 0.9 m wide × 2 m high (1.8 m²), defined by the Door constants
+in `Units.h`; occupying a full Wall edge does not make its opening wall-sized.
 `setDoor(level, wall, true)` places one, including in a supported gap;
 `setDoor(level, wall, false)` clears the edge to None. `Level::canPlaceDoor`
 checks for solid collinear Walls at both ends and no Door sharing either

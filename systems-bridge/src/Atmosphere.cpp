@@ -97,8 +97,9 @@ std::vector<DoorExpansion> expandDoors(const core::Installation& installation) {
                 station::AtmospherePathwaySettings path;
                 path.id="door-"+std::to_string(l)+"-"+std::to_string(w);
                 path.aAtmosphereId=*a; path.bAtmosphereId=*b;
-                // One Cell edge wide and one Level high, not the Sector height.
-                path.areaM2=(alongX ? core::CellWidthM : core::CellDepthM)*core::LevelHeightM;
+                // The clear opening is 0.9 m wide by 2 m high, not the full
+                // Cell-edge Wall surface and independent of Sector height.
+                path.areaM2=core::DoorOpeningAreaM2;
                 path.openFraction=0.0;
                 door.pathway=std::move(path);
             }

@@ -208,6 +208,45 @@ unchanged. `writeFaultReplay`/`readFaultReplay` use the shared serialization
 interface and authoritative configuration codec; replay reconstruction accepts
 explicit source selection too. No backend headers enter the simulation API.
 
+## Compressible atmosphere pathways
+
+Every explicit `AtmospherePathwaySettings` uses pressure-driven ideal-gas bulk
+flow for interior and exterior openings. `dischargeCoefficient` defaults to 0.7
+and multiplies `areaM2 * openFraction`; it is live-editable and validated in
+(0,1]. Schema 140 writes it; older configurations load with 0.7. There is no
+legacy diffusion-only bulk mode. Residual molar counterdiffusion separately
+mixes compositions, including at equal total pressure.
+
+The upstream mixture sets gamma and specific gas constant. The flow is choked
+below the critical downstream/upstream absolute-pressure ratio, subsonic above
+it, and zero at equal pressure; a closed opening is sealed. Snapshot
+`flowRegime`/`pressureRatio` describe the current state. `bulkFlowRateKgPerS`
+is the signed A-to-B last-step average excluding mixing; existing per-species
+rates include mixing. Enthalpy and bulk/species rates remain last-step means,
+not instantaneous nozzle rates.
+
+Pathway-connected atmospheres (even with closed Doors) use inventory-dependent
+gas `sum(m cv)` and absolute internal energy `sum(m cv) T_K`; enthalpy crossing
+an opening is `sum(dm cp) T_K`. No authored fixed capacity becomes hidden wall
+heat mass. Standalone atmospheres retain their existing explicit-capacity
+contract. Snapshots expose starting/current capacities, `inventoryThermodynamics`
+and `inventoryEnergyKJ` for sensible energy carried by non-pathway inventory
+changes; this term participates in the thermal audit. Hull conduction/radiation
+and existing condensation/latent heat are separate.
+
+Shared adaptive donor-limited substeps (maximum 2 ms, 1% donor mass per edge)
+and pair-equilibrium bisection prevent overdraft and pressure overshoot. This
+adds work inside an external update; a finite integration budget can refuse
+pathological configurations. Positive numerical heat-capacity floors do not
+add mass to the energy ledger. Hull splitting permits its existing 1e-7 kJ
+energy error on vanishing-capacity nodes instead of demanding nanokelvin
+agreement in trace gas. Stiff multi-contact meshes switch from pair splitting
+to a simultaneous implicit, second-order extrapolated conduction solve, with
+conservative per-edge bookings and rejection of negative absolute temperatures. Constant room-temperature species properties, the
+well-mixed assumption, and unchanged low-pressure Hull U-values are engineering
+approximations; jets, acoustic propagation, ice and real-gas effects are not
+modelled. See [ADR-0003](../docs/adr/0003-compressible-door-gas-flow.md).
+
 ## World lifecycle integration
 
 World and its core-owned SimulationCoordinator consume the public `station`

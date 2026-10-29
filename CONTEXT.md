@@ -32,7 +32,22 @@ A Sector's starting atmosphere condition, independent of its size: Earth-like sp
 A shared edge between neighbouring Cells, or an edge at a Level's boundary. An ordinary present Wall is Interior between two Interior Cells and Exterior between Interior and Void or outside the grid; an absent Wall is None. A Door is a special present Wall.
 
 **Door**:
-A special Wall occupying one edge, supported by solid collinear Walls at both ends. Doors cannot share an endpoint and remain Sector boundaries.
+A special Wall occupying one edge, with a clear opening 0.9 m wide and 2 m tall, supported by solid collinear Walls at both ends. Doors cannot share an endpoint and remain Sector boundaries.
+
+**Atmosphere pathway**:
+An opening through an authored Door that permits gas and its carried heat to cross between atmosphere compartments, or from a compartment to exterior space. It is distinct from a Thermal link, which conducts heat without transferring gas.
+
+**Bulk gas flow**:
+Pressure-driven movement of the upstream gas mixture through an open Atmosphere pathway. It is distinct from composition mixing, where species can exchange even at equal total pressure.
+
+**Choked flow**:
+Bulk gas flow limited by sonic conditions at an opening. Below the critical downstream/upstream absolute-pressure ratio, further lowering downstream pressure does not increase flow for unchanged upstream conditions; above that ratio the flow is subsonic.
+
+**Discharge coefficient**:
+The dimensionless reduction of an opening's ideal mass flow due to real opening losses. It is separate from geometric area and Door openness.
+
+**Pressure**:
+The absolute total gas pressure in a Sector's atmosphere, measured in kPa. A gas's partial pressure is its contribution to that total; its wet mole fraction includes water vapour in the mixture, unlike a dry-gas fraction or mass fraction.
 
 **Hull type**:
 An Installation-wide choice of exterior thermal assembly, characterised by thermal transmittance and radiative properties. The Hull is the physical skin enclosing the Installation, not the empty space outside or an individual geometric edge.

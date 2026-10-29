@@ -1413,6 +1413,7 @@ namespace station
 	inline constexpr char StationExteriorAtmosphereId[]{"$exterior"};
 	// One undirected opening; A/B only define the sign of published flux.
 	// Exactly one endpoint may be StationExteriorAtmosphereId.
+	enum class StationAtmosphereFlowRegime { Sealed, NoBulkFlow, Subsonic, Choked };
 	struct AtmospherePathwaySettings
 	{
 		std::string id;
@@ -1424,6 +1425,8 @@ namespace station
 		// live through updateNode with no mirror to keep in step, and what a
 		// run starts with is simply what the document says.
 		double openFraction{1.0};
+		// Provisional sharp-edged opening resistance; dimensionless, (0,1].
+		double dischargeCoefficient{0.7};
 		bool operator==(AtmospherePathwaySettings const&) const = default;
 	};
 	// A Thermal link (#794): an explicitly authored, undirected conduction
@@ -1467,8 +1470,9 @@ namespace station
 		"oxygen", "nitrogen", "carbon-dioxide", "water-vapour"};
 	inline constexpr std::array<char const*, 4> StationPathwayGasLabels{
 		"Oxygen", "Nitrogen", "Carbon dioxide", "Water vapour"};
-	// Effective turbulent coefficients, not molecular diffusivities. At
-	// 293 K, 1 m2 between two 100 m3 volumes relaxes 95% in ~256 s.
+	// Effective residual composition-mixing coefficients, not molecular
+	// diffusivities and NOT the bulk/decompression flow law. The common
+	// coefficient drives molar counterdiffusion through an open pathway.
 	inline constexpr std::array<double, 4> StationPathwayDiffusionCoefficients{
 		0.002, 0.002, 0.002, 0.002};
 	// A scheduled airlock cycle over one compartment (#400): a scenario

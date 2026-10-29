@@ -26,8 +26,11 @@ via `expandInstallation` returns only atmospheres. IDs are
 
 `expandDoors` returns one control binding per explicitly authored Door, keyed by
 Level and Wall index, with an optional initially closed `AtmospherePathwaySettings`.
-Pathway ids are `door-<level>-<wall>`; area is one Cell edge × one Level high
-(6 m²), independent of Sector height. The runtime changes `openFraction` directly
+Pathway ids are `door-<level>-<wall>`; the clear opening is 0.9 m wide × 2 m
+high (1.8 m²), smaller than the Wall it occupies and independent of edge
+orientation or Sector height. The default discharge coefficient is 0.7.
+The solver uses compressible subsonic/choked bulk flow with separate composition
+mixing and inventory-dependent gas heat capacity on connected compartments. The runtime changes `openFraction` directly
 between 0 and 1, without rebuilding compartments. Exterior/geometry-Void
 endpoints map to `$exterior`; an Interior Void atmosphere preset is absence,
 not vacuum, so it does not generate a pathway. Same-compartment endpoints also
@@ -43,8 +46,10 @@ total pressure **before** the dry gases are sized using the library's gas
 constant and molar masses.
 
 Every mass scales with `Sector::volumeM3()` (12 m³ per Cell per Level).
-Thermal capacity uses 0.851 kJ/(K·m³), density × **cv**, not advected **cp**
-(1.005 kJ/(kg·K)). Declared limits are 90–110 kPa total, minimum 16 kPa O₂,
+Authored starting thermal capacity uses 0.851 kJ/(K·m³), density × **cv**, not
+advected **cp** (1.005 kJ/(kg·K)). Pathway-connected runtime compartments instead
+calculate gas capacity and enthalpy from current species inventories; the fixed
+authored values do not introduce structural heat mass (ADR-0003). Declared limits are 90–110 kPa total, minimum 16 kPa O₂,
 and maximum 5 kPa CO₂.
 
 Sector assignments pass through unchanged: occupant count and all four rates,

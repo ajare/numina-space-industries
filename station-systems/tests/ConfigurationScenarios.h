@@ -34,6 +34,9 @@ void invalidPathways(station::StationSystemsSettings const& s, Refuse&& refuse)
 	{
 		auto bad = s; bad.atmospherePathways[0].openFraction = value; refuse(bad, "openFraction");
 	}
+	for (double value : {0.0,-1.0,1.01,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+		auto bad=s;bad.atmospherePathways[0].dischargeCoefficient=value;refuse(bad,"dischargeCoefficient");
+	}
 	for (bool first : {false, true})
 	{
 		auto bad = s;

@@ -11,6 +11,12 @@ inline constexpr double CellWidthM{2.0};
 inline constexpr double CellDepthM{2.0};
 inline constexpr double LevelHeightM{3.0};
 
+// A Door occupies one Wall edge but its clear opening is smaller than that
+// edge's wall surface. These dimensions do not resize the grid or Sectors.
+inline constexpr double DoorWidthM{0.9};
+inline constexpr double DoorHeightM{2.0};
+inline constexpr double DoorOpeningAreaM2{DoorWidthM * DoorHeightM};
+
 // Derived footprint and single-Level volume of one Cell.
 inline constexpr double CellAreaM2{CellWidthM * CellDepthM};
 inline constexpr double CellVolumeM3{CellAreaM2 * LevelHeightM};

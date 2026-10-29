@@ -46,7 +46,7 @@ void doorExpansion() {
     for (const auto& d:doors) {
         require(d.pathway.has_value(),"Valid Door has no gas pathway");
         require(d.pathway->openFraction==0,"Door did not start closed");
-        near(d.pathway->areaM2,6.0);
+        near(d.pathway->areaM2,1.8);
         settings.atmospherePathways.push_back(*d.pathway);
     }
     require(doors[0].pathway->aAtmosphereId==station::StationExteriorAtmosphereId,"Exterior Door not wired to vacuum");
@@ -61,6 +61,13 @@ void doorExpansion() {
     for (unsigned x:{1,3}) loop.toggleWall(0,l.horizontalWall(x,2));
     loop.setDoor(0,l.horizontalWall(2,2),true);
     require(expandDoors(loop).size()==1 && !expandDoors(loop)[0].pathway,"Same-room Door fabricated self-pathway");
+    Installation tall(5,5);const auto tg=tall.level(0);
+    for (unsigned y=0;y<5;++y) tall.toggleWall(0,tg.verticalWall(2,y));
+    tall.setDoor(0,tg.verticalWall(2,2),true);tall.addLevel(5,5);
+    for (std::size_t s=0;s<tall.level(0).sectors().size();++s) tall.setSector(0,s,"",2);
+    const auto vertical=expandDoors(tall);
+    require(vertical.size()==1 && vertical[0].pathway,"Tall vertical Door lost pathway");
+    near(vertical[0].pathway->areaM2,1.8); // independent of edge orientation and Sector height
 }
 void thermalExpansion() {
     using namespace nsi::systems;

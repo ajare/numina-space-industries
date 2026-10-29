@@ -1,6 +1,8 @@
 #pragma once
 
 #include "TemperatureSample.h"
+#include "PressureSample.h"
+#include "SectorAtmosphere.h"
 #include <nsi/core/Installation.h>
 #include <station/StationSystemsRuntime.h>
 
@@ -41,11 +43,15 @@ public:
     // Last minute of simulation time, collected for every compartment even
     // while its Sector is not selected. Invalidated by reset/update/synchronize.
     std::span<const TemperatureSample> temperatureHistory(const std::string& atmosphereId) const;
+    std::span<const PressureSample> pressureHistory(const std::string& atmosphereId) const;
+    std::span<const AtmosphereSample> atmosphereHistory(const std::string& atmosphereId) const;
 private:
-    void recordTemperatures();
+    void recordAtmosphereHistory();
     struct DoorState { bool open=false; std::optional<std::string> pathwayId; };
     std::map<std::pair<std::size_t,std::size_t>, DoorState> doors_;
     std::map<std::string, std::vector<TemperatureSample>> temperatureHistory_;
+    std::map<std::string, std::vector<PressureSample>> pressureHistory_;
+    std::map<std::string, std::vector<AtmosphereSample>> atmosphereHistory_;
     static constexpr double historySeconds = 60.0;
     static constexpr double historySampleIntervalSeconds = 0.1;
     static constexpr double updateIntervalSeconds = 0.1;

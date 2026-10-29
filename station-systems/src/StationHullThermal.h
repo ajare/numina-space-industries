@@ -72,14 +72,86 @@ struct HullMeshSolution
 	std::vector<double> transferred;
 	double emittedKJ{};
 };
+// L-stable simultaneous conduction for a stiff mesh. Solve for temperature
+// changes (not absolute temperatures) with the SPD matrix C + dt*L. Pair
+// splitting needs infinitesimal steps when a nearly empty gas node bridges
+// several finite bodies; the implicit mesh instead resolves its quasi-steady
+// limit. Each edge still books one equal-and-opposite transfer.
+inline bool implicitHullConductionStep(HullMeshSolution& state,double dt,
+    const std::vector<long double>& capacities,const std::vector<HullMeshLink>& links)
+{
+    const auto n=capacities.size();
+    std::vector<long double> matrix(n*n,0),rhs(n,0),delta(n,0);
+    for (size_t i=0;i<n;++i) matrix[i*n+i]=capacities[i];
+    for (const auto& link:links) {
+        const auto a=link.a,b=link.b;const long double weight=dt*link.conductance;
+        matrix[a*n+a]+=weight;matrix[b*n+b]+=weight;
+        matrix[a*n+b]-=weight;matrix[b*n+a]-=weight;
+        const auto q=weight*(state.temperatures[b]-state.temperatures[a]);
+        rhs[a]+=q;rhs[b]-=q;
+    }
+    // In-place lower Cholesky factor followed by forward/back substitution.
+    for (size_t i=0;i<n;++i) for (size_t j=0;j<=i;++j) {
+        auto value=matrix[i*n+j];
+        for (size_t k=0;k<j;++k) value-=matrix[i*n+k]*matrix[j*n+k];
+        if (i==j) {
+            if (!(value>0) || !std::isfinite(value)) return false;
+            matrix[i*n+j]=std::sqrt(value);
+        } else matrix[i*n+j]=value/matrix[j*n+j];
+    }
+    for (size_t i=0;i<n;++i) {
+        auto value=rhs[i];
+        for (size_t j=0;j<i;++j) value-=matrix[i*n+j]*delta[j];
+        delta[i]=value/matrix[i*n+i];
+    }
+    for (size_t i=n;i-->0;) {
+        auto value=delta[i];
+        for (size_t j=i+1;j<n;++j) value-=matrix[j*n+i]*delta[j];
+        delta[i]=value/matrix[i*n+i];
+    }
+    for (size_t i=0;i<n;++i) state.temperatures[i]+=delta[i];
+    for (size_t i=0;i<links.size();++i) {
+        const auto& link=links[i];
+        state.transferred[i]+=static_cast<double>(dt*link.conductance
+            *(state.temperatures[link.a]-state.temperatures[link.b]));
+    }
+    return true;
+}
+// Richardson-extrapolated backward Euler is second order and stiffly decays
+// to equilibrium, while retaining each edge's conservative energy booking.
+// Reject any trial that crosses absolute zero; the outer error controller
+// refines it. Applying plain first-order Euler would require millions of
+// transient steps to meet the energy tolerance of a tiny gas capacity.
+inline bool implicitHullConduction(HullMeshSolution& state,double dt,
+    const std::vector<long double>& capacities,const std::vector<HullMeshLink>& links)
+{
+    HullMeshSolution whole{state.temperatures,std::vector<double>(links.size()),0};
+    auto halves=whole;
+    if (!implicitHullConductionStep(whole,dt,capacities,links)
+        || !implicitHullConductionStep(halves,dt/2,capacities,links)
+        || !implicitHullConductionStep(halves,dt/2,capacities,links)) return false;
+    for (size_t i=0;i<capacities.size();++i) {
+        const auto t=2*halves.temperatures[i]-whole.temperatures[i];
+        if (!std::isfinite(t) || t<=-StationCelsiusOffset) return false;
+        state.temperatures[i]=t;
+    }
+    for (size_t i=0;i<links.size();++i) state.transferred[i]+=2*halves.transferred[i]-whole.transferred[i];
+    return true;
+}
 // Radiation and conduction do not commute. Control their splitting error,
 // rather than letting the configured Station step decide insulation fidelity.
-// Every trial uses only closed-form pair relaxation; rejected trials book nothing.
+// Ordinary meshes use closed-form pair relaxation; stiff meshes use the
+// simultaneous implicit/extrapolated solve above. Rejected trials book nothing.
 inline std::optional<HullMeshSolution> solveHullThermalMesh(HullSettings const& hull,
 	double absorbedKW, double dt, std::vector<long double> capacities,
 	std::vector<long double> temperatures, std::vector<HullMeshLink> const& links)
 {
 	HullMeshSolution result{std::move(temperatures), std::vector<double>(links.size()), 0};
+	std::vector<long double> contact(capacities.size(),0);
+	for (const auto& link:links) { contact[link.a]+=link.conductance;contact[link.b]+=link.conductance; }
+	bool stiffConduction=false;
+	for (size_t i=0;i<capacities.size();++i)
+		if (capacities[i]<0.01L*dt*contact[i]) stiffConduction=true;
 	auto split = [&](HullMeshSolution& state, double duration) {
 		auto radiate = [&]() {
 			auto const initial = state.temperatures.back();
@@ -90,6 +162,8 @@ inline std::optional<HullMeshSolution> solveHullThermalMesh(HullSettings const& 
 			return true;
 		};
 		if (!radiate()) return false;
+		if (stiffConduction)
+			return implicitHullConduction(state,duration,capacities,links) && radiate();
 		auto conduct = [&](size_t i) {
 			auto const& link = links[i];
 			auto& ta = state.temperatures[link.a]; auto& tb = state.temperatures[link.b];
@@ -116,7 +190,13 @@ inline std::optional<HullMeshSolution> solveHullThermalMesh(HullSettings const& 
 		{
 			auto const delta = static_cast<double>(std::abs(whole.temperatures[i] - halves.temperatures[i]));
 			if (!std::isfinite(delta)) valid = false;
-			error = std::max(error, delta / 1e-8);
+			// Near vacuum a gas node can have vanishing capacity. Requiring
+			// nanokelvin agreement there exhausts the split solver while the
+			// entire disputed energy is below its existing 1e-7 kJ budget.
+			// Preserve the ordinary temperature target and additionally allow
+			// that bounded energy error, without adding artificial heat mass.
+			const auto temperatureBudget=std::max(1e-8L,1e-7L/capacities[i]);
+			error = std::max(error,static_cast<double>(delta/temperatureBudget));
 		}
 		for (size_t i = 0; i < links.size(); ++i)
 		{

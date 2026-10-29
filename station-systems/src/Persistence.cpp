@@ -885,6 +885,7 @@ namespace station
 				serializer.writeString("bAtmosphereId", pathway.bAtmosphereId);
 				serializer.writeDouble("areaM2", pathway.areaM2);
 				serializer.writeDouble("openFraction", pathway.openFraction);
+				serializer.writeDouble("dischargeCoefficient",pathway.dischargeCoefficient);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -2463,13 +2464,16 @@ namespace station
 				// same field.
 				bool const hasOpen = version >= 106;
 				if (hasOpen) fields.push_back("openFraction");
+				const bool hasDischarge=version>=140 && serializer.hasField("dischargeCoefficient");
+				if (hasDischarge) fields.push_back("dischargeCoefficient");
 				for (auto const& field : serializer.mapKeys(""))
 					if (std::find(fields.begin(), fields.end(), field) == fields.end())
 						throw SerializationException("Station entry '" + id + "' field '" + field + "' is unknown; conversion required");
 				stationSettings.atmospherePathways.push_back({id,
 					serializer.readString("aAtmosphereId"), serializer.readString("bAtmosphereId"),
 					serializer.readDouble("areaM2"),
-					hasOpen ? serializer.readDouble("openFraction") : 1.0});
+					hasOpen ? serializer.readDouble("openFraction") : 1.0,
+					hasDischarge ? serializer.readDouble("dischargeCoefficient") : 0.7});
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -3372,6 +3376,7 @@ namespace station
 
 	std::uint32_t stationConfigurationSchemaVersion(StationSystemsSettings const& settings)
 	{
+		if (!settings.atmospherePathways.empty()) return 140;
 		// Keep feature-absent documents byte-identical; schema 112 is required
 		// only when the new opt-in contract actually travels on the wire, and
 		// schema 113 only when a loop carries the Condition model (#840).

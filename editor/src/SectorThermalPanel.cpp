@@ -1,4 +1,5 @@
 #include "SectorThermalPanel.h"
+#include "SectorAtmospherePanel.h"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
@@ -6,15 +7,29 @@
 
 namespace station::editor {
 void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSample> history,
-    const std::function<void()>& drawConfiguration) {
+    const std::function<void()>& drawConfiguration, std::span<const PressureSample> pressureHistory,
+    std::span<const AtmosphereSample> atmosphereHistory) {
     if (!state.hasAtmosphere) ImGui::TextUnformatted("No atmosphere compartment; no thermal links or Hull connection.");
     else if (state.isolated()) ImGui::TextUnformatted("Thermally isolated");
     if (!ImGui::BeginTabBar("SectorSystems")) return;
+    if (ImGui::BeginTabItem("Atmosphere")) {
+        drawSectorAtmosphere(state,pressureHistory,atmosphereHistory);
+        ImGui::EndTabItem();
+    }
     if (ImGui::BeginTabItem("Thermal")) {
         ImGui::TextUnformatted("Atmosphere thermal state");
         if (state.atmosphere) {
             const auto& air = *state.atmosphere;
+            ImGui::TextUnformatted("Starting conditions");
+            ImGui::Text("Starting temperature: %.3f C", air.startingTemperatureC);
+            ImGui::Text("Starting thermal energy: %.3f kJ", air.startingEnergyKJ);
+            ImGui::Text("Heat capacity: %.3f kJ/K (starting)", air.startingThermalCapacityKJPerK);
+            if (air.inventoryThermodynamics)
+                ImGui::TextUnformatted("Door-connected gas: inventory-dependent capacity; energy referenced to absolute zero.");
+            ImGui::Separator();
+            ImGui::TextUnformatted("Live simulation values");
             ImGui::Text("Temperature: %.3f C", air.temperatureC);
+            ImGui::Text("Current heat capacity: %.6g kJ/K",air.thermalCapacityKJPerK);
             if (!history.empty()) {
                 if (ImPlot::BeginPlot("Temperature — last minute###SectorTemperature", ImVec2(-1,180),
                         ImPlotFlags_NoLegend)) {
@@ -30,11 +45,8 @@ void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSa
                     ImPlot::EndPlot();
                 }
             } else ImGui::TextUnformatted("Temperature history unavailable.");
-            ImGui::Text("Starting temperature: %.3f C | Change: %+.3f C",
-                air.startingTemperatureC, air.temperatureC - air.startingTemperatureC);
-            ImGui::Text("Heat capacity: %.3f kJ/K", air.thermalCapacityKJPerK);
-            ImGui::Text("Thermal energy: %.3f kJ | Starting: %.3f kJ",
-                air.currentEnergyKJ, air.startingEnergyKJ);
+            ImGui::Text("Temperature change: %+.3f C", air.temperatureC - air.startingTemperatureC);
+            ImGui::Text("Thermal energy: %.3f kJ", air.currentEnergyKJ);
             ImGui::TextUnformatted("Last-step heat rates (kW; positive adds heat to this Sector)");
             ImGui::Text("Conduction: %+.6f | Reservoir exchange: %+.6f",
                 air.lastConductedKW, air.lastExchangeIntoCompartmentKW);
@@ -44,6 +56,8 @@ void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSa
                 air.lastCrewHeatKW, air.lastCropHeatKW, air.lastAlgaeHeatKW);
             ImGui::Text("Fixtures: %+.6f | Hazard heat: %+.6f",
                 air.lastFixtureHeatKW, air.lastHazardHeatKW);
+            if (air.inventoryThermodynamics)
+                ImGui::Text("Inventory-carried energy (non-Door processes): %+.6f kJ",air.inventoryEnergyKJ);
             ImGui::Text("Thermal energy balance residual: %+.6f kJ", air.residualKJ);
         } else if (state.hasAtmosphere) {
             ImGui::TextWrapped("Live atmosphere stats unavailable: no runtime snapshot for this compartment.");

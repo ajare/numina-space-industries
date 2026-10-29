@@ -47,6 +47,9 @@ void doorControls() {
     p.update(0.1);
     const auto vented=p.runtime()->snapshot();
     require(vented.healthy && vented.atmospheres[0].oxygenKg<before.atmospheres[0].oxygenKg,"Open Door did not vent gas");
+    const auto pressure=p.pressureHistory(vented.atmospheres[0].id);
+    require(pressure.back().pressureKPa<pressure.front().pressureKPa,"Pressure history missed Door decompression");
+    near(pressure.back().pressureKPa,vented.atmospheres[0].pressureKPa);
     p.togglePlaying();
     require(!p.toggleDoor(0,wall) && p.doorOpen(0,wall),"Paused Door operated");
     p.togglePlaying();
@@ -180,8 +183,17 @@ void temperatureHistory() {
         const auto samples=playback.temperatureHistory(air.id);
         require(samples.size()==1,"History did not start at time zero");
         near(samples[0].seconds,0); near(samples[0].temperatureC,air.temperatureC);
+        const auto pressures=playback.pressureHistory(air.id);
+        require(pressures.size()==1,"Pressure history did not start at time zero");
+        near(pressures[0].seconds,0); near(pressures[0].pressureKPa,air.pressureKPa);
+        const auto composition=playback.atmosphereHistory(air.id);
+        require(composition.size()==1 && composition[0].wetMoleBoundsPercent,"Composition history did not start at time zero");
+        near(composition[0].relativeHumidity,air.relativeHumidity);
+        near(composition[0].wetMoleBoundsPercent->back(),100);
     }
     require(playback.temperatureHistory("missing").empty(),"Unknown compartment gained history");
+    require(playback.pressureHistory("missing").empty(),"Unknown compartment gained pressure history");
+    require(playback.atmosphereHistory("missing").empty(),"Unknown compartment gained composition history");
     for (int speed : {0,2,4}) {
         playback.reset(installation);
         playback.setSpeedIndex(speed);
@@ -202,28 +214,57 @@ void temperatureHistory() {
             for (std::size_t n=1;n<samples.size();++n)
                 require(samples[n].seconds>samples[n-1].seconds,"Duplicate or unordered history samples");
             require(samples.back().temperatureC < samples.front().temperatureC,"History did not capture cooling");
+            const auto pressures=playback.pressureHistory(air.id);
+            require(pressures.size()==samples.size(),"Pressure samples differ from temperature cadence");
+            const auto composition=playback.atmosphereHistory(air.id);
+            require(composition.size()==samples.size(),"Composition history is not cadence-aligned and bounded");
+            for (std::size_t n=0;n<composition.size();++n) {
+                near(composition[n].seconds,samples[n].seconds);
+                require(composition[n].wetMoleBoundsPercent.has_value(),"Ordinary atmosphere lost composition");
+                near(composition[n].wetMoleBoundsPercent->back(),100);
+            }
+            require(composition.back().relativeHumidity>composition.front().relativeHumidity,"Humidity history missed cooling response");
+            for (std::size_t n=0;n<samples.size();++n) near(pressures[n].seconds,samples[n].seconds);
+            require(pressures.back().pressureKPa<pressures.front().pressureKPa,"Pressure history missed cooling response");
+            if (std::abs(pressures.back().seconds-snapshot.elapsedSeconds)<1e-9)
+                near(pressures.back().pressureKPa,air.pressureKPa);
         }
         const auto id=snapshot.atmospheres[0].id;
         const auto count=playback.temperatureHistory(id).size();
         const auto last=playback.temperatureHistory(id).back();
+        const auto pressureLast=playback.pressureHistory(id).back();
+        const auto humidityLast=playback.atmosphereHistory(id).back().relativeHumidity;
         playback.togglePlaying(); playback.update(100);
         require(playback.temperatureHistory(id).size()==count,"Paused graph added samples");
         near(playback.temperatureHistory(id).back().seconds,last.seconds);
         near(playback.temperatureHistory(id).back().temperatureC,last.temperatureC);
+        require(playback.pressureHistory(id).size()==count,"Paused pressure graph added samples");
+        near(playback.pressureHistory(id).back().pressureKPa,pressureLast.pressureKPa);
+        require(playback.atmosphereHistory(id).size()==count,"Paused composition history added samples");
+        near(playback.atmosphereHistory(id).back().relativeHumidity,humidityLast);
     }
     const auto id=initial.atmospheres[0].id;
     playback.reset(installation);
     require(playback.temperatureHistory(id).size()==1,"Reset retained old temperature graph");
+    require(playback.pressureHistory(id).size()==1,"Reset retained old pressure graph");
+    require(playback.atmosphereHistory(id).size()==1,"Reset retained composition graph");
     near(playback.temperatureHistory(id)[0].temperatureC,20);
     installation.setName("Replacement");
     playback.synchronize(installation);
     require(playback.temperatureHistory(id).size()==1,"Document replacement retained graph");
+    require(playback.pressureHistory(id).size()==1,"Document replacement retained pressure graph");
+    require(playback.atmosphereHistory(id).size()==1,"Document replacement retained composition graph");
     installation.setCell(0,0,0,I::SectorType::Void);
     playback.synchronize(installation);
     require(playback.temperatureHistory(id).empty(),"Removed compartment retained graph");
+    require(playback.pressureHistory(id).empty(),"Removed compartment retained pressure graph");
+    require(playback.atmosphereHistory(id).empty(),"Removed compartment retained composition graph");
     playback.synchronize(nullptr);
-    for (const auto& air:initial.atmospheres)
+    for (const auto& air:initial.atmospheres) {
         require(playback.temperatureHistory(air.id).empty(),"Closed document retained graph");
+        require(playback.pressureHistory(air.id).empty(),"Closed document retained pressure graph");
+        require(playback.atmosphereHistory(air.id).empty(),"Closed document retained composition graph");
+    }
 }
 
 void hullPlayback() {

@@ -9,7 +9,7 @@ namespace serialization { class Serializer; }
 namespace station
 {
 	// Historical shared Station/World wire versions, not a separate format.
-	inline constexpr std::uint32_t kStationSchemaVersion = 139;
+	inline constexpr std::uint32_t kStationSchemaVersion = 140;
 	std::uint32_t stationConfigurationSchemaVersion(StationSystemsSettings const& settings);
 
 	// Embed the existing stationSystems child map in the current scope.

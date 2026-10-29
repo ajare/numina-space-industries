@@ -263,9 +263,10 @@ void replay() {
     StationSystemsRuntime fixed(s, 0.125f);
     require(fixed.advanceTo(1), "Fixed replay setup failed");
     auto legacy = serializeStationReplay(fixed);
-    auto const version = legacy.find("schemaVersion: 139");
+    const auto currentVersion="schemaVersion: "+std::to_string(kStationSchemaVersion);
+    auto const version = legacy.find(currentVersion);
     require(version != std::string::npos, "Missing replay version");
-    legacy.replace(version, std::string("schemaVersion: 139").size(), "schemaVersion: 138");
+    legacy.replace(version, currentVersion.size(), "schemaVersion: 138");
     require(parseStationReplay(legacy, restored, &diagnostic) && restored->snapshot() == fixed.snapshot(),
             "Legacy fixed replay no longer loads");
     require(restored->advanceTo(2) && fixed.advanceTo(2) && restored->snapshot() == fixed.snapshot(),

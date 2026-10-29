@@ -29,6 +29,10 @@ namespace station
 		std::string reservoirId;      // empty: adiabatic, no thermal coupling
 		double volumeM3{0.0};
 		double thermalCapacityKJPerK{0.0};
+		double startingThermalCapacityKJPerK{0.0};
+		bool inventoryThermodynamics{false};
+		// Sensible internal energy carried by non-pathway inventory changes.
+		double inventoryEnergyKJ{0.0};
 		double exchangerConductanceKWPerK{0.0};
 		int occupants{0};
 		double oxygenUsePerOccupantKgPerS{0.0};

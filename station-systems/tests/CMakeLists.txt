@@ -1,5 +1,11 @@
 include(Scenarios.cmake)
 
+add_executable(station-compressible-flow-consumer CompressibleFlowConsumer.cpp)
+target_link_libraries(station-compressible-flow-consumer PRIVATE StationSystems::StationSystems)
+add_test(NAME station-library-compressible-flow COMMAND station-compressible-flow-consumer)
+set_tests_properties(station-library-compressible-flow PROPERTIES
+    LABELS "station;functional;validation-fast" TIMEOUT 60)
+
 # Compile every public header in isolation, with only the supported target's
 # transitive requirements. Catch missing includes and hidden parent dependencies.
 file(GLOB_RECURSE station_public_headers CONFIGURE_DEPENDS

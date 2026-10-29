@@ -1064,7 +1064,7 @@ namespace station
 		{
 			auto const& a = runtime.atmospheres[i];
 			runtime.prediction.include(ProtectionPrediction::Body::Atmosphere, i,
-				protectionAtmosphereStart[i], a.temperatureC, a.authored.thermalCapacityKJPerK, seconds,
+				protectionAtmosphereStart[i], a.temperatureC, a.thermalCapacity(), seconds,
 				{a.lastOccupantHeatKW, a.lastCrewHeatKW, a.lastCropHeatKW, a.lastAlgaeHeatKW, a.lastFixtureHeatKW,
 				 a.lastLatentHeatKW, a.lastExchangeIntoCompartmentKW});
 		}

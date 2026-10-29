@@ -96,7 +96,7 @@ endif()
 
 # Headless playback adapter keeps simulation dependencies out of the document model.
 add_library(editor-simulation STATIC
-    src/SimulationPlayback.cpp src/SectorThermal.cpp src/InstallationRenderMode.cpp)
+    src/SimulationPlayback.cpp src/SectorThermal.cpp src/SectorAtmosphere.cpp src/InstallationRenderMode.cpp)
 target_include_directories(editor-simulation PUBLIC src)
 target_link_libraries(editor-simulation PUBLIC nsi::systemsBridge)
 
@@ -107,6 +107,7 @@ add_executable(editor
     src/DeckGridWidget.cpp
     src/InstallationRenderControls.cpp
     src/SectorThermalPanel.cpp
+    src/SectorAtmospherePanel.cpp
 )
 target_compile_features(editor PRIVATE cxx_std_20)
 target_include_directories(editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -159,7 +160,7 @@ if(BUILD_TESTING)
         LABELS "editor;functional;validation-fast" TIMEOUT 30)
 
     add_executable(editor-sector-thermal-panel-test
-        tests/SectorThermalPanelTest.cpp src/SectorThermalPanel.cpp)
+        tests/SectorThermalPanelTest.cpp src/SectorThermalPanel.cpp src/SectorAtmospherePanel.cpp)
     target_link_libraries(editor-sector-thermal-panel-test PRIVATE editor-simulation editor::implot)
     add_test(NAME editor-sector-thermal-panel COMMAND editor-sector-thermal-panel-test)
     set_tests_properties(editor-sector-thermal-panel PROPERTIES

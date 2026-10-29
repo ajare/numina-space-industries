@@ -204,7 +204,7 @@ namespace station
 				auto const& compartment = runtime.atmospheres[atmosphereIndex];
 				if (compartment.reservoirIndex != reservoirIndex) continue;
 				if (compartment.authored.exchangerConductanceKWPerK <= 0.0) continue;
-				leaves.push_back({compartment.authored.thermalCapacityKJPerK,
+				leaves.push_back({compartment.thermalCapacity(),
 					compartment.authored.exchangerConductanceKWPerK,
 					compartment.temperatureC, 0.0});
 				exchangePorts.push_back({connections.port("Atmosphere", compartment.authored.id, "Heat exchange"),

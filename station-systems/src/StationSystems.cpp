@@ -1352,6 +1352,12 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				state.bIndex = atmosphereIndex.at(pathway.bAtmosphereId);
 			mImpl->atmospherePathways.push_back(std::move(state));
 		}
+		for (const auto& path:mImpl->atmospherePathways)
+			for (const auto index:{path.aIndex,path.bIndex}) if (index!=SIZE_MAX) {
+				auto& air=mImpl->atmospheres[index];
+				air.compressibleGas=true;
+				air.trackedGasCapacityKJPerK=gasMixture(air.gasMass()).capacityKJPerK;
+			}
 		// Resolve each typed node within its own namespace at construction.
 		// The tick pass uses the validated kind and index, never a lookup.
 		auto nodeIndex = [&](ThermalNodeKind kind, std::string const& id) -> size_t {

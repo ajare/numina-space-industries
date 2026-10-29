@@ -10,6 +10,8 @@ Earth-like specifies composition, total pressure, temperature, humidity, limits 
 
 One Cell has a 2 m × 2 m footprint and consecutive Levels are 3 m apart. The authoritative constants live in `core/include/nsi/core/Units.h`: an Interior Sector's volume is its Cell area count × height in Levels × 12 m³. This scale sizes every derived inventory and life-support quantity; it is not an arbitrary rendering scale.
 
+[ADR-0003](0003-compressible-door-gas-flow.md) qualifies these starting thermal estimates for Door-connected compartments: their runtime gas capacity follows inventory and composition, rather than remaining fixed.
+
 **cv ≠ cp:** a fixed-volume compartment's volumetric thermal capacity is density × **cv**, approximately 0.851 kJ/(K·m³) for Earth-like air. Multiplying this by volume gives compartment thermal capacity in kJ/K. Advected specific heat is **cp**, approximately 1.005 kJ/(kg·K), and belongs only to the enthalpy of gas crossing a pathway; substituting cp for cv would incorrectly size the compartment's stored thermal energy.
 
 ## Void is absence

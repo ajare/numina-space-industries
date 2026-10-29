@@ -33,7 +33,8 @@ SectorThermal sectorThermal(const nsi::core::Installation& installation,
         row.hull = (atA ? link.bKind : link.aKind) == ThermalNodeKind::Hull;
         row.neighbour = row.hull ? "Hull" : names.at(atA ? link.bAtmosphereId : link.aAtmosphereId);
         row.conductanceKWPerK = link.conductanceKWPerK;
-        row.timescaleSeconds = atmosphere->thermalCapacityKJPerK / link.conductanceKWPerK;
+        row.timescaleSeconds = (result.atmosphere ? result.atmosphere->thermalCapacityKJPerK
+            : atmosphere->thermalCapacityKJPerK) / link.conductanceKWPerK;
         if (row.hull) result.drainSeconds = row.timescaleSeconds;
         if (live) {
             const auto it = std::find_if(live->thermalLinks.begin(), live->thermalLinks.end(),

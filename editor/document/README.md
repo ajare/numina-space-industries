@@ -24,7 +24,10 @@ Modes:
   and revisiting an edge never toggles it again. Sectors rebuild live and the
   whole drag is one undo step. Ineligible Void/Void edges are skipped.
 - **Door**: left-click the nearest edge to place a Door; right-click clears the
-  edge to None. Doors appear cyan, with green/red placement previews. Each click
+  edge to None. The clear opening is 0.9 m wide × 2 m high (1.8 m²), not the full
+  Wall. The cyan Door symbol occupies the centre 0.9 m of the edge, with solid
+  wall at both sides; the open gap has that same width. Doors have green/red
+  placement previews. Each click
   is one undo step. A Door needs solid collinear Walls at both ends and cannot
   share an endpoint with another Door. Edits removing its supports are rejected;
   remove the Door first. Doors remain Sector boundaries and retain wall thermal
@@ -67,6 +70,27 @@ The host applies `SimulationPlayback::editingAllowed()` through
 locked, and locking finishes an in-flight stroke as one undo step. New/Open
 replace the scenario and reset playback, rather than mutate the running scenario;
 cancelled or failed actions preserve the existing lock and preview.
+
+## Atmosphere and pressure inspection
+
+Sector selection exposes Atmosphere, Thermal, Systems graph and Configuration
+graph tabs. Atmosphere contains total pressure, humidity, per-species mass/wet
+mole percentage/partial pressure, limit warnings and rolling-minute pressure,
+relative-humidity and stacked wet-mole composition plots. Pressure/humidity
+plots sit under their readouts; composition is stacked on a 0–100% axis and
+leaves gaps when fractions are undefined. The Configuration graph includes immediate explicit Door pathways and
+thermal links with both endpoints, Hull/exterior boundaries and live signed
+outward flows. It never recursively expands the Installation or invents Gas out
+or Heat out wiring. Closed Doors remain visible; absent references stay unresolved.
+The Configuration graph initially zooms out to fit every node. The mouse wheel
+zooms around the pointer while over the canvas; middle/right drag pans, and
+Fit view reframes all nodes. These controls never modify the Installation.
+
+The Pressure render mode uses adjustable minimum/reference/maximum anchors of
+0/101.325/150 kPa by default, coloured blue/green/red. Its controls, like Thermal,
+remain available during playback and are view state only. Missing atmosphere
+data retains Default colours. Histories cover every compartment, preserve the
+last committed data while paused and clear on reset or document replacement.
 
 ## Files and unsaved changes
 
