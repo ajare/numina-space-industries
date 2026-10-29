@@ -270,9 +270,12 @@ bool Installation::removeTopLevel() {
 void Installation::validate() const {
     require(!levels_.empty(),"Installation must contain a Level");
     std::set<std::tuple<std::size_t,std::int64_t,std::int64_t>> claims;
+    std::size_t compartments=0;
     for (std::size_t l=0;l<levels_.size();++l) {
         const auto& grid=levels_[l];
         for (const auto& s:grid.sectors_) {
+            if (s.type==SectorType::Interior && s.atmosphere!=AtmospherePreset::Void)
+                ++compartments;
             require(s.height>=1,"Sector height must be positive");
             require(s.type!=SectorType::Void || s.height==1,"Void height must be 1");
             require(s.type!=SectorType::Interior || std::size_t(s.height)<=levels_.size()-l,
@@ -291,6 +294,13 @@ void Installation::validate() const {
                 require(claims.emplace(l+std::size_t(h),x,y).second,"Sector volumes overlap");
         }
     }
+    // Leave headroom below the simulation's measured agent instruction ceiling.
+    constexpr std::size_t maxCompartments=128;
+    require(compartments<=maxCompartments,
+            "Installation has " + std::to_string(compartments)
+            + " atmosphere compartments; the supported maximum is " + std::to_string(maxCompartments)
+            + ". Reduce the number of Interior Sectors with non-Void atmosphere presets "
+              "by merging compartments or using the Void atmosphere preset.");
 }
 
 Installation::HullSpec Installation::hullSpec(HullType type) {

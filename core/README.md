@@ -27,6 +27,12 @@ commands (`setCell`, `toggleWall`, `setSector`, `setOffset`, `addLevel`,
 index; a Sector carries its containing Level index. Areas are cached Cell
 counts, not calculated by scanning Cells on access.
 
+Validation permits at most 128 atmosphere compartments across the Installation:
+only Interior Sectors with non-Void atmosphere presets count. Void Sectors and
+Interior Sectors using the Void atmosphere preset do not consume this budget.
+Construction, loading and geometry edits reject an excess before simulation
+construction, reporting the compartment count, maximum and how to reduce it.
+
 Walls represent shared edges, with `width*(depth+1)` horizontal edges followed
 by `(width+1)*depth` vertical edges. `horizontalWall(x,y)` and
 `verticalWall(x,y)` return indices into this single array. Interior/Interior
