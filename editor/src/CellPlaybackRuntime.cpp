@@ -15,7 +15,11 @@ StationSystemsSettings lifecycleSettings(const nsi::systems::CellAtmosphereExpan
 }
 }
 CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,CellObservationOptions options,StationSystemsSource source,nsi::systems::CellThermalMode mode)
-    :model_(installation,mode),lifecycle_(lifecycleSettings(model_.geometry()),std::move(source)),
+    :CellPlaybackRuntime(installation,nsi::systems::expandCellAtmosphere(installation,mode==nsi::systems::CellThermalMode::LocalStructure),
+        options,std::move(source),mode) {}
+CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,nsi::systems::CellAtmosphereExpansion expansion,
+    CellObservationOptions options,StationSystemsSource source,nsi::systems::CellThermalMode mode)
+    :model_(std::move(expansion),mode),lifecycle_(lifecycleSettings(model_.geometry()),std::move(source)),
     aerodynamics_(model_.fluid().states().size()),options_(options),previous_(model_.sectors().size()) {
     diagnostics_.reserve(1);snapshot_.enabled=true;snapshot_.variableTimestep=true;snapshot_.systemsStepWorldTicks=0;
     const auto& geometry=model_.geometry();snapshot_.atmospheres.resize(geometry.atmospheres.size());

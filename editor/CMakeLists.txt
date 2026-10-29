@@ -184,6 +184,24 @@ if(BUILD_TESTING)
         tests/StructuralCostBenchmark.cpp src/SectorThermalPanel.cpp src/SectorAtmospherePanel.cpp src/SimulationTimingPanel.cpp)
     target_include_directories(editor-structural-cost-benchmark PRIVATE "${PROJECT_SOURCE_DIR}/systems-bridge/tests")
     target_link_libraries(editor-structural-cost-benchmark PRIVATE editor-simulation editor::implot)
+    add_executable(editor-reset-expansion-test tests/ResetExpansionTest.cpp)
+    target_link_libraries(editor-reset-expansion-test PRIVATE editor-simulation)
+    add_test(NAME editor-reset-expansion COMMAND editor-reset-expansion-test)
+    set_tests_properties(editor-reset-expansion PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
+    # malloc_usable_size accounting is deliberately Linux-only. This target is
+    # evidence tooling, not part of the portable numerical/public API.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_executable(editor-integrated-thermal-benchmark
+            tests/IntegratedThermalBenchmark.cpp src/StructuralPanel.cpp
+            src/SectorThermalPanel.cpp src/SectorAtmospherePanel.cpp src/SimulationTimingPanel.cpp)
+        target_include_directories(editor-integrated-thermal-benchmark PRIVATE "${PROJECT_SOURCE_DIR}/systems-bridge/tests")
+        target_link_libraries(editor-integrated-thermal-benchmark PRIVATE editor-simulation editor::implot)
+        add_test(NAME editor-integrated-thermal-smoke COMMAND editor-integrated-thermal-benchmark 1 8)
+        set_tests_properties(editor-integrated-thermal-smoke PROPERTIES
+            LABELS "editor;functional;validation-fast" TIMEOUT 120)
+    endif()
     add_executable(editor-cell-playback-benchmark tests/CellPlaybackBenchmark.cpp)
     target_link_libraries(editor-cell-playback-benchmark PRIVATE editor-simulation)
     add_executable(editor-simulation-test tests/SimulationPlaybackTest.cpp)

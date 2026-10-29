@@ -1,5 +1,9 @@
 # Serial structural/cavity cost review — P1 (#25)
 
+Subsequent integrated measurements (not P1 estimates) are in the
+[#35 rollout review](integrated-thermal-rollout.md). That gate is not passed;
+Geometry remains the default.
+
 **Prototype/cost gate only. No production backend, defaults, limits, YAML or
 standalone compartment behavior changes.** Read with [#22](https://github.com/ajare/numina-space-industries/issues/22),
 [ADR-0007](adr/0007-native-structural-thermal-contract.md) and

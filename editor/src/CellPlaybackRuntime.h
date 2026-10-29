@@ -13,6 +13,10 @@ class CellPlaybackRuntime {
 public:
     explicit CellPlaybackRuntime(const nsi::core::Installation&,CellObservationOptions = {},StationSystemsSource = std::nullopt,
         nsi::systems::CellThermalMode = nsi::systems::CellThermalMode::Geometry);
+    // Reset-time explicit expansion for controlled initial-state experiments.
+    // The expansion must correspond to installation; no mid-run state injection.
+    CellPlaybackRuntime(const nsi::core::Installation&,nsi::systems::CellAtmosphereExpansion,
+        CellObservationOptions,StationSystemsSource,nsi::systems::CellThermalMode);
     void setObservationOptions(CellObservationOptions);
     CellObservationOptions observationOptions() const {return options_;}
     // Cell-centre one-way load, not rigid-body movement. Disabled, absent or
