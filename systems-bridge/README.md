@@ -1,5 +1,10 @@
 # Systems bridge
 
+The opt-in [reset-time structural topology builder](../docs/structural-topology.md)
+(#27), `<nsi/systems/StructuralTopology.h>`, expands geometry into deduplicated,
+gas-independent two-sided bodies, local solid contacts and opening metadata.
+It does not change playback defaults or activate the later solver/radiation work.
+
 The [native structural calibration study](../docs/thermal-calibration.md) (#24)
 records provisional passive material/film candidates and the Release
 `nsi-thermal-calibration` fixture. It does not change these production mappings
