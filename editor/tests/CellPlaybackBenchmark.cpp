@@ -30,7 +30,7 @@ int main(int argc,char** argv) {
             const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
             if (trial>=2) {total+=ms;maximum=std::max(maximum,ms);}
         }
-        std::cout<<scenario<<": "<<total/10<<" ms mean, "<<maximum<<" ms max / "<<seconds<<" simulated s (4096 Cells, includes snapshots; calculations="<<calculations<<")\n";
+        std::cout<<scenario<<": "<<total/10<<" ms mean, "<<maximum<<" ms max / "<<seconds<<" simulated s (4096 Cells, includes Lua/physics/snapshots; calculations="<<calculations<<")\n";
     }
     } catch (const std::exception& e) {std::cerr<<e.what()<<'\n';return 2;}
 }

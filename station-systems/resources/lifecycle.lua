@@ -10257,26 +10257,31 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             end
         end
     end
-    function object:advance(station_step, fixed_seconds)
+    function object:advance(station_step, fixed_seconds, start_seconds)
         assert(station_step > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
-        local elapsed = station_step * fixed_seconds
+        -- Native variable-duration hosts supply committed elapsed time. Step
+        -- number times the current delta is not a clock when playback speed
+        -- changes. The absent argument retains the legacy factory contract.
+        local start = start_seconds or (station_step - 1) * fixed_seconds
+        local elapsed = start_seconds ~= nil and (start + fixed_seconds)
+            or station_step * fixed_seconds
         -- Deliveries land first: what arrives this tick is available to
         -- this tick's equipment, transfers and conversions, matching the
         -- host ledger order.
-        applyDeliveries(self, (station_step - 1) * fixed_seconds)
+        applyDeliveries(self, start)
         -- Installation outage availability is resolved before any
         -- installation reads its rated capacity, mirroring the host
         -- ledger order (#413).
-        applyOutages(self, (station_step - 1) * fixed_seconds)
+        applyOutages(self, start)
         -- Maintenance reservations, completion spend and installation
         -- isolation run right behind the outage pass, mirroring the
         -- host ledger order (#414).
-        applyMaintenance(self, (station_step - 1) * fixed_seconds, 0)
+        applyMaintenance(self, start, 0)
         -- Mirror the host's profile-event integration. All forcing profiles
         -- share one timeline; averaging solar and demand independently would
         -- invent power when their active windows do not overlap.
-        local cursor = (station_step - 1) * fixed_seconds
+        local cursor = start
         local boundaries = {elapsed}
         local function collectProfile(profile)
             if profile.periodSeconds <= 0 or #profile.segments == 0 then return end

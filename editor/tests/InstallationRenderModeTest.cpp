@@ -233,6 +233,36 @@ void doorInput() {
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
     ImGui::DestroyContext();
 }
+void evacuatedThermalRendering() {
+    // Minimal replay of S0: decompression cools, the remaining trace gas warms
+    // from the Hull, then its temperature becomes unresolved (not cold again).
+    I scene(3,4);scene.setHullType(I::HullType::MultiLayerBlanket);
+    const auto door=scene.level(0).verticalWall(3,1);scene.setDoor(0,door,true);
+    CellPlaybackRuntime runtime(scene);runtime.setDoorOpen(0,door,true);
+    InstallationRenderSettings settings;settings.mode=InstallationRenderMode::Thermal;
+    bool cooled=false,rewarmed=false,unresolved=false;
+    for (int step=0;step<400;++step) {
+        require(runtime.update(0.1),"Thermal decompression replay failed");const auto& snapshot=runtime.snapshot();
+        const auto colours=cellRenderColours(scene,0,settings,&snapshot);
+        for (const auto& c:snapshot.cellAtmospheres) {
+            if (c.resolvedGas) {
+                cooled=cooled || c.temperatureC<0;
+                rewarmed=rewarmed || (cooled && c.temperatureC>18 && colours[c.gridIndex].green>0.99f);
+            } else {
+                unresolved=true;const auto colour=colours[c.gridIndex];
+                require(colour.red==colour.green && colour.green==colour.blue,
+                    "Evacuated room looked cold instead of explicitly temperature-unavailable");
+            }
+        }
+    }
+    require(cooled && rewarmed && unresolved,"Thermal replay did not cover cold/warm/unresolved phases");
+    settings.mode=InstallationRenderMode::Default;
+    for (const auto& colour:cellRenderColours(scene,0,settings,&runtime.snapshot()))
+        require(colour==defaultSectorColour(I::SectorType::Interior),"Unresolved marker changed Default rendering");
+    settings.mode=InstallationRenderMode::Pressure;
+    for (const auto& colour:cellRenderColours(scene,0,settings,&runtime.snapshot()))
+        require(colour==SectorColour{0,0,1},"Unresolved marker replaced valid near-zero pressure");
+}
 void cellRendering() {
     I scene(2,1);SimulationPlayback playback;playback.reset(scene);auto snapshot=playback.runtime()->snapshot();
     InstallationRenderSettings settings;settings.mode=InstallationRenderMode::Thermal;
@@ -245,9 +275,9 @@ void cellRendering() {
     auto invalid=snapshot;for (auto& c:invalid.cellAtmospheres) if (c.gridIndex==0) c.sectorUid++;
     require(cellRenderColours(scene,0,settings,&invalid)[0]==defaultSectorColour(I::SectorType::Interior),"Stale Cell uid coloured geometry");
     invalid=snapshot;invalid.atmospheres[0].resolvedGas=false;
-    require(sectorRenderColours(scene,0,settings,&invalid)[0]==defaultSectorColour(I::SectorType::Interior),"Legacy aggregate view fabricated unresolved temperature");
+    require(sectorRenderColours(scene,0,settings,&invalid)[0]==unresolvedGasColour(),"Aggregate view did not distinguish unresolved gas");
     for (auto& c:invalid.cellAtmospheres) if (c.gridIndex==0) c.resolvedGas=false;
-    require(cellRenderColours(scene,0,settings,&invalid)[0]==defaultSectorColour(I::SectorType::Interior),"Unresolved gas fabricated temperature colour");
+    require(cellRenderColours(scene,0,settings,&invalid)[0]==unresolvedGasColour(),"Unresolved gas fabricated temperature colour");
     settings.mode=InstallationRenderMode::Pressure;
     require(cellRenderColours(scene,0,settings,&invalid)[0]==SectorColour{0,0,1},"Vacuum pressure lost its colour");
     auto yaml=scene.serialize();yaml.replace(yaml.find("atmosphere: Earth-like"),std::string("atmosphere: Earth-like").size(),"atmosphere: Void");
@@ -330,6 +360,6 @@ void gridRendering() {
 }
 }
 int main() {
-    try { scaleMapping(); pressureRendering(); runtimeColours(); doorInput(); cellRendering(); gridRendering(); }
+    try { evacuatedThermalRendering(); scaleMapping(); pressureRendering(); runtimeColours(); doorInput(); cellRendering(); gridRendering(); }
     catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

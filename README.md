@@ -75,7 +75,12 @@ canvas follows the sibling Flow view; its source/license and small read-only
 extension are tracked in `editor/vendor/imnodes/`.
 
 Editor playback runs native conservative Cell gas dynamics and Hull/partition
-heat, replacing—not supplementing—the well-mixed compartment runtime. Each Level
+heat, replacing—not supplementing—the well-mixed compartment runtime. Each
+requested 10 Hz update first runs the four budgeted Lua lifecycle/mirror sandboxes;
+they do not run inside fluid substeps or apply a second native plant/gas ledger.
+Only joint Lua/physics success commits time and completion counters. The mirror
+is independent of the spatial gas state, not a CFD audit or equipment controller.
+See [ADR-0006](docs/adr/0006-native-playback-lifecycle-stage.md). Each Level
 has independent horizontal flow: four gas species, pressure, temperature and wind;
 there is no vertical airflow or rigid-body motion. Passive aerodynamic-load
 sampling is described below. Cells store 12 m³ × Sector
@@ -100,7 +105,11 @@ and reference temperatures in Celsius (defaults: -273, 100 and 20). The scale
 interpolates blue → green → red, with pure green at the reference temperature;
 values outside the scale saturate at blue/red. Sliders keep minimum < reference
 < maximum within -273 to 1000 °C. Cells without live atmosphere data keep their
-Default appearance. Heatmap selection/hover uses outlines, preserving fill colours.
+Default appearance. **Grey in Thermal mode means vacuum/unresolved gas with no
+available temperature**, not another cold phase. As gas escapes it can cool,
+then the minute remainder can rewarm from the Hull/partitions before becoming
+unresolved; that does not mean a breathable atmosphere has returned. Heatmap
+selection/hover uses outlines, preserving fill colours.
 
 In Pressure mode, **Pressure rendering** provides minimum/reference/maximum
 pressure sliders (defaults **0 / 101.325 / 150 kPa**) with the same blue/green/red

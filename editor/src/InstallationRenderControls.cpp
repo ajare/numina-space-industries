@@ -31,7 +31,10 @@ void drawThermalRenderControls(InstallationRenderSettings& settings) {
             scale.minimumC+0.1f,scale.maximumC-0.1f,"%.1f",flags);
         ImGui::TextWrapped("Blue = minimum, green = reference, red = maximum. "
             "Temperatures outside this range use the end colours. "
-            "Cells without live atmosphere data retain their Default appearance.");
+            "Missing telemetry retains Default appearance; grey marks vacuum/unresolved gas, not low temperature.");
+        const auto grey=unresolvedGasColour();
+        ImGui::ColorButton("##UnresolvedGasColour",{grey.red,grey.green,grey.blue,1},ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoDragDrop,{12,12});
+        ImGui::SameLine();ImGui::TextUnformatted("Grey = temperature unavailable (vacuum / unresolved gas)");
     }
 }
 void drawPressureRenderControls(InstallationRenderSettings& settings) {

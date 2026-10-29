@@ -14,6 +14,31 @@ runtime rules and diagnostics in one implementation, not parallel client copies.
 The atmosphere observation value type and metric catalogue accompany validation
 because they are the authoritative source of valid atmosphere Monitor metrics.
 
+## Lifecycle-only integration
+
+`station/StationLifecycleRuntime.h` exposes the same four sandboxed lifecycle
+objects used by the standalone runtime, without its authoritative native plant,
+compartment or thermal ledger. Editor playback prepares this stage once per
+10 Hz host update, then advances native Cell physics and commits lifecycle/time
+only on success. Numerical substeps call no Lua. Snapshot `completedTicks`
+contains committed script acknowledgements, never a prepared candidate.
+
+A same-duration physical retry reuses the successful Lua candidate. A script
+failure retires all partially mutated VMs; changed-duration retries/recovery
+reconstruct the immutable configuration/source and replay committed durations.
+The default recovery limit is 4096 committed steps and refuses explicitly rather
+than dropping time. Sandbox memory/instruction limits are unchanged. Explicit
+source injection is supported at construction; malformed/empty sources never
+fall back to the bundled source.
+
+Variable hosts supply `advance(self, tick, seconds, startSeconds)`. The bundled
+script honours the optional start time; existing three-argument calls remain
+compatible. Custom wrappers delegating variable-duration work should forward
+that argument. The mirror audits its own compartment/configuration contracts:
+it does not consume spatial Cell transfers, validate the actual CFD inventory,
+or apply equipment control to native state. Lifecycle integration is therefore
+not full native plant integration. See ADR-0006.
+
 ## Native aerodynamic-load observations
 
 `station/CellAerodynamics.h` provides a preallocated `CellAerodynamicField` and
@@ -102,9 +127,14 @@ The fresh breach scenario takes approximately **15.7 ms** for 0.2 simulated
 seconds and **88.5 ms** for one simulated second (a 10x playback update). These
 are kernel measurements, not integrated playback guarantees or hardware-dependent
 test thresholds. Re-run on the target machine and measure sustained playback
-including runtime snapshot publication via `editor-cell-playback-benchmark`.
-GUI drawing remains excluded. The bridge benchmark also measures the
-coupled source/phase/thermal path.
+including lifecycle preparation and runtime snapshot publication via
+`editor-cell-playback-benchmark`. With the four Lua sandboxes and both optional
+diagnostic calculations enabled, the integrated 4,096-Cell run measured **0.87 ms**
+at rest and **10.29 ms** sustained breaches (maximum **10.36 ms**) per 0.1 simulated
+seconds; the latter is slightly above the 10 ms target. A one-simulated-second
+sustained update measured **97.9 ms** (maximum **98.9 ms**). Construction, controller
+history and GUI drawing remain excluded. The bridge benchmark separately measures
+the coupled source/phase/thermal path.
 
 `station/CellThermal.h` supplies the sparse implicit heat solver: backward Euler
 with exact star elimination (including parallel edges) or preconditioned CG for

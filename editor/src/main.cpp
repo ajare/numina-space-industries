@@ -10,6 +10,7 @@
 #include "InstallationRenderControls.h"
 #include "imgui.h"
 #include "implot.h"
+#include "SimulationTimingPanel.h"
 #include "imgui_internal.h"  // DockBuilder* (initial dock layout) is internal API
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
@@ -438,8 +439,9 @@ int runEditor() {
                    session.installation().level(active_level).interiorCount(),
                    session.installation().level(active_level).cellCount());
         ImGui::SameLine();
-        ImGui::Text("| Sim update: %.1f \xC2\xB5s (1s avg)",
+        ImGui::Text("| Sim update: %.1f \xC2\xB5s (10-run avg)",
                     simulation.runtime() ? simulation.runtime()->averageStepMicroseconds() : 0.0);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Last 10 successful updates (about 1 s at normal cadence); startup averages available samples. Sum of Lua lifecycle preparation and native gas/thermal solver time. Excludes diagnostics, snapshot publication, history and GUI work.");
         if (!file_status.empty()) {
             ImGui::SameLine();
             ImGui::TextUnformatted(file_status.c_str());
@@ -460,6 +462,8 @@ int runEditor() {
             if (ImGui::InputText(label,buffer.data(),buffer.size()))
                 edit([&]{ commit(std::string(buffer.data())); });
         };
+        if (const auto* runtime=simulation.runtime()) station::editor::drawSimulationTiming(runtime->stepTimings());
+        else station::editor::drawSimulationTiming({});
         station::editor::drawThermalRenderControls(render_settings);
         station::editor::drawPressureRenderControls(render_settings);
         if (!session.editingEnabled())

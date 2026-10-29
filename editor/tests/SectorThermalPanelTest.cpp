@@ -1,4 +1,5 @@
 #include "SectorThermalPanel.h"
+#include "SimulationTimingPanel.h"
 #include "SimulationPlayback.h"
 #include "SectorAtmosphere.h"
 #include "SectorAtmospherePanel.h"
@@ -24,6 +25,27 @@ int main() {
     int result=0;
     try {
         using namespace station::editor;
+        // Render the timing chart empty, partially filled and across rollover.
+        SimulationStepTiming timing;
+        for (int samples:{0,1,50,75}) {
+            timing={};for (int i=1;i<=samples;++i) timing.recordMicroseconds(i*100,i*200);
+            for (int frame=0;frame<2;++frame) {
+                ImGui::NewFrame();ImGui::SetNextWindowSize({500,400});ImGui::Begin("Timing inspector");
+                drawSimulationTiming(timing);
+                if (samples) {
+                    auto* plot=ImPlot::GetPlot("###SimulationUpdateTiming");
+                    if (!plot || plot->Items.GetLegendCount()!=2
+                        || std::string(plot->Items.GetLegendLabel(0))!="Fluid / thermal solvers"
+                        || std::string(plot->Items.GetLegendLabel(1))!="Lua")
+                        throw std::runtime_error("Timing chart omitted a stacked series");
+                    if (plot->Axes[ImAxis_Y1].Range.Min!=0 || plot->Axes[ImAxis_Y1].Range.Max<samples*0.3)
+                        throw std::runtime_error("Timing chart clips the combined update cost");
+                }
+                ImGui::End();ImGui::Render();
+                if (!ImGui::GetDrawData()->Valid || ImGui::GetDrawData()->TotalVtxCount==0)
+                    throw std::runtime_error("Timing chart did not render");
+            }
+        }
         nsi::core::Installation installation(1,1);
         SimulationPlayback playback;
         playback.reset(installation);

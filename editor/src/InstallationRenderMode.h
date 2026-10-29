@@ -39,6 +39,8 @@ struct SectorColour {
 // No minimum arrow length or speed saturation; invalid inputs return zero.
 double airflowLoadArrowFraction(double forceN,double halfLengthN=10);
 SectorColour defaultSectorColour(nsi::core::Installation::SectorType);
+// Neutral, outside the blue/green/red temperature scale: not a cold reading.
+SectorColour unresolvedGasColour();
 // Piecewise linear RGB interpolation with exact blue/green/red anchors.
 // Values outside the scale saturate; invalid scales/temperatures have no colour.
 std::optional<SectorColour> thermalColour(double temperatureC, const ThermalColourScale&);
@@ -48,7 +50,7 @@ std::optional<SectorColour> pressureColour(double pressureKPa, const PressureCol
 std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation&,
     std::size_t level, const InstallationRenderSettings&, const StationSystemsSnapshot* live = nullptr);
 // One colour per geometric Cell. Native values are matched by Level, Cell
-// index and stable Sector uid; absent/unresolved temperatures use Default.
+// index and stable Sector uid; absent data uses Default, unresolved gas is grey.
 std::vector<SectorColour> cellRenderColours(const nsi::core::Installation&,
     std::size_t level,const InstallationRenderSettings&,const StationSystemsSnapshot* live=nullptr);
 } // namespace station::editor

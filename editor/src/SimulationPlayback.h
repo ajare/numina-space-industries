@@ -13,11 +13,13 @@
 #include <span>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace station::editor {
 // Runtime preview only: simulation never writes into the authored document.
 class SimulationPlayback {
 public:
+    explicit SimulationPlayback(StationSystemsSource lifecycleSource=std::nullopt):lifecycleSource_(std::move(lifecycleSource)) {}
     static constexpr std::array<double, 5> speeds{0.1, 0.5, 1.0, 2.0, 10.0};
     // nullptr means no active Installation: retire the preview and pause.
     void synchronize(const nsi::core::Installation* installation);
@@ -66,5 +68,6 @@ private:
     int speedIndex_ = 2;
     bool playing_ = false;
     CellObservationOptions observationOptions_{};
+    const StationSystemsSource lifecycleSource_;
 };
 } // namespace station::editor

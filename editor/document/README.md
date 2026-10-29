@@ -71,6 +71,20 @@ locked, and locking finishes an in-flight stroke as one undo step. New/Open
 replace the scenario and reset playback, rather than mutate the running scenario;
 cancelled or failed actions preserve the existing lock and preview.
 
+The left inspector's **Update time** chart stacks native fluid/thermal solver
+and Lua lifecycle durations for the last **50 successful updates** (five seconds
+at 10 Hz). Its horizontal axis uses update cadence, not simulated time, so changing
+playback speed does not change the window. Pausing freezes the chart. Startup
+shows only collected samples; Reset/document replacement clears history.
+
+The separate solver/Lua readouts and statusbar's **Sim update (10-run avg)** use
+the last ten successful updates, or available samples during startup. The total
+is the sum of the two measured stages: Lua preparation/recovery and native gas,
+local sources, phase and thermal processing. Construction, diagnostics, snapshot
+publication, history recording and GUI work are excluded. Zero-duration calls and
+failed attempts do not add samples; a cached Lua preparation on a native retry
+records only that retry's actual preparation cost.
+
 ## Atmosphere and pressure inspection
 
 Sector selection exposes Atmosphere, Thermal, Systems graph and Configuration
@@ -78,6 +92,12 @@ graph tabs. Atmosphere contains total pressure, humidity, per-species mass/wet
 mole percentage/partial pressure, limit warnings and rolling-minute pressure,
 relative-humidity and stacked wet-mole composition plots. Playback owns native
 Cell gas/heat through `CellPlaybackRuntime`, never a second compartment solver.
+Four budgeted Lua lifecycle/mirror sandboxes prepare once per host update before
+physics, not inside numerical substeps. Lua/native completion is committed only
+on joint success; a same-duration physical retry reuses the staged Lua step.
+Script failures pause with attribution and preserve committed observations/time.
+Reset clears both stages. The compartment mirror does not audit spatial Door
+fluxes, and the standalone C++ plant ledger is not run alongside native transport.
 Pressure histories include Cell minima/maxima; means use Cell volume, temperature
 uses current heat capacity, and mole fractions use aggregate species inventory.
 Warnings reflect any Cell outside its limits. Pressure/humidity
@@ -93,7 +113,9 @@ Fit view reframes all nodes. These controls never modify the Installation.
 The Pressure render mode uses adjustable minimum/reference/maximum anchors of
 0/101.325/150 kPa by default, coloured blue/green/red. Its controls, like Thermal,
 remain available during playback and are view state only. Missing atmosphere
-data retains Default colours. Thermal/Pressure colours are per Cell, keyed by
+data retains Default colours. Native unresolved gas is neutral grey specifically
+in Thermal mode, with an explicit legend; it is not a cold temperature reading.
+Pressure mode still shows its near-zero pressure. Thermal/Pressure colours are per Cell, keyed by
 Level/grid index and stable Sector uid. Hover inspection remains active on the
 read-only playing grid and reports composition and horizontal velocity. Optional
 Airflow load arrows show drag plus pressure-gradient force on the stationary

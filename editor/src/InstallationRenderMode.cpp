@@ -20,6 +20,7 @@ bool PressureColourScale::valid() const {
         && minimumKPa>=0 && minimumKPa<referenceKPa && referenceKPa<maximumKPa;
 }
 
+SectorColour unresolvedGasColour() {return {0.42f,0.42f,0.42f};}
 SectorColour defaultSectorColour(nsi::core::Installation::SectorType type) {
     return type == nsi::core::Installation::SectorType::Interior
         ? SectorColour{126/255.0f,168/255.0f,200/255.0f}
@@ -48,11 +49,11 @@ std::optional<SectorColour> pressureColour(double pressureKPa, const PressureCol
 
 std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation& installation,
     std::size_t level, const InstallationRenderSettings& settings, const StationSystemsSnapshot* live) {
-    std::map<std::string,double> values;
+    std::map<std::string,std::optional<double>> values;
     if (settings.mode != InstallationRenderMode::Default && live && live->enabled)
         for (const auto& air : live->atmospheres) {
-            if (settings.mode==InstallationRenderMode::Thermal && air.spatial && !air.resolvedGas) continue;
-            values.emplace(air.id,settings.mode==InstallationRenderMode::Pressure ? air.pressureKPa : air.temperatureC);
+            if (settings.mode==InstallationRenderMode::Thermal && air.spatial && !air.resolvedGas) values.emplace(air.id,std::nullopt);
+            else values.emplace(air.id,settings.mode==InstallationRenderMode::Pressure ? air.pressureKPa : air.temperatureC);
         }
     const auto sectors = installation.level(level).sectors();
     std::vector<SectorColour> result;
@@ -63,8 +64,9 @@ std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation& ins
             if (const auto air = nsi::systems::expandSector(installation,level,index)) {
                 const auto it = values.find(air->id);
                 if (it != values.end()) {
-                    const auto mapped=settings.mode==InstallationRenderMode::Pressure
-                        ? pressureColour(it->second,settings.pressure) : thermalColour(it->second,settings.thermal);
+                    const auto mapped=!it->second ? std::optional<SectorColour>{unresolvedGasColour()}
+                        : settings.mode==InstallationRenderMode::Pressure
+                            ? pressureColour(*it->second,settings.pressure) : thermalColour(*it->second,settings.thermal);
                     if (mapped) colour=*mapped;
                 }
             }
@@ -84,7 +86,7 @@ std::vector<SectorColour> cellRenderColours(const nsi::core::Installation& insta
         if (sector.uid!=cell.sectorUid || sector.type!=nsi::core::Installation::SectorType::Interior
             || !nsi::systems::specFor(sector.atmosphere)) continue;
         const auto colour=settings.mode==InstallationRenderMode::Pressure ? pressureColour(cell.pressureKPa,settings.pressure)
-            : cell.resolvedGas ? thermalColour(cell.temperatureC,settings.thermal) : std::nullopt;
+            : cell.resolvedGas ? thermalColour(cell.temperatureC,settings.thermal) : std::optional<SectorColour>{unresolvedGasColour()};
         if (colour) result[cell.gridIndex]=*colour;
     }
     return result;

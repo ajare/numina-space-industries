@@ -1,14 +1,17 @@
 #pragma once
+#include "SimulationStepTiming.h"
 #include <nsi/systems/CellAtmosphere.h>
 #include <station/StationSystems.h>
 #include <station/CellAerodynamics.h>
+#include <station/StationLifecycleRuntime.h>
 
 namespace station::editor {
 // Editor-only facade: the native model is the sole gas/heat owner. Shared
 // observation value types keep panels independent of the numerical backend.
+// Four lifecycle sandboxes gate each host update; no standalone C++ ledger runs.
 class CellPlaybackRuntime {
 public:
-    explicit CellPlaybackRuntime(const nsi::core::Installation&,CellObservationOptions = {});
+    explicit CellPlaybackRuntime(const nsi::core::Installation&,CellObservationOptions = {},StationSystemsSource = std::nullopt);
     void setObservationOptions(CellObservationOptions);
     CellObservationOptions observationOptions() const {return options_;}
     // Cell-centre one-way load, not rigid-body movement. Disabled, absent or
@@ -18,13 +21,15 @@ public:
     bool setDoorOpen(std::size_t level,std::size_t wall,bool open);
     const StationSystemsSnapshot& snapshot() const {return snapshot_;}
     const std::vector<StationSystemsDiagnostic>& diagnostics() const {return diagnostics_;}
-    double averageStepMicroseconds() const {return steps_ ? totalMicros_/steps_ : 0;}
+    double averageStepMicroseconds() const {return timing_.averageMicroseconds();}
+    const SimulationStepTiming& stepTimings() const {return timing_;}
     const nsi::systems::CellAtmosphereTransport& model() const {return model_;}
 private:
     void publish(double seconds);
     void doorConditions();
     void publishDiagnostics();
     nsi::systems::CellAtmosphereTransport model_;
+    StationLifecycleRuntime lifecycle_;
     CellAerodynamicField aerodynamics_;
     CellObservationOptions options_;
     StationSystemsSnapshot snapshot_;
@@ -32,7 +37,6 @@ private:
     std::vector<StationSystemsDiagnostic> diagnostics_;
     struct PathFace {std::size_t face;double sign;};
     std::vector<PathFace> paths_;
-    double totalMicros_{};
-    std::size_t steps_{};
+    SimulationStepTiming timing_;
 };
 } // namespace station::editor

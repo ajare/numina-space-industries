@@ -1,5 +1,7 @@
 #include "StationSystemsImpl.h"
 #include "BundledStationSystemsSource.h"
+#include "station/StationLifecycleRuntime.h"
+#include <cassert>
 namespace station
 {
 namespace {
@@ -872,12 +874,15 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			double seconds;
 			uint64_t completed{};
 			bool invalidOutput{false};
+			double elapsedStart{-1}; // optional fourth advance argument for variable hosts
 			int operator()(lua_State* state)
 			{
 				lua_rawgeti(state, LUA_REGISTRYINDEX, object->reference);
 				lua_getfield(state, -1, "advance"); lua_pushvalue(state, -2);
 				lua_pushinteger(state, static_cast<lua_Integer>(tick));
-				lua_pushnumber(state, seconds); lua_call(state, 3, 1);
+				lua_pushnumber(state, seconds);
+				if (elapsedStart>=0) lua_pushnumber(state,elapsedStart);
+				lua_call(state, elapsedStart>=0 ? 4 : 3, 1);
 				if (!lua_isinteger(state, -1) || lua_tointeger(state, -1) < 0)
 				{
 					invalidOutput = true;
@@ -889,8 +894,139 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				return 0;
 			}
 		};
+	std::unique_ptr<ScriptObject> makeLifecycleObject(StationSystemsSettings const& settings,std::string const& source,char const* name)
+	{
+		auto object=std::make_unique<ScriptObject>();
+		Construction construction{object.get(),&source,name,
+			&settings.stores,&settings.transfers,&settings.conversions,
+			&settings.solarArrays,&settings.equipmentLoads,&settings.batteries,
+			&settings.deliveries,&settings.thermalReservoirs,&settings.radiators,
+			&settings.coolantLoops,&settings.chillers,&settings.generators,
+			&settings.atmospheres,&settings.airlockCycles,&settings.crews,
+			&settings.waterCollectors,&settings.waterTreatments,&settings.electrolyzers,&settings.co2Captures,&settings.fuelCells,
+			&settings.thermalBuffers,&settings.wasteEjections,&settings.outages,
+			&settings.sabatierReactors,&settings.methaneProcessors,&settings.microbialProcessors,&settings.cropPopulations,&settings.algaeCultures,
+			Construction::settingsDispatchModeName(settings.dispatchMode),&settings.maintenanceJobs,&settings.heatEngines,&settings.lightingFixtures,&settings.solarCycle};
+		script::beginInstructionBudget(object->state.get(),object->budget);
+		auto status=script::protectedLuaOperation(object->state.get(),construction,0,0);
+		script::endInstructionBudget(object->state.get());
+		if (status!=LUA_OK || script::budgetExhausted(object->budget))
+			throw serialization::SerializationException(std::string(name)+": "+(script::budgetExhausted(object->budget)
+				? std::string(script::budgetDiagnostic(object->budget)) : errorMessage(object->state.get(),"Station constructor failed")));
+		lua_settop(object->state.get(),0);return object;
+	}
 }
 	std::string bundledStationSystemsSource() { return std::string(kStationSystemsLua); }
+
+	struct StationLifecycleRuntime::Impl
+	{
+		StationSystemsSettings settings;
+		std::string source;
+		std::array<std::unique_ptr<ScriptObject>,4> objects;
+		struct DurationRun {double seconds;uint64_t steps;};
+		std::vector<DurationRun> durations;
+		std::vector<StationSystemsDiagnostic> diagnostics;
+		uint64_t steps{};
+		double elapsed{},preparedSeconds{};
+		bool prepared{},needsReplay{};
+		void construct()
+		{
+			std::array<std::unique_ptr<ScriptObject>,4> next;
+			for (size_t i=0;i<next.size();++i) next[i]=makeLifecycleObject(settings,source,StationSystemNames[i]);
+			objects=std::move(next);
+		}
+		bool invoke(uint64_t tick,double seconds,double start)
+		{
+			for (size_t i=0;i<objects.size();++i)
+			{
+				auto& object=*objects[i];Step step{&object,tick,seconds};step.elapsedStart=start;
+				try
+				{
+					script::beginInstructionBudget(object.state.get(),object.budget);
+					auto status=script::protectedLuaOperation(object.state.get(),step,0,0);
+					script::endInstructionBudget(object.state.get());
+					if (status!=LUA_OK || script::budgetExhausted(object.budget))
+						throw std::runtime_error(script::budgetExhausted(object.budget)
+							? std::string(script::budgetDiagnostic(object.budget)) : errorMessage(object.state.get(),"Station step failed"));
+					if (step.completed!=tick) {step.invalidOutput=true;throw std::runtime_error("Station lifecycle step accounting mismatch");}
+					lua_settop(object.state.get(),0);
+				}
+				catch (std::exception const& error)
+				{
+					script::endInstructionBudget(object.state.get());
+					diagnostics.push_back({tick,StationSystemNames[i],script::failureKind(object.budget,step.invalidOutput
+						? ScriptExecutionFailure::ConversionError : ScriptExecutionFailure::LuaError),
+						std::string(error.what(),std::min(std::char_traits<char>::length(error.what()),DiagnosticByteLimit))});
+					objects={};needsReplay=true;prepared=false;return false;
+				}
+			}
+			return true;
+		}
+	};
+	StationLifecycleRuntime::StationLifecycleRuntime(StationSystemsSettings settings,StationSystemsSource source):impl_(std::make_unique<Impl>())
+	{
+		std::string diagnostic;
+		if (!settings.enabled || !validateStationSystemsSettings(settings,diagnostic))
+			throw serialization::SerializationException(diagnostic.empty() ? "Lifecycle runtime requires enabled settings" : diagnostic);
+		impl_->settings=std::move(settings);impl_->source=source ? std::move(*source) : bundledStationSystemsSource();
+		if (impl_->source.empty()) throw serialization::SerializationException("Station systems source is empty");
+		impl_->diagnostics.reserve(1);impl_->construct();
+	}
+	StationLifecycleRuntime::~StationLifecycleRuntime()=default;
+	bool StationLifecycleRuntime::prepare(double seconds,size_t maxRecoverySteps)
+	{
+		auto& r=*impl_;r.diagnostics.clear();
+		if (!std::isfinite(seconds) || seconds<=0 || !std::isfinite(r.elapsed+seconds) || r.elapsed+seconds==r.elapsed
+			|| r.steps>=uint64_t(std::numeric_limits<lua_Integer>::max()))
+		{
+			r.diagnostics.push_back({r.steps,"Station lifecycle",ScriptExecutionFailure::ConversionError,"Invalid lifecycle duration or clock range"});return false;
+		}
+		// Native refusal leaves this private candidate staged, not committed.
+		// Its same-duration retry must not execute the Lua step twice.
+		if (r.prepared && r.preparedSeconds==seconds) return true;
+		try
+		{
+			if (r.needsReplay || r.prepared)
+			{
+				if (r.steps>maxRecoverySteps)
+				{
+					r.diagnostics.push_back({r.steps,"Station lifecycle",ScriptExecutionFailure::ConversionError,
+						"Lifecycle recovery work limit exceeded; reset or explicitly increase the recovery budget"});return false;
+				}
+				r.needsReplay=true;r.prepared=false;r.construct();uint64_t tick=0;double elapsed=0;
+				for (const auto& run:r.durations) for (uint64_t n=0;n<run.steps;++n)
+				{
+					if (!r.invoke(++tick,run.seconds,elapsed)) return false;
+					elapsed+=run.seconds;
+				}
+				r.needsReplay=false;
+			}
+			// Reserve before the candidate mutates, so commit cannot allocate.
+			if ((r.durations.empty() || r.durations.back().seconds!=seconds) && r.durations.size()==r.durations.capacity())
+				r.durations.reserve(std::max(size_t{1},r.durations.capacity()*2));
+			if (!r.invoke(r.steps+1,seconds,r.elapsed)) return false;
+			r.prepared=true;r.preparedSeconds=seconds;return true;
+		}
+		catch (std::exception const& error)
+		{
+			r.objects={};r.prepared=false;r.needsReplay=true;
+			r.diagnostics.push_back({r.steps+1,"Station lifecycle",ScriptExecutionFailure::LuaError,
+				std::string(error.what(),std::min(std::char_traits<char>::length(error.what()),DiagnosticByteLimit))});return false;
+		}
+	}
+	void StationLifecycleRuntime::commit() noexcept
+	{
+		auto& r=*impl_;assert(r.prepared);
+		if (!r.prepared) return;
+		if (!r.durations.empty() && r.durations.back().seconds==r.preparedSeconds) ++r.durations.back().steps;
+		else r.durations.push_back({r.preparedSeconds,1});
+		++r.steps;r.elapsed+=r.preparedSeconds;r.prepared=false;
+	}
+	uint64_t StationLifecycleRuntime::completedSteps() const {return impl_->steps;}
+	double StationLifecycleRuntime::elapsedSeconds() const {return impl_->elapsed;}
+	std::array<uint64_t,4> StationLifecycleRuntime::completedTicks() const
+	{std::array<uint64_t,4> result{};result.fill(impl_->steps);return result;}
+	std::vector<StationSystemsDiagnostic> const& StationLifecycleRuntime::diagnostics() const {return impl_->diagnostics;}
 	// #418/#603: the public seam over the bounded trend-history
 	// primitive. The World runtime records through the same code from
 	// the committed snapshot at the observation cadence; the seam lets
@@ -1942,48 +2078,15 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 						store.authored.startingQualified + store.authored.startingUnqualified), 1.0);
 		if (!settings.enabled) return;
 		auto const source = selectedSource ? std::move(*selectedSource) : bundledStationSystemsSource();
-		// No upper bound on source size. The compiled footprint is trivial —
-		// the bundled model loads to ~74 KiB per sandbox against a 512 KiB
-		// budget — and a cap on the length of the text guards nothing the
-		// ScratchBudget's allocation and instruction limits do not already
-		// cover properly: compile time is not VM instructions, and per-tick
-		// cost follows the configured scenario rather than the script length.
+		// No upper bound on source text size: ScratchBudget enforces each
+		// sandbox's compiled/runtime allocation and instruction limits.
+		// Per-tick cost follows the configured scenario, not source length.
 		// A cap here only ever produced a confusing construction refusal
 		// whenever the lifecycle model legitimately grew.
 		if (source.empty())
 			throw serialization::SerializationException("Station systems source is empty");
 		for (size_t i = 0; i < mImpl->objects.size(); ++i)
-		{
-			auto object = std::make_unique<ScriptObject>();
-			Construction construction{object.get(), &source, StationSystemNames[i],
-				&settings.stores, &settings.transfers, &settings.conversions,
-				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries,
-				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators,
-				&settings.coolantLoops, &settings.chillers, &settings.generators,
-				&settings.atmospheres, &settings.airlockCycles, &settings.crews,
-				&settings.waterCollectors, &settings.waterTreatments,
-				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells,
-				&settings.thermalBuffers, &settings.wasteEjections,
-				&settings.outages,
-				&settings.sabatierReactors, &settings.methaneProcessors,
-				&settings.microbialProcessors, &settings.cropPopulations,
-				&settings.algaeCultures,
-				Construction::settingsDispatchModeName(settings.dispatchMode),
-				&settings.maintenanceJobs,
-				&settings.heatEngines,
-				&settings.lightingFixtures, &settings.solarCycle};
-			script::beginInstructionBudget(object->state.get(), object->budget);
-			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
-			script::endInstructionBudget(object->state.get());
-			if (status != LUA_OK || script::budgetExhausted(object->budget))
-			{
-				throw serialization::SerializationException(std::string(StationSystemNames[i]) + ": "
-					+ (script::budgetExhausted(object->budget) ? std::string(script::budgetDiagnostic(object->budget))
-						: errorMessage(object->state.get(), "Station constructor failed")));
-			}
-			lua_settop(object->state.get(), 0);
-			mImpl->objects[i] = std::move(object);
-		}
+			mImpl->objects[i] = makeLifecycleObject(settings,source,StationSystemNames[i]);
 		for (auto& machine : mImpl->batteries) machine.wear.initialize(machine.authored.capacityFade);
 		for (auto& machine : mImpl->coolantLoops) machine.wear.initialize(machine.authored.wear);
 		for (auto& machine : mImpl->heatSources) machine.wear.initialize(machine.authored.wear);

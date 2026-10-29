@@ -9,9 +9,14 @@ namespace station::editor {
 namespace {
 constexpr std::array<double,4> inverseMolarMass{1/StationMolarMassOxygenKgPerMol,1/StationMolarMassNitrogenKgPerMol,
     1/StationMolarMassCarbonDioxideKgPerMol,1/StationMolarMassWaterKgPerMol};
+StationSystemsSettings lifecycleSettings(const nsi::systems::CellAtmosphereExpansion& geometry) {
+    StationSystemsSettings settings;settings.enabled=true;settings.atmospheres=geometry.atmospheres;
+    settings.solarCycle=geometry.thermal.solarCycle;return settings;
 }
-CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,CellObservationOptions options)
-    :model_(installation,nsi::systems::CellThermalMode::Geometry),aerodynamics_(model_.fluid().states().size()),options_(options),previous_(model_.sectors().size()) {
+}
+CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installation,CellObservationOptions options,StationSystemsSource source)
+    :model_(installation,nsi::systems::CellThermalMode::Geometry),lifecycle_(lifecycleSettings(model_.geometry()),std::move(source)),
+    aerodynamics_(model_.fluid().states().size()),options_(options),previous_(model_.sectors().size()) {
     diagnostics_.reserve(1);snapshot_.enabled=true;snapshot_.variableTimestep=true;snapshot_.systemsStepWorldTicks=0;
     const auto& geometry=model_.geometry();snapshot_.atmospheres.resize(geometry.atmospheres.size());
     for (std::size_t i=0;i<geometry.atmospheres.size();++i) {
@@ -65,11 +70,19 @@ bool CellPlaybackRuntime::update(double seconds,std::size_t acousticBudget,std::
     diagnostics_.clear();
     for (std::size_t i=0;i<previous_.size();++i) previous_[i]=model_.sectors()[i].ledger;
     const auto start=std::chrono::steady_clock::now();
+    if (!lifecycle_.prepare(seconds)) {
+        snapshot_.healthy=false;diagnostics_=lifecycle_.diagnostics();return false;
+    }
+    const auto luaEnd=std::chrono::steady_clock::now();
     if (!model_.advance(seconds,{},acousticBudget,thermalBudget)) {
         snapshot_.healthy=false;diagnostics_.push_back({snapshot_.worldTick,"native-cell-fluid",ScriptExecutionFailure::None,model_.diagnostic()});return false;
     }
-    ++snapshot_.worldTick;snapshot_.systemsTimestepSeconds=seconds;snapshot_.elapsedSeconds=model_.elapsedSeconds();snapshot_.healthy=true;
-    publish(seconds);++steps_;totalMicros_+=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();return true;
+    const auto solverEnd=std::chrono::steady_clock::now();
+    lifecycle_.commit();snapshot_.worldTick=lifecycle_.completedSteps();snapshot_.completedTicks=lifecycle_.completedTicks();
+    snapshot_.systemsTimestepSeconds=seconds;snapshot_.elapsedSeconds=model_.elapsedSeconds();snapshot_.healthy=true;
+    publish(seconds);
+    timing_.recordMicroseconds(std::chrono::duration<double,std::micro>(solverEnd-luaEnd).count(),
+        std::chrono::duration<double,std::micro>(luaEnd-start).count());return true;
 }
 bool CellPlaybackRuntime::setDoorOpen(std::size_t level,std::size_t wall,bool open) {
     if (!model_.setDoorOpen(level,wall,open)) return false;

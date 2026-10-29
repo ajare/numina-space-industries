@@ -108,6 +108,7 @@ add_executable(editor
     src/InstallationRenderControls.cpp
     src/SectorThermalPanel.cpp
     src/SectorAtmospherePanel.cpp
+    src/SimulationTimingPanel.cpp
 )
 target_compile_features(editor PRIVATE cxx_std_20)
 target_include_directories(editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -160,7 +161,7 @@ if(BUILD_TESTING)
         LABELS "editor;functional;validation-fast" TIMEOUT 30)
 
     add_executable(editor-sector-thermal-panel-test
-        tests/SectorThermalPanelTest.cpp src/SectorThermalPanel.cpp src/SectorAtmospherePanel.cpp)
+        tests/SectorThermalPanelTest.cpp src/SectorThermalPanel.cpp src/SectorAtmospherePanel.cpp src/SimulationTimingPanel.cpp)
     target_link_libraries(editor-sector-thermal-panel-test PRIVATE editor-simulation editor::implot)
     add_test(NAME editor-sector-thermal-panel COMMAND editor-sector-thermal-panel-test)
     set_tests_properties(editor-sector-thermal-panel PROPERTIES

@@ -13,6 +13,92 @@ void near(double a, double b) {
     require(std::abs(a - b) < 1e-6, "Unexpected simulation time");
 }
 
+void lifecycleTickIntegration() {
+    using namespace station::editor;using I=nsi::core::Installation;
+    I scene(3,3);scene.setHullType(std::nullopt);scene.toggleWall(0,scene.level(0).horizontalWall(1,0));
+    const std::string spy=R"lua(return function(name,...)
+        local n,elapsed=0,0
+        return {advance=function(self,tick,dt,start)
+            assert(tick==n+1,'Lua advanced twice for one host tick')
+            assert(math.abs(start-elapsed)<1e-10,'Lua clock differs from committed host clock')
+            n=n+1;elapsed=elapsed+dt;return n
+        end}
+    end)lua";
+    CellPlaybackRuntime runtime(scene,{},spy);const auto before=runtime.snapshot();
+    require(!runtime.update(0.1,0),"Native refusal fixture did not fail");
+    require(runtime.snapshot().completedTicks==std::array<uint64_t,4>{}
+        && runtime.snapshot().cellAtmospheres==before.cellAtmospheres,"Prepared Lua published before native commit");
+    require(runtime.update(0.1),"Same-duration retry reran a prepared Lua step");
+    require(runtime.snapshot().completedTicks==std::array<uint64_t,4>{1,1,1,1},"Lifecycle not committed at host cadence");
+    require(!runtime.update(0.2,0) && runtime.update(0.01),"Changed-duration retry did not restore Lua");
+    near(runtime.snapshot().elapsedSeconds,0.11);
+    require(runtime.snapshot().completedTicks==std::array<uint64_t,4>{2,2,2,2},"Lua ran per source/acoustic slice instead of host tick");
+    CellPlaybackRuntime bundled(scene),observer(scene,{},spy);
+    for (double dt:{0.1,0.01,0.5}) {
+        require(bundled.update(dt) && observer.update(dt),"Mixed-duration lifecycle failed");
+        for (std::size_t i=0;i<bundled.model().fluid().states().size();++i)
+            require(bundled.model().fluid().states()[i].q==observer.model().fluid().states()[i].q,"Lua mirror replaced or double-processed authoritative gas");
+    }
+    const std::string failure=R"lua(return function(name)
+        local n=0
+        return {advance=function(self,tick)
+            assert(tick==n+1,'earlier sandbox was not recovered');n=n+1
+            if name=='ECLSS' and tick==2 then error('intentional lifecycle rejection') end
+            return n
+        end}
+    end)lua";
+    SimulationPlayback playback(failure);playback.reset(scene);playback.togglePlaying();playback.update(0.1);
+    const auto committed=playback.runtime()->snapshot();const auto id=committed.atmospheres[0].id;
+    const auto samples=playback.temperatureHistory(id).size();
+    for (int attempt=0;attempt<2;++attempt) {
+        bool refused=false;try {playback.update(attempt ? 0 : 0.1);} catch (const std::runtime_error&) {refused=true;}
+        require(refused && !playback.playing(),"Lifecycle failure did not pause playback");
+        require(playback.runtime()->snapshot().cellAtmospheres==committed.cellAtmospheres
+            && playback.runtime()->snapshot().completedTicks==committed.completedTicks,"Lua failure advanced physical/script state");
+        require(playback.runtime()->diagnostics()[0].system=="ECLSS" && playback.temperatureHistory(id).size()==samples,"Lua diagnostic/history wrong");
+        if (attempt==0) playback.togglePlaying();
+    }
+    playback.reset(scene);require(playback.runtime()->snapshot().completedTicks==std::array<uint64_t,4>{},"Reset retained Lua state");
+}
+void rollingStepTiming() {
+    using namespace station::editor;
+    SimulationStepTiming timing;require(timing.sampleCount()==0,"Fresh timing window has samples");near(timing.averageMicroseconds(),0);
+    for (int sample=1;sample<=3;++sample) timing.recordMicroseconds(sample,0);
+    near(timing.averageMicroseconds(),2);require(timing.sampleCount()==3,"Timing warmup padded the window");
+    for (int sample=4;sample<=10;++sample) timing.recordMicroseconds(sample,0);
+    near(timing.averageMicroseconds(),5.5);timing.recordMicroseconds(11,0);near(timing.averageMicroseconds(),6.5);
+    for (int sample=12;sample<=25;++sample) timing.recordMicroseconds(sample,0);
+    near(timing.averageMicroseconds(),20.5);require(timing.sampleCount()==25,"Timing history lost chart samples");
+    timing.recordMicroseconds(0,0);near(timing.averageMicroseconds(),18.9);
+    // Old slow runs must disappear completely, not remain in a lifetime mean.
+    timing={};timing.recordMicroseconds(1000,0);for (int n=0;n<10;++n) timing.recordMicroseconds(1,0);
+    near(timing.averageMicroseconds(),1);
+    timing={};for (int n=1;n<=75;++n) timing.recordMicroseconds(2*n,3*n);
+    require(timing.sampleCount()==50,"Timing history is not bounded to 50 updates");
+    for (std::size_t i=0;i<50;++i) {
+        near(timing.sample(i).solverMicroseconds,2*(26+i));near(timing.sample(i).luaMicroseconds,3*(26+i));
+        near(timing.sample(i).totalMicroseconds(),5*(26+i));
+    }
+    near(timing.average().solverMicroseconds,141);near(timing.average().luaMicroseconds,211.5);
+    near(timing.averageMicroseconds(),352.5);
+    using I=nsi::core::Installation;I scene(1,1);scene.setHullType(std::nullopt);scene.toggleWall(0,scene.level(0).horizontalWall(0,0));
+    CellPlaybackRuntime runtime(scene);near(runtime.averageStepMicroseconds(),0);
+    require(runtime.update(0.001),"Timed update failed");const double measured=runtime.averageStepMicroseconds();
+    require(measured>0,"Successful update was not timed");
+    require(runtime.stepTimings().sampleCount()==1 && runtime.stepTimings().sample(0).solverMicroseconds>0
+        && runtime.stepTimings().sample(0).luaMicroseconds>0,"Separate solver/Lua timing was not recorded");
+    near(measured,runtime.stepTimings().sample(0).totalMicroseconds());
+    require(runtime.update(0),"Zero-duration update failed");require(runtime.averageStepMicroseconds()==measured,"Zero-duration call changed timing window");
+    require(!runtime.update(0.1,0),"Timing failure fixture did not refuse");
+    require(runtime.averageStepMicroseconds()==measured && runtime.stepTimings().sampleCount()==1,"Failed update changed timing window");
+    SimulationPlayback playback;playback.reset(scene);playback.togglePlaying();playback.update(0.1);playback.togglePlaying();
+    const double paused=playback.runtime()->averageStepMicroseconds();playback.update(10);
+    require(playback.runtime()->averageStepMicroseconds()==paused,"Paused frame changed timing window");
+    playback.setSpeedIndex(4);playback.togglePlaying();playback.update(0.1);
+    require(playback.runtime()->stepTimings().sampleCount()==2,"Accelerated simulated substeps filled the wall-cadence timing chart");
+    playback.reset(scene);near(playback.runtime()->averageStepMicroseconds(),0);
+    require(playback.runtime()->stepTimings().sampleCount()==0,"Reset retained timing chart history");
+}
 void doorControls() {
     using namespace station::editor;
     using I=nsi::core::Installation;
@@ -435,6 +521,8 @@ void documentAvailability() {
 int main() {
     try {
         using namespace station::editor;
+        lifecycleTickIntegration();
+        rollingStepTiming();
         editingLockout();
         observationControls();
         nativeSnapshots();
