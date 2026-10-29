@@ -22,6 +22,9 @@ public:
     int speedIndex() const noexcept { return speedIndex_; }
     void update(double wallSeconds);
     const StationSystemsRuntime* runtime() const noexcept { return runtime_.get(); }
+    // Read-only snapshot only when the preview still matches this document.
+    // Geometry edits may occur later in the frame than synchronization.
+    std::optional<StationSystemsSnapshot> snapshotFor(const nsi::core::Installation& installation) const;
 private:
     static constexpr double updateIntervalSeconds = 0.1;
     // Bound catch-up after stalls/native dialogs; discard excess wall-time debt.

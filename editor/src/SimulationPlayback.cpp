@@ -27,6 +27,12 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     runtime_ = std::make_unique<StationSystemsRuntime>(std::move(settings), StationSystemsUpdateMode::Variable);
 }
 
+std::optional<StationSystemsSnapshot> SimulationPlayback::snapshotFor(
+    const nsi::core::Installation& installation) const {
+    if (!runtime_ || !source_ || *source_ != installation) return std::nullopt;
+    return runtime_->snapshot();
+}
+
 void SimulationPlayback::setSpeedIndex(int index) {
     if (index < 0 || index >= static_cast<int>(speeds.size()))
         throw std::out_of_range("Invalid simulation speed");

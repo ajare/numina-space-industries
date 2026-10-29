@@ -19,6 +19,7 @@
 #include "DeckGridWidget.h"
 #include "NativeFileDialogs.h"
 #include "SimulationPlayback.h"
+#include "SectorSystemsView.h"
 
 #include "station/editor/EditorSession.h"
 #include "station/editor/Installation.h"
@@ -39,6 +40,7 @@ constexpr int kInitialWindowHeight = 800;
 constexpr float kInitialLeftDockWidthPx = 500.0f;
 constexpr const char* kPanelTitle = "Editor";
 constexpr const char* kGridTitle = "Level Grid";
+constexpr const char* kSectorTitle = "Sector";
 
 class SdlUnsavedChangesPrompt final : public station::editor::UnsavedChangesPrompt {
 public:
@@ -104,6 +106,7 @@ void buildInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size) {
 
     ImGui::DockBuilderDockWindow(kPanelTitle, left);
     ImGui::DockBuilderDockWindow(kGridTitle, right);
+    ImGui::DockBuilderDockWindow(kSectorTitle, right);
     ImGui::DockBuilderFinish(dockspace_id);
 }
 
@@ -183,6 +186,7 @@ int runEditor() {
     // own, it only renders and drives what the session reports.
     station::editor::EditorSession session;
     station::editor::SimulationPlayback simulation;
+    station::editor::SectorSystemsView sector_view;
     SdlUnsavedChangesPrompt unsaved_prompt(window);
     std::string file_status;
     auto report = [&](const station::editor::FileResult& result) {
@@ -216,6 +220,9 @@ int runEditor() {
             if (action == station::editor::DocumentAction::Exit) running = false;
             else if (action == station::editor::DocumentAction::New ||
                      action == station::editor::DocumentAction::Open) {
+                active_level = 0;
+                selected_cell.reset();
+                sector_view.reset();
                 // Even an identical replacement document starts a fresh preview.
                 try { simulation.reset(session.installation()); }
                 catch (const std::exception& error) { file_status = error.what(); }
@@ -497,6 +504,7 @@ int runEditor() {
 
         // --- Grid input ----------------------------------------------------
         ImGui::Begin(kGridTitle);
+        const ImGuiID grid_dock_id = ImGui::GetWindowDockID();
         const auto grid=session.installation().level(active_level);
         std::optional<int> selected_sector;
         if (mode==EditMode::Sector && selected_cell && grid.contains(selected_cell->x,selected_cell->y))
@@ -525,6 +533,25 @@ int runEditor() {
         });
         ImGui::End();
 
+        // A selected Sector adds a dock tab beside Level Grid, rather than
+        // replacing the geometry view or placing system editing in the inspector.
+        if (mode == EditMode::Sector && selected_cell) {
+            const auto current = session.installation().level(active_level);
+            if (current.contains(selected_cell->x, selected_cell->y)) {
+                if (grid_dock_id && ImGui::FindWindowSettingsByID(ImHashStr(kSectorTitle)) == nullptr)
+                    ImGui::DockBuilderDockWindow(kSectorTitle, grid_dock_id);
+                if (ImGui::Begin(kSectorTitle)) {
+                    const auto id = current.cellData(selected_cell->x, selected_cell->y).sector;
+                    // A grid/inspector edit can precede this draw but follow
+                    // the frame's preview update. Never attach stale telemetry.
+                    const auto live = simulation.snapshotFor(session.installation());
+                    sector_view.draw(station::editor::buildSectorSystemsGraph(session.installation(), active_level, id,
+                                                                             live ? &*live : nullptr));
+                }
+                ImGui::End();
+            }
+        }
+
         ImGui::Render();
         int drawable_width = 0;
         int drawable_height = 0;
@@ -536,6 +563,7 @@ int runEditor() {
         SDL_GL_SwapWindow(window);
     }
 
+    sector_view.reset();
     ImGui_ImplSDL2_Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext(context);

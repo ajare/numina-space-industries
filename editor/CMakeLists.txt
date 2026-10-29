@@ -61,6 +61,20 @@ else()
     target_compile_options(editor-imgui PRIVATE -w)
 endif()
 
+# Same node canvas as the sibling Station Flow view, locally vendored and
+# restricted to read-only display by SectorSystemsView.
+add_library(editor-imnodes STATIC vendor/imnodes/imnodes.cpp)
+target_include_directories(editor-imnodes PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/vendor/imnodes")
+target_link_libraries(editor-imnodes PUBLIC editor::imgui)
+if(MSVC)
+    target_compile_options(editor-imnodes PRIVATE /w)
+else()
+    target_compile_options(editor-imnodes PRIVATE -w)
+endif()
+add_library(editor-sector-systems STATIC src/SectorSystemsGraph.cpp src/SectorSystemsView.cpp)
+target_include_directories(editor-sector-systems PUBLIC src)
+target_link_libraries(editor-sector-systems PUBLIC nsi::systemsBridge editor::imgui PRIVATE editor-imnodes)
+
 # Headless playback adapter keeps simulation dependencies out of the document model.
 add_library(editor-simulation STATIC src/SimulationPlayback.cpp)
 target_include_directories(editor-simulation PUBLIC src)
@@ -87,6 +101,7 @@ find_package(OpenGL REQUIRED)
 target_link_libraries(editor PRIVATE
     editor::document
     editor-simulation
+    editor-sector-systems
     nfd
     editor::imgui
     SDL2::SDL2-static
@@ -107,6 +122,12 @@ add_custom_target(editor-font-assets
 add_dependencies(editor editor-font-assets)
 
 if(BUILD_TESTING)
+    add_executable(editor-sector-systems-test tests/SectorSystemsTest.cpp)
+    target_link_libraries(editor-sector-systems-test PRIVATE editor-sector-systems editor-simulation editor::document)
+    add_test(NAME editor-sector-systems COMMAND editor-sector-systems-test)
+    set_tests_properties(editor-sector-systems PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
     add_executable(editor-simulation-test tests/SimulationPlaybackTest.cpp)
     target_link_libraries(editor-simulation-test PRIVATE editor-simulation editor::document)
     add_test(NAME editor-simulation-playback COMMAND editor-simulation-test)

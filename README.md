@@ -34,5 +34,28 @@ the executable, not the working directory. Font licenses are recorded in
 `resources/FontAwesome-LICENSE.txt`; the icon header's license is alongside it
 under `editor/include/imgui/`.
 
+## Sector systems view
+
+In the Editor, choose **Sector (S)** mode and click a Cell to select its Sector.
+A **Sector** dock tab appears beside **Level Grid**, showing the selected
+Sector's authored systems as nodes with the shared Station port/link catalogue.
+Expand a node's **Configuration** to inspect its authored starting values.
+The separate **Simulation state** section shows the matching preview's current
+temperature, pressure, humidity, gas masses, wet mole fractions and partial
+pressures, plus heat/loss readouts and limit flags. Values retain their last
+committed state while paused, restore on reset, and show as unavailable when no
+matching preview exists (including the editing frame before a geometry reset).
+The view is read-only: links cannot be created, detached or deleted. Drag nodes to rearrange
+the transient view layout without changing configuration or undo history;
+middle/right mouse pans the canvas and **Center view** restores its origin.
+
+Currently Sector authoring supplies an Atmosphere preset, loads, fire opt-in and
+an optional reservoir coupling. Referenced reservoirs without a definition are
+marked unresolved, not fabricated. Void Sectors/presets explicitly show that no
+compartment exists; no neighbour heat or gas links are inferred. The diagram is
+a configuration/live-state viewer, not a second simulation or a live-state editor. The imnodes
+canvas follows the sibling Flow view; its source/license and small read-only
+extension are tracked in `editor/vendor/imnodes/`.
+
 The Station Systems library needs no runtime asset installation and embeds its
 own default Lua. World-specific code, documents and assets remain in Promethium.
