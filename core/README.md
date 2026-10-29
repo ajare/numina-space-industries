@@ -68,6 +68,14 @@ removed, retaining at least one; if removing it would truncate a lower Sector,
 it is instead cleared to one unnamed Void Sector with no Walls, preserving
 its dimensions and offset. `removeTopLevel()` returns false in that case.
 
+## Candidate native thermal presets
+
+`<nsi/core/ThermalPresets.h>` exposes opt-in `nativeThermalSpec` overloads for
+Hull/Partition choices, SI material properties, passivity validation and the
+`C1-v1-provisional` preset revision. These do not replace the legacy specs or
+change playback defaults/YAML. See [the body/contact API contract](../docs/native-thermal-api.md)
+for side allocation, calibration, revision and future object energy bookkeeping.
+
 ## Persistence
 
 `serialize()` emits version-4 YAML with name, explicit `hull` (`BareSkin`,

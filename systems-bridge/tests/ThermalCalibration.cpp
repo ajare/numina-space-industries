@@ -1,5 +1,7 @@
 // #24 calibration study only. Not a production preset API or playback backend.
 #include <nsi/systems/CellAtmosphere.h>
+#include <nsi/core/ThermalPresets.h>
+#include <station/ThermalBody.h>
 #include <array>
 #include <cmath>
 #include <iomanip>
@@ -104,6 +106,39 @@ void anchors() {
         std::cout<<m.name<<" R="<<m.resistance<<" U="<<q/20<<" W/(m2 K)\n";
     }
 }
+// #26 installed candidates must reproduce anchors with the actual runtime EOS
+// species constants, not just the study's rounded molar cv values.
+void nativeAnchors() {
+    using I=nsi::core::Installation;
+    const std::array hullTypes{I::HullType::BareSkin,I::HullType::StandardInsulated,I::HullType::MultiLayerBlanket};
+    const std::array partitionTypes{I::PartitionType::BarePartition,I::PartitionType::ThermalBreak,I::PartitionType::InsulatedPartition};
+    const std::array flux{224.,62.,3.8},u{5.,1.,0.3};
+    const auto contact=[](const auto& m,double gas,double surface) {
+        const double h=station::thermalGasFilmWPerM2K(
+            {m.gasFilm.continuumWPerM2K,m.gasFilm.accommodation},referencePressure,293.15,air);
+        return h*(gas-surface)+m.firstSide.emissivity*sigma*(fourth(gas)-fourth(surface));
+    };
+    std::cout<<"Native candidates: model="<<station::NativeThermalModelRevision
+        <<" preset="<<nsi::core::NativeThermalPresetRevision<<'\n';
+    for (std::size_t i=0;i<3;++i) {
+        const auto m=nsi::core::nativeThermalSpec(hullTypes[i]);
+        const double q=root(0,flux[i]*2,[&](double q) {
+            const double outer=std::pow(q/(m.secondSide.emissivity*sigma)+fourth(3),0.25);
+            return q-contact(m,293.15,outer+q*m.throughResistanceM2KPerW);
+        });
+        near(q,flux[i],0.05*flux[i],"Native Hull missed calibration");
+        const auto p=nsi::core::nativeThermalSpec(partitionTypes[i]);
+        const double pq=root(0,20/p.throughResistanceM2KPerW,[&](double q) {
+            const double hot=root(283.15,303.15,[&](double t){return q-contact(p,303.15,t);});
+            const double cold=root(283.15,303.15,[&](double t){return -q-contact(p,283.15,t);});
+            return q-(hot-cold)/p.throughResistanceM2KPerW;
+        });
+        near(pq/20,u[i],0.05*u[i],"Native Partition missed calibration");
+        std::cout<<"Native Hull flux="<<q<<" W/m2; Partition U="<<pq/20<<" W/(m2 K)\n";
+    }
+    const double k=station::thermalGasFilmWPerM2K({20,0.8},1e-16,293.15,air)/1e-16;
+    std::cout<<"Native K_air="<<k<<" W/(m2 K Pa); crossover="<<20/k<<" Pa\n";
+}
 void sweeps() {
     constexpr std::array<Mixture,7> mixtures{{air,{1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1},
         {0.2,0.7,0.05,0.05},{0.1,0.1,0.4,0.4}}};
@@ -139,6 +174,6 @@ void sweeps() {
 }
 }
 int main() {
-    try {std::cout<<std::setprecision(12);checkMaterials();anchors();sweeps();}
+    try {std::cout<<std::setprecision(12);checkMaterials();anchors();nativeAnchors();sweeps();}
     catch (const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

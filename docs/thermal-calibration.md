@@ -4,8 +4,11 @@
 physical-parameter gate under [#22](https://github.com/ajare/numina-space-industries/issues/22)
 and [ADR-0007](adr/0007-native-structural-thermal-contract.md). It does not change
 native playback, standalone compartments, core presets, YAML or backend selection.
-The versioned production API belongs to #26, after the #25 cost gate; rollout
-still requires #35. C1 is a study identifier, not a save-schema/model revision.
+The opt-in [versioned candidate API](native-thermal-api.md) was added in #26
+after the #25 cost gate; rollout still requires #35. C1 is a study identifier,
+not a save-schema/model revision. The API revision additionally records the
+reconciliation with runtime species constants; the frozen study below remains
+reproducible and the executable also checks the installed candidate's anchors.
 
 ## Reproduce
 
@@ -18,7 +21,7 @@ ctest --test-dir build-linux -C Release -j 16 --output-on-failure
 ```
 
 `systems-bridge/tests/ThermalCalibration.cpp` is an executable fixture, deliberately
-not an installed material or gas-contact API. Its frozen positive resistances are
+not itself an installed material or gas-contact API. Its frozen positive resistances are
 checked by independently solving steady-state balances, not re-fitted in the test.
 It also detects changes to the existing core Hull/Partition anchors and bridge
 exterior capacity. Roundoff-level agreement is obtained; acceptance remains the

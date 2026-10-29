@@ -25,7 +25,7 @@ if(NOT TARGET Promethium::Serialization)
     add_subdirectory(../serialization "${CMAKE_CURRENT_BINARY_DIR}/serialization")
 endif()
 
-add_library(nsi-core STATIC src/Installation.cpp)
+add_library(nsi-core STATIC src/Installation.cpp src/ThermalPresets.cpp)
 add_library(nsi::core ALIAS nsi-core)
 target_compile_features(nsi-core PUBLIC cxx_std_20)
 target_link_libraries(nsi-core PUBLIC Promethium::Serialization)
@@ -35,6 +35,12 @@ target_include_directories(nsi-core PUBLIC
 )
 
 if(BUILD_TESTING)
+    add_executable(nsi-core-thermal-presets tests/ThermalPresets.cpp)
+    target_link_libraries(nsi-core-thermal-presets PRIVATE nsi::core)
+    add_test(NAME nsi-core-thermal-presets COMMAND nsi-core-thermal-presets)
+    set_tests_properties(nsi-core-thermal-presets PROPERTIES
+        LABELS "core;functional;validation-fast" TIMEOUT 30)
+
     add_executable(nsi-core-doors tests/Doors.cpp)
     target_link_libraries(nsi-core-doors PRIVATE nsi::core)
     add_test(NAME nsi-core-doors COMMAND nsi-core-doors)
