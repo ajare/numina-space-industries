@@ -53,6 +53,15 @@ void projection() {
     const auto before = i.serialize();
     const auto graph = buildSectorSystemsGraph(i, 0, 0);
     require(graph.nodes.size() == 2 && graph.links.size() == 1, "Did not project atmosphere and authored coupling");
+    const auto local=buildSectorSystemsGraph(i,0,0,nullptr,true);
+    require(local.nodes.size()==graph.nodes.size() && local.links.size()==graph.links.size(),
+        "LocalStructure removed authored gas/reservoir configuration");
+    Installation hull(1,1);
+    const auto active=buildSectorSystemsGraph(hull,0,0,nullptr,true);
+    require(std::none_of(active.nodes.begin(),active.nodes.end(),[](const auto& node){
+        return node.type=="Hull" || node.type=="Thermal link";
+    }),"LocalStructure configuration invented inactive legacy heat nodes");
+    require(!active.nodes.empty(),"LocalStructure configuration hid gas nodes");
     require(graph.title.find("Habitat") != std::string::npos, "Missing selected Sector name");
     const auto& a = atmosphere(graph);
     require(a.id == "sector-0-" + std::to_string(i.level(0).sectors()[0].uid), "Node lacks stable Sector identity");

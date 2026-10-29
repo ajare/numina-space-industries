@@ -124,7 +124,7 @@ void atmosphereSimulation(SectorSystemNode& node, const station::StationSystemsS
 
 SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& installation,
                                           std::size_t level, std::size_t sector,
-                                          const station::StationSystemsSnapshot* snapshot) {
+                                          const station::StationSystemsSnapshot* snapshot, bool localStructure) {
     SectorSystemsGraph result;
     if (level >= installation.levelCount() || sector >= installation.level(level).sectors().size()) {
         result.message = "No Sector selected.";
@@ -171,7 +171,9 @@ SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& instal
         breach(x,y-1,grid.horizontalWall(x,y),nsi::core::CellWidthM*nsi::core::LevelHeightM);
         breach(x,y+1,grid.horizontalWall(x,y+1),nsi::core::CellWidthM*nsi::core::LevelHeightM);
     }
-    const auto thermal=nsi::systems::expandThermal(installation);
+    // LocalStructure's real sides/contacts live in the bounded structural view.
+    // Keep authored gas/devices here without fabricating legacy geometry links.
+    const auto thermal=localStructure ? nsi::systems::ThermalExpansion{} : nsi::systems::expandThermal(installation);
     for (const auto& link:thermal.links) {
         if (!(link.aKind==ThermalNodeKind::Atmosphere && link.aAtmosphereId==atmosphere->id)
             && !(link.bKind==ThermalNodeKind::Atmosphere && link.bAtmosphereId==atmosphere->id)) continue;

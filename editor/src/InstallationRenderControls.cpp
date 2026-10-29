@@ -5,7 +5,7 @@ namespace station::editor {
 void drawInstallationRenderModeCombo(InstallationRenderSettings& settings) {
     int mode = static_cast<int>(settings.mode);
     ImGui::SetNextItemWidth(110);
-    if (ImGui::Combo("Render mode",&mode,"Default\0Thermal\0Pressure\0"))
+    if (ImGui::Combo("Render mode",&mode,"Default\0Thermal (gas)\0Pressure\0Structure (surfaces)\0"))
         settings.mode = static_cast<InstallationRenderMode>(mode);
     ImGui::SameLine();ImGui::Checkbox("Airflow load arrows",&settings.forceArrows);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Estimated force in N on a stationary reference object: area 1 m2, volume 1 m3, Cd 1. Drag + coarse pressure-gradient load; no rigid-body motion.");
@@ -17,7 +17,9 @@ void drawInstallationRenderModeCombo(InstallationRenderSettings& settings) {
 }
 
 void drawThermalRenderControls(InstallationRenderSettings& settings) {
-    if (settings.mode != InstallationRenderMode::Thermal) return;
+    if (settings.mode != InstallationRenderMode::Thermal && settings.mode != InstallationRenderMode::Structure) return;
+    if (settings.mode == InstallationRenderMode::Structure)
+        ImGui::TextWrapped("Structure: area-weighted temperature of all exposed sides owned by each Cell (walls, floor and ceiling). Not air temperature. Grey = no measured surfaces. Requires LocalStructure backend at Reset.");
     if (ImGui::CollapsingHeader("Thermal rendering",ImGuiTreeNodeFlags_DefaultOpen)) {
         auto& scale = settings.thermal;
         // Keep the green anchor strictly inside the scale, including Ctrl-click
@@ -34,7 +36,7 @@ void drawThermalRenderControls(InstallationRenderSettings& settings) {
             "Missing telemetry retains Default appearance; grey marks vacuum/unresolved gas, not low temperature.");
         const auto grey=unresolvedGasColour();
         ImGui::ColorButton("##UnresolvedGasColour",{grey.red,grey.green,grey.blue,1},ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoDragDrop,{12,12});
-        ImGui::SameLine();ImGui::TextUnformatted("Grey = temperature unavailable (vacuum / unresolved gas)");
+        ImGui::SameLine();ImGui::TextUnformatted(settings.mode == InstallationRenderMode::Structure ? "Grey = surface temperature unavailable" : "Grey = temperature unavailable (vacuum / unresolved gas)");
     }
 }
 void drawPressureRenderControls(InstallationRenderSettings& settings) {

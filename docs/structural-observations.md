@@ -1,8 +1,9 @@
 # Committed structural observations (#32)
 
 Native `LocalStructure` only; default `Geometry`, standalone compartments,
-physical presets and schema are unchanged. Rendering/histories remain #33;
-the integrated performance/default review remains #35.
+physical presets and schema are unchanged. Editor rendering/histories are
+covered by [#33](structural-editor.md); the integrated performance/default review
+remains #35.
 
 ## Observation contract
 
@@ -103,7 +104,8 @@ cavities remain unavailable. Pause (`advance(0)` or paused Editor playback)
 retains the last rate and observation timestamp; it does not invent zero-rate
 samples. Reset clears ledgers/rates/time and consistently initializes bodies.
 The Editor facade exposes Cell/Sector summaries and bounded surface queries;
-its read-only `model()` provides contact/portal queries for #33.
+its read-only `model()` provides contact/portal queries used by the bounded
+[#33 topology browser](structural-editor.md).
 
 ## Validation and measured observation cost
 

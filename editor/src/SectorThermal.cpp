@@ -5,8 +5,9 @@
 
 namespace station::editor {
 SectorThermal sectorThermal(const nsi::core::Installation& installation,
-    std::size_t level, std::size_t sector, const StationSystemsSnapshot* live) {
+    std::size_t level, std::size_t sector, const StationSystemsSnapshot* live, bool localStructure) {
     SectorThermal result;
+    result.localStructure=localStructure;
     result.skin = installation.exteriorSkin(level, sector);
     const auto atmosphere = nsi::systems::expandSector(installation, level, sector);
     if (!atmosphere) return result;
@@ -16,6 +17,7 @@ SectorThermal sectorThermal(const nsi::core::Installation& installation,
             [&](const auto& state) { return state.id == atmosphere->id; });
         if (it != live->atmospheres.end()) result.atmosphere = *it;
     }
+    if (localStructure) return result; // legacy U/C links are not the active topology
     std::map<std::string, std::string> names;
     for (std::size_t l = 0; l < installation.levelCount(); ++l) {
         const auto sectors = installation.level(l).sectors();

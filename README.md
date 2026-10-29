@@ -98,8 +98,9 @@ references refuse native playback rather than silently omitting their heat.
 ## Installation render modes
 
 The toolbar's **Render mode** combo switches between **Default** (the existing
-floor/void view), **Thermal** (live Cell atmosphere temperatures), and
-**Pressure** (live absolute total pressure in kPa). In Thermal
+floor/void view), **Thermal (gas)** (live Cell atmosphere temperatures),
+**Pressure** (live absolute total pressure in kPa), and **Structure (surfaces)**
+(area-weighted exposed-side temperatures, opt-in LocalStructure backend). In Thermal
 mode, expand **Thermal rendering** in the left panel to adjust minimum, maximum
 and reference temperatures in Celsius (defaults: -273, 100 and 20). The scale
 interpolates blue → green → red, with pure green at the reference temperature;
@@ -165,7 +166,18 @@ do not edit the Installation or advance the simulation.
 
 ## Sector thermal inspection
 
-In the Editor, choose Sector mode and select a Cell. The **Sector** panel's
+For opt-in local solids, choose **LocalStructure (candidate)** in the left
+panel's **Thermal backend (resets run)** combo while paused. This performs a full
+Reset; Geometry remains the default pending #35. **Structure (surfaces)** keeps
+solid temperatures separate from air, including warm surfaces in rooms without
+resolved gas. Select a Cell in Sector mode to inspect directional surface
+means/min/max, capacity/energy, heat-path ledgers, a bounded one-hop real-topology
+graph and simulation-time surface histories. See
+[Structural Editor observations](docs/structural-editor.md) for aggregation,
+diffuse well-mixed cavity/binary Door approximations, unavailable gaps and
+lifecycle semantics. Legacy cooldown indicators are not shown for LocalStructure.
+
+With the default Geometry backend, choose Sector mode and select a Cell. The **Sector** panel's
 **Thermal** tab shows side, roof and exposed floor-underside skin areas,
 conductance and signed heat flow for every attached neighbour/Hull link.
 The **Systems graph** tab draws those connections; arrows follow the last

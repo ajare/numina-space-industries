@@ -1,5 +1,6 @@
 #include "InstallationRenderMode.h"
 #include <nsi/systems/Atmosphere.h>
+#include <nsi/systems/CellAtmosphere.h>
 #include <station/StationSystems.h>
 #include <algorithm>
 #include <cmath>
@@ -50,7 +51,7 @@ std::optional<SectorColour> pressureColour(double pressureKPa, const PressureCol
 std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation& installation,
     std::size_t level, const InstallationRenderSettings& settings, const StationSystemsSnapshot* live) {
     std::map<std::string,std::optional<double>> values;
-    if (settings.mode != InstallationRenderMode::Default && live && live->enabled)
+    if (settings.mode != InstallationRenderMode::Default && settings.mode != InstallationRenderMode::Structure && live && live->enabled)
         for (const auto& air : live->atmospheres) {
             if (settings.mode==InstallationRenderMode::Thermal && air.spatial && !air.resolvedGas) values.emplace(air.id,std::nullopt);
             else values.emplace(air.id,settings.mode==InstallationRenderMode::Pressure ? air.pressureKPa : air.temperatureC);
@@ -76,9 +77,23 @@ std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation& ins
     return result;
 }
 std::vector<SectorColour> cellRenderColours(const nsi::core::Installation& installation,
-    std::size_t level,const InstallationRenderSettings& settings,const StationSystemsSnapshot* live) {
+    std::size_t level,const InstallationRenderSettings& settings,const StationSystemsSnapshot* live,
+    const nsi::systems::CellAtmosphereTransport* structure) {
     const auto& grid=installation.level(level);std::vector<SectorColour> result;result.reserve(grid.cellCount());
     for (const auto& c:grid.cells()) result.push_back(defaultSectorColour(grid.sectors()[c.sector].type));
+    if (settings.mode==InstallationRenderMode::Structure) {
+        if (structure && structure->structure().enabled) {
+            for (std::size_t i=0;i<grid.cellCount();++i) {
+                const auto summary=structure->structuralSummary({level,
+                    grid.offsetX()+static_cast<std::int64_t>(i%grid.width()),
+                    grid.offsetY()+static_cast<std::int64_t>(i/grid.width())});
+                const auto temperature=summary.all.areaWeightedTemperatureK();
+                result[i]=temperature ? thermalColour(*temperature-273.15,settings.thermal).value_or(unresolvedGasColour())
+                    : unresolvedGasColour();
+            }
+        }
+        return result;
+    }
     if (!live || !live->enabled || settings.mode==InstallationRenderMode::Default) return result;
     for (const auto& cell:live->cellAtmospheres) {
         if (cell.level!=level || cell.gridIndex>=grid.cellCount()) continue;

@@ -9,7 +9,8 @@ namespace station::editor {
 void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSample> history,
     const std::function<void()>& drawConfiguration, std::span<const PressureSample> pressureHistory,
     std::span<const AtmosphereSample> atmosphereHistory) {
-    if (!state.hasAtmosphere) ImGui::TextUnformatted("No atmosphere compartment; no thermal links or Hull connection.");
+    if (state.localStructure) ImGui::TextUnformatted("Gas observations; see Structure for surfaces and real heat paths.");
+    else if (!state.hasAtmosphere) ImGui::TextUnformatted("No atmosphere compartment; no thermal links or Hull connection.");
     else if (state.isolated()) ImGui::TextUnformatted("Conductively isolated (no thermal links)");
     if (!ImGui::BeginTabBar("SectorSystems")) return;
     if (ImGui::BeginTabItem("Atmosphere")) {
@@ -75,6 +76,7 @@ void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSa
             state.skin.sideM2, state.skin.roofM2, state.skin.floorUndersideM2);
         const bool noGas=state.atmosphere && (state.atmosphere->thermalCapacityKJPerK<=0
             || (state.atmosphere->spatial && !state.atmosphere->resolvedGas));
+        if (!state.localStructure) {
         if (noGas) ImGui::TextUnformatted("Thermal timescales: unavailable (no resolved gas capacity)");
         else if (state.drainSeconds) ImGui::Text("Drain timescale: %.2f s", *state.drainSeconds);
         else ImGui::TextUnformatted("Drain timescale: infinite (no Hull link)");
@@ -95,9 +97,10 @@ void drawSectorThermal(const SectorThermal& state, std::span<const TemperatureSa
                 else ImGui::TextUnformatted("Diffusion / drain: 0 (infinite drain timescale)");
             }
         }
+        } else ImGui::TextWrapped("No whole-structure cooldown prediction. Gas capacity is separate from finite local solid capacity.");
         ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem("Systems graph")) {
+    if (!state.localStructure && ImGui::BeginTabItem("Systems graph")) {
         ImGui::TextUnformatted("Conductive links only; no gas exchange");
         if (state.links.empty()) ImGui::TextUnformatted("No thermal connections");
         else {

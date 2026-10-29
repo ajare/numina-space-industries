@@ -24,6 +24,7 @@
 #include "SimulationPlayback.h"
 #include "SectorSystemsView.h"
 #include "SectorThermalPanel.h"
+#include "StructuralPanel.h"
 
 #include "station/editor/EditorSession.h"
 #include "station/editor/Installation.h"
@@ -191,6 +192,7 @@ int runEditor() {
     // own, it only renders and drives what the session reports.
     station::editor::EditorSession session;
     station::editor::SimulationPlayback simulation;
+    station::editor::StructuralPanelState structural_view;
     station::editor::SectorSystemsView sector_view;
     station::editor::InstallationRenderSettings render_settings;
     SdlUnsavedChangesPrompt unsaved_prompt(window);
@@ -464,6 +466,12 @@ int runEditor() {
         };
         if (const auto* runtime=simulation.runtime()) station::editor::drawSimulationTiming(runtime->stepTimings());
         else station::editor::drawSimulationTiming({});
+        ImGui::BeginDisabled(simulation.playing());
+        int backend=simulation.thermalMode()==nsi::systems::CellThermalMode::LocalStructure ? 1 : 0;
+        if (ImGui::Combo("Thermal backend (resets run)",&backend,"Geometry (default)\0LocalStructure (candidate)\0"))
+            edit([&]{simulation.reset(session.installation(),backend ? nsi::systems::CellThermalMode::LocalStructure : nsi::systems::CellThermalMode::Geometry);});
+        ImGui::EndDisabled();
+        ImGui::TextWrapped("Candidate backend is opt-in pending performance/default review. Changing it performs a full Reset.");
         station::editor::drawThermalRenderControls(render_settings);
         station::editor::drawPressureRenderControls(render_settings);
         if (!session.editingEnabled())
@@ -559,7 +567,8 @@ int runEditor() {
         std::vector<station::editor::SectorColour> thermal_colours;
         if (render_settings.mode != station::editor::InstallationRenderMode::Default)
             thermal_colours = station::editor::cellRenderColours(session.installation(),active_level,
-                render_settings,snapshot ? &*snapshot : nullptr);
+                render_settings,snapshot ? &*snapshot : nullptr,
+                snapshot && simulation.runtime() ? &simulation.runtime()->model() : nullptr);
         const auto open_doors=simulation.openDoors(active_level);
         const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector,{},door_controls,open_doors,thermal_colours,
             snapshot ? std::span<const station::StationCellAtmosphereSnapshot>(snapshot->cellAtmospheres) : std::span<const station::StationCellAtmosphereSnapshot>{},
@@ -606,16 +615,22 @@ int runEditor() {
                     // attach telemetry from a preview of a different document.
                     const auto live = simulation.snapshotFor(session.installation());
                     const auto thermal = station::editor::sectorThermal(
-                        session.installation(),active_level,id,live ? &*live : nullptr);
+                        session.installation(),active_level,id,live ? &*live : nullptr,
+                        live && simulation.runtime()->structuralSnapshot().enabled);
                     station::editor::drawSectorThermal(thermal, thermal.atmosphere
                         ? simulation.temperatureHistory(thermal.atmosphere->id)
                         : std::span<const station::editor::TemperatureSample>{}, [&] {
+                            if (thermal.localStructure)
+                                ImGui::TextWrapped("Authored gas/devices; active local thermal edges are in Structure / real thermal topology.");
                             sector_view.draw(station::editor::buildSectorSystemsGraph(
-                                session.installation(),active_level,id,live ? &*live : nullptr));
+                                session.installation(),active_level,id,live ? &*live : nullptr,thermal.localStructure));
                         }, thermal.atmosphere ? simulation.pressureHistory(thermal.atmosphere->id)
                             : std::span<const station::editor::PressureSample>{},
                             thermal.atmosphere ? simulation.atmosphereHistory(thermal.atmosphere->id)
                             : std::span<const station::editor::AtmosphereSample>{});
+                    if (live) station::editor::drawStructuralPanel(simulation,
+                        {active_level,static_cast<std::int64_t>(current.offsetX())+selected_cell->x,
+                            static_cast<std::int64_t>(current.offsetY())+selected_cell->y},structural_view);
                 }
                 ImGui::End();
             }

@@ -96,7 +96,7 @@ endif()
 
 # Headless playback adapter keeps simulation dependencies out of the document model.
 add_library(editor-simulation STATIC
-    src/SimulationPlayback.cpp src/CellPlaybackRuntime.cpp src/SectorThermal.cpp src/SectorAtmosphere.cpp src/InstallationRenderMode.cpp)
+    src/SimulationPlayback.cpp src/StructuralView.cpp src/CellPlaybackRuntime.cpp src/SectorThermal.cpp src/SectorAtmosphere.cpp src/InstallationRenderMode.cpp)
 target_include_directories(editor-simulation PUBLIC src)
 target_link_libraries(editor-simulation PUBLIC nsi::systemsBridge)
 
@@ -107,6 +107,7 @@ add_executable(editor
     src/DeckGridWidget.cpp
     src/InstallationRenderControls.cpp
     src/SectorThermalPanel.cpp
+    src/StructuralPanel.cpp
     src/SectorAtmospherePanel.cpp
     src/SimulationTimingPanel.cpp
 )
@@ -146,6 +147,12 @@ add_custom_target(editor-font-assets
 add_dependencies(editor editor-font-assets)
 
 if(BUILD_TESTING)
+    add_executable(editor-structural-view-test tests/StructuralViewTest.cpp src/StructuralPanel.cpp)
+    target_link_libraries(editor-structural-view-test PRIVATE editor-simulation editor::implot)
+    add_test(NAME editor-structural-view COMMAND editor-structural-view-test)
+    set_tests_properties(editor-structural-view PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
     add_executable(editor-sector-node-view-test tests/SectorSystemsTest.cpp)
     target_link_libraries(editor-sector-node-view-test PRIVATE editor-sector-systems editor-simulation editor::document)
     add_test(NAME editor-sector-node-view COMMAND editor-sector-node-view-test)

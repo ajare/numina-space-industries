@@ -13,6 +13,7 @@ void SimulationPlayback::synchronize(const nsi::core::Installation* installation
         runtime_.reset();
         doors_.clear();
         temperatureHistory_.clear();
+        structuralHistory_.clear();
         pressureHistory_.clear();
         atmosphereHistory_.clear();
         source_.reset();
@@ -25,6 +26,7 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     runtime_.reset();
     doors_.clear();
     temperatureHistory_.clear();
+    structuralHistory_.clear();
     pressureHistory_.clear();
     atmosphereHistory_.clear();
     source_ = installation;
@@ -71,6 +73,11 @@ std::span<const AtmosphereSample> SimulationPlayback::atmosphereHistory(const st
     return it==atmosphereHistory_.end() ? std::span<const AtmosphereSample>{} : it->second;
 }
 
+std::span<const StructuralSample> SimulationPlayback::structuralHistory(std::size_t cavity) const {
+    const auto it=structuralHistory_.find(cavity);
+    return it==structuralHistory_.end() ? std::span<const StructuralSample>{} : it->second;
+}
+
 void SimulationPlayback::recordAtmosphereHistory() {
     const auto& snapshot = runtime_->snapshot();
     auto record=[&](auto& samples, auto sample) {
@@ -84,6 +91,9 @@ void SimulationPlayback::recordAtmosphereHistory() {
             [](const auto& sample, double time) { return sample.seconds < time; });
         samples.erase(samples.begin(), first);
     };
+    const auto& structure=runtime_->structuralSnapshot();
+    if (structure.enabled) for (std::size_t cavity=0;cavity<structure.cavities;++cavity)
+        record(structuralHistory_[cavity],structuralSample(structure.observedSeconds,runtime_->structuralSector(cavity)));
     for (const auto& air : snapshot.atmospheres) {
         record(temperatureHistory_[air.id],TemperatureSample{snapshot.elapsedSeconds,
             air.spatial && !air.resolvedGas ? std::numeric_limits<double>::quiet_NaN() : air.temperatureC});

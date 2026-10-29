@@ -5,11 +5,12 @@
 #include <vector>
 
 namespace station { struct StationSystemsSnapshot; }
+namespace nsi::systems { class CellAtmosphereTransport; }
 
 namespace station::editor {
 // Editor view state only: never serialized into an Installation or fed back
 // into the simulation, and independent of the Cell/Wall/Sector editing mode.
-enum class InstallationRenderMode { Default, Thermal, Pressure };
+enum class InstallationRenderMode { Default, Thermal, Pressure, Structure };
 
 struct ThermalColourScale {
     float minimumC = -273.0f;
@@ -52,5 +53,6 @@ std::vector<SectorColour> sectorRenderColours(const nsi::core::Installation&,
 // One colour per geometric Cell. Native values are matched by Level, Cell
 // index and stable Sector uid; absent data uses Default, unresolved gas is grey.
 std::vector<SectorColour> cellRenderColours(const nsi::core::Installation&,
-    std::size_t level,const InstallationRenderSettings&,const StationSystemsSnapshot* live=nullptr);
+    std::size_t level,const InstallationRenderSettings&,const StationSystemsSnapshot* live=nullptr,
+    const nsi::systems::CellAtmosphereTransport* structure=nullptr);
 } // namespace station::editor

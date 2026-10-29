@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TemperatureSample.h"
+#include "StructuralView.h"
 #include "PressureSample.h"
 #include "SectorAtmosphere.h"
 #include <nsi/core/Installation.h>
@@ -27,6 +28,11 @@ public:
     void synchronize(const nsi::core::Installation* installation);
     void synchronize(const nsi::core::Installation& installation) { synchronize(&installation); }
     void reset(const nsi::core::Installation& installation);
+    // Explicit Reset, never an in-flight backend swap.
+    void reset(const nsi::core::Installation& installation,nsi::systems::CellThermalMode mode) {
+        thermalMode_=mode;reset(installation);
+    }
+    nsi::systems::CellThermalMode thermalMode() const {return thermalMode_;}
     void togglePlaying() noexcept { if (runtime_) playing_ = !playing_; }
     bool playing() const noexcept { return playing_; }
     bool editingAllowed() const {
@@ -48,6 +54,7 @@ public:
 
     // Last minute of simulation time, collected for every compartment even
     // while its Sector is not selected. Invalidated by reset/update/synchronize.
+    std::span<const StructuralSample> structuralHistory(std::size_t cavity) const;
     std::span<const TemperatureSample> temperatureHistory(const std::string& atmosphereId) const;
     std::span<const PressureSample> pressureHistory(const std::string& atmosphereId) const;
     std::span<const AtmosphereSample> atmosphereHistory(const std::string& atmosphereId) const;
@@ -55,6 +62,7 @@ private:
     void recordAtmosphereHistory();
     struct DoorState { bool open=false; };
     std::map<std::pair<std::size_t,std::size_t>, DoorState> doors_;
+    std::map<std::size_t, std::vector<StructuralSample>> structuralHistory_;
     std::map<std::string, std::vector<TemperatureSample>> temperatureHistory_;
     std::map<std::string, std::vector<PressureSample>> pressureHistory_;
     std::map<std::string, std::vector<AtmosphereSample>> atmosphereHistory_;
@@ -71,6 +79,6 @@ private:
     bool playing_ = false;
     CellObservationOptions observationOptions_{};
     const StationSystemsSource lifecycleSource_;
-    const nsi::systems::CellThermalMode thermalMode_; // Reset-only; never swapped in-flight
+    nsi::systems::CellThermalMode thermalMode_; // Reset-only; never swapped in-flight
 };
 } // namespace station::editor

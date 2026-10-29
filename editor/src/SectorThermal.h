@@ -19,6 +19,7 @@ struct SectorThermalLink {
 struct SectorThermal {
     nsi::core::Installation::ExteriorSkin skin;
     bool hasAtmosphere = false;
+    bool localStructure = false;
     // Owned snapshot for the selected stable atmosphere id; absent before a
     // runtime exists or when that compartment is not present in the snapshot.
     std::optional<StationAtmosphereSnapshot> atmosphere;
@@ -29,5 +30,5 @@ struct SectorThermal {
 // Local C/G response times (other endpoint held fixed), not two-body
 // equilibration times or a prediction of the radiating Hull's nonlinear cooling.
 SectorThermal sectorThermal(const nsi::core::Installation&, std::size_t level,
-    std::size_t sector, const StationSystemsSnapshot* live = nullptr);
+    std::size_t sector, const StationSystemsSnapshot* live = nullptr, bool localStructure = false);
 }

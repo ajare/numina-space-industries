@@ -36,5 +36,6 @@ struct SectorSystemsGraph {
 // Invalid/stale selections produce an empty graph with a message.
 SectorSystemsGraph buildSectorSystemsGraph(const nsi::core::Installation& installation,
                                           std::size_t level, std::size_t sector,
-                                          const station::StationSystemsSnapshot* snapshot = nullptr);
+                                          const station::StationSystemsSnapshot* snapshot = nullptr,
+                                          bool localStructure = false);
 } // namespace station::editor
