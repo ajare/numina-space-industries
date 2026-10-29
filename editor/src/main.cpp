@@ -191,7 +191,9 @@ int runEditor() {
     // The one headless editing session: the GUI holds no geometry of its
     // own, it only renders and drives what the session reports.
     station::editor::EditorSession session;
-    station::editor::SimulationPlayback simulation;
+    // Owner-requested candidate startup for hands-on testing (#35), not a
+    // claim that the performance/default rollout gate has passed.
+    station::editor::SimulationPlayback simulation(std::nullopt,nsi::systems::CellThermalMode::LocalStructure);
     station::editor::StructuralPanelState structural_view;
     station::editor::SectorSystemsView sector_view;
     station::editor::InstallationRenderSettings render_settings;
@@ -468,10 +470,10 @@ int runEditor() {
         else station::editor::drawSimulationTiming({});
         ImGui::BeginDisabled(simulation.playing());
         int backend=simulation.thermalMode()==nsi::systems::CellThermalMode::LocalStructure ? 1 : 0;
-        if (ImGui::Combo("Thermal backend (resets run)",&backend,"Geometry (default)\0LocalStructure (candidate)\0"))
+        if (ImGui::Combo("Thermal backend (resets run)",&backend,"Geometry (legacy)\0LocalStructure (testing startup)\0"))
             edit([&]{simulation.reset(session.installation(),backend ? nsi::systems::CellThermalMode::LocalStructure : nsi::systems::CellThermalMode::Geometry);});
         ImGui::EndDisabled();
-        ImGui::TextWrapped("Candidate backend is opt-in pending performance/default review. Changing it performs a full Reset.");
+        ImGui::TextWrapped("LocalStructure starts enabled for testing. Performance gate failed; accelerated updates may refuse. Changing backend performs a full Reset.");
         station::editor::drawThermalRenderControls(render_settings);
         station::editor::drawPressureRenderControls(render_settings);
         if (!session.editingEnabled())

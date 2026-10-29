@@ -1,7 +1,11 @@
 # Integrated serial thermal rollout review (#35)
 
-**Gate not passed. Default rollout is not approved.** Geometry remains the
-Reset default; LocalStructure remains an explicitly selected candidate. This
+**Gate not passed. Production rollout is not approved.** The reusable playback
+APIs still default to Geometry. After this measurement, the owner explicitly
+requested LocalStructure enabled for hands-on testing: the Editor now selects it
+at startup, with a visible performance/refusal warning and Geometry available in
+the backend dropdown. This testing selection does not approve the gate or change
+solver limits; changing backend still performs a full Reset. This
 report requests an explicit owner decision under [#22](https://github.com/ajare/numina-space-industries/issues/22)
 and [ADR-0007](adr/0007-native-structural-thermal-contract.md). It is not permission
 to change the accuracy target, work limits, physical defaults or serial policy.
@@ -282,8 +286,9 @@ account precision review remains part of the pending owner decision.
 
 ## Requested rollout decision
 
-**Recommendation: no-go for default enablement; retain Geometry as default and
-LocalStructure as opt-in.** Performance misses and any accelerated refusal must
+**Measurement recommendation: no-go for production default enablement; retain
+Geometry as the reusable API default.** The subsequent owner-requested Editor
+startup selection is for personal testing, not a passed performance gate. Performance misses and any accelerated refusal must
 be addressed or explicitly scoped by the owner, not hidden by parallelisation,
 a larger work limit, a looser energy bound or automatic backend substitution.
 
