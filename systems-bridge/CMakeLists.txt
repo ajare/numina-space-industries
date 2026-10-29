@@ -24,6 +24,11 @@ target_include_directories(nsi-systems-bridge PUBLIC
 set_target_properties(nsi-systems-bridge PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(BUILD_TESTING)
+    # Calibration study only: candidate values are not installed production presets.
+    add_executable(nsi-thermal-calibration tests/ThermalCalibration.cpp)
+    target_link_libraries(nsi-thermal-calibration PRIVATE nsi::systemsBridge)
+    add_test(NAME nsi-thermal-calibration COMMAND nsi-thermal-calibration)
+    set_tests_properties(nsi-thermal-calibration PROPERTIES LABELS "systems;functional;validation-fast" TIMEOUT 30)
     add_executable(nsi-cell-thermal-consumer tests/CellThermalConsumer.cpp)
     target_link_libraries(nsi-cell-thermal-consumer PRIVATE nsi::systemsBridge)
     add_test(NAME nsi-cell-thermal COMMAND nsi-cell-thermal-consumer)

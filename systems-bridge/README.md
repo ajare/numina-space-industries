@@ -1,5 +1,10 @@
 # Systems bridge
 
+The [native structural calibration study](../docs/thermal-calibration.md) (#24)
+records provisional passive material/film candidates and the Release
+`nsi-thermal-calibration` fixture. It does not change these production mappings
+or the default thermal backend.
+
 Source-integrated C++20 mapping from Installation geometry to Station Systems
 atmosphere compartments. Add this directory with `add_subdirectory` and link
 only `nsi::systemsBridge`; its public headers and dependencies are transitive.
