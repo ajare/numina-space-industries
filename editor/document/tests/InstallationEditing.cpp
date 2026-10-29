@@ -137,6 +137,24 @@ void rejectedWallStroke() {
     session.toggleCell(1,2,0);
     check(session.installation().level(1).allVoid(),"Cell editing works after rejected Wall stroke");
 }
+void partitionHistory() {
+    EditorSession session; session.newDocument(1,1);
+    check(session.installation().partitionType()==I::PartitionType::InsulatedPartition,"New partition default");
+    session.setPartitionType(I::PartitionType::BarePartition);
+    check(session.unsavedChanges() && session.canUndo(),"Partition edit dirties document");
+    session.setPartitionType(I::PartitionType::BarePartition);
+    session.undo();
+    check(session.installation().partitionType()==I::PartitionType::InsulatedPartition
+        && !session.unsavedChanges() && !session.canUndo(),"Undo partition restores clean baseline; no redundant history");
+    session.redo(); check(session.installation().partitionType()==I::PartitionType::BarePartition,"Redo partition");
+    session.setPartitionType(I::PartitionType::ThermalBreak);
+    session.undo(); check(session.installation().partitionType()==I::PartitionType::BarePartition,"Undo changed partition");
+    session.redo(); check(session.installation().partitionType()==I::PartitionType::ThermalBreak,"Redo changed partition");
+    session.setPartitionType(std::nullopt);
+    check(!session.installation().partitionType(),"Explicit no partition command");
+    session.undo(); check(session.installation().partitionType()==I::PartitionType::ThermalBreak,"Undo no partition");
+    session.redo(); check(!session.installation().partitionType(),"Redo no partition");
+}
 void hullHistory() {
     EditorSession session; session.newDocument(1,1);
     check(session.installation().hullType()==I::HullType::MultiLayerBlanket,"New has blanket");
@@ -236,6 +254,6 @@ void replay() {
 }
 }
 int main() {
-    try {automaticWalls(); wallStrokes(); rejectedWallStroke(); history(); hullHistory(); picking(); replay();}
+    try {automaticWalls(); wallStrokes(); rejectedWallStroke(); history(); hullHistory(); partitionHistory(); picking(); replay();}
     catch (const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

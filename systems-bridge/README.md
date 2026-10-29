@@ -55,8 +55,17 @@ area is one quarter, and panel heat capacity is 0.4 kJ/(K·m²) times that area.
 Optical properties use the jointly calibrated core presets (ADR-0002). Solar
 profile level is constant zero: absorbed power is exactly zero with positive
 optical coefficients. No hull is emitted without a drain, and no hull choice
-means no links. No atmosphere pathway is ever inferred. Partition coupling is
-not implemented yet.
+means no links. No atmosphere pathway is ever inferred.
+
+When a Partition type is present, shared Interior Walls conduct between
+pressurised Sectors on the same Level. Each edge contributes its length times
+the smaller Sector height in metres; all shared edges (including disjoint
+segments) are summed into one link per sorted uid pair. Pair link ids are
+`pair-<level>-<lowerUid>-<higherUid>`: uids are Level-local, so the Level namespace
+prevents collisions while preserving identity across Sector index reshuffles.
+The Partition U-value times shared area is converted to kW/K at this boundary.
+A missing Partition type emits no partition links, and no Hull suppresses all
+geometry-authored coupling. Vertical floor coupling remains follow-up work.
 
 The runtime consumer follows the station-systems scenario-rig precedent and
 checks isolated temperatures across ticks, active loads/couplings, and pressure

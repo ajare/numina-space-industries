@@ -1,5 +1,7 @@
 #include <nsi/systems/Atmosphere.h>
 #include <stdexcept>
+#include <algorithm>
+#include <map>
 
 namespace nsi::systems {
 namespace {
@@ -98,6 +100,39 @@ ThermalExpansion expandThermal(const core::Installation& installation) {
             link.bKind = station::ThermalNodeKind::Hull;
             link.conductanceKWPerK = spec.transmittanceWPerM2K * area / 1000.0;
             result.links.push_back(std::move(link));
+        }
+    }
+    if (installation.partitionType()) {
+        const double u = core::Installation::partitionSpec(*installation.partitionType()).transmittanceWPerM2K;
+        for (std::size_t l = 0; l < installation.levelCount(); ++l) {
+            const auto& grid = installation.level(l);
+            // Uids are stable within a Level, so namespace each sorted pair by Level.
+            std::map<std::pair<std::int64_t, std::int64_t>, double> sharedAreas;
+            auto shared = [&](std::uint32_t ax, std::uint32_t ay,
+                              std::uint32_t bx, std::uint32_t by, std::size_t wall, double edge) {
+                if (grid.walls()[wall].type != core::Installation::WallType::Interior) return;
+                const auto& a = grid.sectorAt(ax, ay);
+                const auto& b = grid.sectorAt(bx, by);
+                if (a.uid == b.uid || a.type != core::Installation::SectorType::Interior
+                    || b.type != core::Installation::SectorType::Interior
+                    || !specFor(a.atmosphere) || !specFor(b.atmosphere)) return;
+                sharedAreas[std::minmax(a.uid, b.uid)] += edge * core::LevelHeightM * std::min(a.height, b.height);
+            };
+            for (std::uint32_t y = 0; y < grid.depth(); ++y)
+                for (std::uint32_t x = 1; x < grid.width(); ++x)
+                    shared(x-1, y, x, y, grid.verticalWall(x, y), core::CellDepthM);
+            for (std::uint32_t y = 1; y < grid.depth(); ++y)
+                for (std::uint32_t x = 0; x < grid.width(); ++x)
+                    shared(x, y-1, x, y, grid.horizontalWall(x, y), core::CellWidthM);
+            for (const auto& [pair, area] : sharedAreas) {
+                const auto level = std::to_string(l) + "-";
+                station::ThermalLinkSettings link;
+                link.id = "pair-" + level + std::to_string(pair.first) + "-" + std::to_string(pair.second);
+                link.aAtmosphereId = "sector-" + level + std::to_string(pair.first);
+                link.bAtmosphereId = "sector-" + level + std::to_string(pair.second);
+                link.conductanceKWPerK = u * area / 1000.0;
+                result.links.push_back(std::move(link));
+            }
         }
     }
     if (totalArea > 0.0) {

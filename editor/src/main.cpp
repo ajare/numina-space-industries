@@ -445,6 +445,13 @@ int runEditor() {
         if (ImGui::Combo("Hull type", &hullIndex, hullNames, 4))
             edit([&]{ session.setHullType(hullIndex == 0 ? std::nullopt
                 : std::optional(static_cast<HullType>(hullIndex - 1))); });
+        using PartitionType = nsi::core::Installation::PartitionType;
+        const auto partition = session.installation().partitionType();
+        int partitionIndex = partition ? static_cast<int>(*partition) + 1 : 0;
+        const char* partitionNames[] = {"No partition coupling", "Bare partition", "Thermal break", "Insulated partition"};
+        if (ImGui::Combo("Partition type", &partitionIndex, partitionNames, 4))
+            edit([&]{ session.setPartitionType(partitionIndex == 0 ? std::nullopt
+                : std::optional(static_cast<PartitionType>(partitionIndex - 1))); });
         const auto level_label="Level "+std::to_string(active_level);
         if (ImGui::BeginCombo("Level",level_label.c_str())) {
             for (std::size_t l=0;l<session.installation().levelCount();++l) {

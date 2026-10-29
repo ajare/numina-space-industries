@@ -185,6 +185,9 @@ void EditorSession::setName(std::string name) {
 void EditorSession::setHullType(std::optional<Installation::HullType> type) {
     edit([&](auto& i){ i.setHullType(type); });
 }
+void EditorSession::setPartitionType(std::optional<Installation::PartitionType> type) {
+    edit([&](auto& i){ i.setPartitionType(type); });
+}
 void EditorSession::undo() {
     endStroke(); if (mUndoHistory.empty()) return;
     mRedoHistory.push_back(std::move(mStation));

@@ -301,6 +301,18 @@ Installation::HullSpec Installation::hullSpec(HullType type) {
     }
     throw std::invalid_argument("Invalid Hull type");
 }
+Installation::PartitionSpec Installation::partitionSpec(PartitionType type) {
+    switch (type) {
+    case PartitionType::BarePartition: return {5.0};
+    case PartitionType::ThermalBreak: return {1.0};
+    case PartitionType::InsulatedPartition: return {0.3};
+    }
+    throw std::invalid_argument("Invalid Partition type");
+}
+void Installation::setPartitionType(std::optional<PartitionType> type) {
+    if (type) (void)partitionSpec(*type);
+    partitionType_ = type;
+}
 void Installation::setHullType(std::optional<HullType> type) {
     if (type) (void)hullSpec(*type);
     hullType_ = type;
@@ -365,6 +377,13 @@ std::string Installation::serialize() const {
     case HullType::MultiLayerBlanket: hull = "MultiLayerBlanket"; break;
     }
     root["hull"] = hull;
+    const char* partition = "none";
+    if (partitionType_) switch (*partitionType_) {
+    case PartitionType::BarePartition: partition = "BarePartition"; break;
+    case PartitionType::ThermalBreak: partition = "ThermalBreak"; break;
+    case PartitionType::InsulatedPartition: partition = "InsulatedPartition"; break;
+    }
+    root["partition"] = partition;
     root["levels"]=YAML::Node(YAML::NodeType::Sequence);
     for (const auto& grid:levels_) {
         YAML::Node l; l["width"]=grid.width_; l["depth"]=grid.depth_;
@@ -426,6 +445,14 @@ void Installation::deserialize(const std::string& text) {
             else if (value == "StandardInsulated") hull = HullType::StandardInsulated;
             else if (value == "MultiLayerBlanket") hull = HullType::MultiLayerBlanket;
             else require(value == "none", "Invalid Hull type");
+        }
+        std::optional<PartitionType> partition;
+        if (version == 4 && root["partition"]) {
+            const auto value = root["partition"].as<std::string>();
+            if (value == "BarePartition") partition = PartitionType::BarePartition;
+            else if (value == "ThermalBreak") partition = PartitionType::ThermalBreak;
+            else if (value == "InsulatedPartition") partition = PartitionType::InsulatedPartition;
+            else require(value == "none", "Invalid Partition type");
         }
         auto ls=root["levels"]; require(ls.IsSequence() && ls.size()>0,"Expected Levels");
         std::vector<Level> loaded;
@@ -505,6 +532,7 @@ void Installation::deserialize(const std::string& text) {
         Installation next(std::move(loaded));
         next.name_=root["name"].as<std::string>();
         next.hullType_ = hull; // Never apply creation-time defaults when loading.
+        next.partitionType_ = partition;
         *this=std::move(next);
     } catch (const std::exception& e) { throw serialization::SerializationException(e.what()); }
 }

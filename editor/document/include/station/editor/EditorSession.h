@@ -41,6 +41,7 @@ public:
     bool removeTopLevel();
     void setName(std::string name);
     void setHullType(std::optional<Installation::HullType> type);
+    void setPartitionType(std::optional<Installation::PartitionType> type);
     void undo();
     void redo();
     bool canUndo() const noexcept { return !mUndoHistory.empty(); }

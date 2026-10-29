@@ -27,6 +27,9 @@ public:
         double calibratedFluxWPerM2;
     };
     static HullSpec hullSpec(HullType type);
+    enum class PartitionType { BarePartition, ThermalBreak, InsulatedPartition };
+    struct PartitionSpec { double transmittanceWPerM2K; };
+    static PartitionSpec partitionSpec(PartitionType type);
     // The starting condition of a Sector's air, referenced rather than stored.
     // A preset carries only intensive constants - composition fractions,
     // pressure, temperature - so Sectors of any volume share one definition and
@@ -150,6 +153,8 @@ public:
     void setName(std::string name) { name_ = std::move(name); }
     std::optional<HullType> hullType() const noexcept { return hullType_; }
     void setHullType(std::optional<HullType> type);
+    std::optional<PartitionType> partitionType() const noexcept { return partitionType_; }
+    void setPartitionType(std::optional<PartitionType> type);
     struct ExteriorSkin {
         double sideM2 = 0.0;
         double roofM2 = 0.0;
@@ -181,6 +186,7 @@ public:
 private:
     std::string name_;
     std::optional<HullType> hullType_ = HullType::MultiLayerBlanket;
+    std::optional<PartitionType> partitionType_ = PartitionType::InsulatedPartition;
     std::vector<Level> levels_;
     void reindex();
 };

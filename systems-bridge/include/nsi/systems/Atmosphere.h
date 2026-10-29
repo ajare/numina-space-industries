@@ -35,7 +35,8 @@ struct ThermalExpansion {
     std::vector<station::ThermalLinkSettings> links;
     std::optional<station::ProfileSettings> solarCycle;
 };
-// Total exterior skin (side, roof, exposed floor underside); no partition coupling yet.
+// Total exterior skin (side, roof, exposed floor underside) and shared-Wall
+// partition conduction. One pair link per Level-local sorted Sector uid pair.
 // No hull means no links. No gas pathways are ever inferred.
 ThermalExpansion expandThermal(const core::Installation&);
 

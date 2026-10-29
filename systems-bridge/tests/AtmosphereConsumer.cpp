@@ -34,7 +34,8 @@ std::array<double, 4> pressures(const station::AtmosphereSettings& a) {
 }
 void thermalExpansion() {
     using namespace nsi::systems;
-    auto scene=[](const Installation& i) {
+    auto scene=[](Installation i) {
+        i.setPartitionType(std::nullopt); // These assertions isolate Hull expansion.
         station::StationSystemsSettings settings;
         settings.enabled=true;
         settings.atmospheres=expandInstallation(i);

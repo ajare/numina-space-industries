@@ -109,6 +109,28 @@ void volumes() {
     refused([&]{overlap.setSector(1,0,"Void",2);});
     roundTrip(overlap);
 }
+void partitionPersistence() {
+    check(I(1,1).partitionType()==I::PartitionType::InsulatedPartition,"Creation default partition");
+    for (auto type : {I::PartitionType::BarePartition, I::PartitionType::ThermalBreak, I::PartitionType::InsulatedPartition}) {
+        I i(1,1); i.setPartitionType(type); roundTrip(i);
+        check(I::partitionSpec(type).transmittanceWPerM2K>0,"Positive Partition U-value");
+    }
+    I i(1,1); i.setPartitionType(std::nullopt); roundTrip(i);
+    check(YAML::Load(i.serialize())["partition"].as<std::string>()=="none","Explicit no partition");
+    auto node=YAML::Load(I(1,1).serialize()); node.remove("partition");
+    for (int version : {3,4}) {
+        node["version"]=version; YAML::Emitter out; out<<node;
+        I loaded; loaded.deserialize(out.c_str());
+        check(!loaded.partitionType(),"Absent partition never applies creation default");
+        roundTrip(loaded);
+    }
+    node["version"]=4; node["partition"]="Unknown";
+    YAML::Emitter bad; bad<<node;
+    auto before=i; refused([&]{i.deserialize(bad.c_str());});
+    check(i==before,"Invalid partition rejected transactionally");
+    refused([&]{i.setPartitionType(static_cast<I::PartitionType>(99));});
+    check(i==before,"Invalid Partition enum rejected");
+}
 void hullPersistence() {
     check(I(1,1).hullType()==I::HullType::MultiLayerBlanket,"Creation default hull");
     for (auto type : {I::HullType::BareSkin, I::HullType::StandardInsulated, I::HullType::MultiLayerBlanket}) {
@@ -176,6 +198,6 @@ void persistence() {
 }
 }
 int main() {
-    try { topology(); volumes(); persistence(); hullPersistence(); }
+    try { topology(); volumes(); persistence(); hullPersistence(); partitionPersistence(); }
     catch (const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }
