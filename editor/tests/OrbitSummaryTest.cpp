@@ -52,6 +52,51 @@ I sceneWith(const std::optional<O>& orbit) {
     return scene;
 }
 
+// Check the displayed values, including every converted second unit, rather
+// than just the labels or the unformatted summary fields.
+void summaryFormatsNumericValues() {
+    const auto lines = orbitSummaryLines(orbitSummary(I(2, 2)));
+    const std::array<std::string_view, 8> expected{
+        "Stellar irradiance  1361.0 W/m^2",
+        "Orbital period  5570.0 s (92.8 min)",
+        "Orbital radius  6791000 m (6791 km)",
+        "Beta angle  0.0000 rad (0.0 deg)",
+        "Phase offset  0.0 s",
+        "Albedo  0.300",
+        "Eclipse duration  2158.2 s (36.0 min)",
+        "Sunlit duration  3411.8 s (56.9 min)"};
+    for (const auto text : expected) {
+        bool found = false;
+        for (const auto& line : lines) found = found || line == text;
+        require(found, std::string("incorrect formatted reading: ").append(text).c_str());
+    }
+
+    // A nonzero, signed Beta angle catches a missing radians-to-degrees
+    // conversion that the zero default cannot expose. This sky has no eclipse.
+    const auto tilted = orbitSummaryLines(orbitSummary(
+        sceneWith(O{1361.0, 6000.0, 42164000.0, 0.3, -0.5, 120.0})));
+    require(hasLine(tilted, "Beta angle  -0.5000 rad (-28.6 deg)"),
+            "nonzero Beta angle was not converted to degrees");
+    require(hasLine(tilted, "Eclipse duration  0.0 s (0.0 min)"),
+            "zero eclipse duration was not formatted correctly");
+    require(hasLine(tilted, "Sunlit duration  6000.0 s (100.0 min)"),
+            "fully sunlit duration was not converted to minutes");
+
+    auto unavailable = orbitSummary(I(2, 2));
+    unavailable.orbitalPeriodS = kNaN;
+    unavailable.radiusFromPlanetCentreM = std::numeric_limits<double>::infinity();
+    unavailable.betaAngleRad = -std::numeric_limits<double>::infinity();
+    unavailable.eclipseDurationS = kNaN;
+    const auto gaps = orbitSummaryLines(unavailable);
+    require(hasLine(gaps, "Orbital period  unavailable")
+                && hasLine(gaps, "Orbital radius  unavailable")
+                && hasLine(gaps, "Beta angle  unavailable"),
+            "nonfinite authored values were formatted as numbers");
+    require(hasLine(gaps, "Derived values unavailable")
+                && !hasLine(gaps, "Eclipse duration") && !hasLine(gaps, "Sunlit duration"),
+            "unavailable durations were formatted as numbers");
+}
+
 // The authored numbers sit beside the derived ones, and every derived one
 // is the evaluator's own rather than a second opinion.
 void summaryShowsAuthoredBesideDerived() {
@@ -354,6 +399,7 @@ void graphCarriesTheLabelledTrace() {
 
 int main() {
     try {
+        summaryFormatsNumericValues();
         summaryShowsAuthoredBesideDerived();
         badgeOnlyAtTheSiderealMatch();
         derivedValuesFollowEveryEdit();

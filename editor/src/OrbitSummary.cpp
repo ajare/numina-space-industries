@@ -8,24 +8,27 @@
 
 #include <cmath>
 #include <cstdio>
+#include <numbers>
 #include <optional>
 
 namespace station::editor {
 namespace {
-std::string number(double value, const char* format) {
-    char buffer[96];
-    std::snprintf(buffer, sizeof buffer, format, value);
-    return buffer;
-}
-
 // One labelled reading. An unavailable value says so out loud rather than
 // printing anything: a zero eclipse duration reads as a sunlit orbit and a
 // zero drift reads as Geostationary, and neither is a fact about a sky the
 // author has not authored.
-std::string reading(std::string_view label, double value, const char* format) {
+template <typename... Converted>
+std::string reading(std::string_view label, double value, const char* format,
+                    Converted... converted) {
     std::string text(label);
     text += "  ";
-    text += std::isfinite(value) ? number(value, format) : std::string("unavailable");
+    if (std::isfinite(value)) {
+        char buffer[96];
+        std::snprintf(buffer, sizeof buffer, format, value, converted...);
+        text += buffer;
+    } else {
+        text += "unavailable";
+    }
     return text;
 }
 
@@ -96,9 +99,12 @@ std::vector<std::string> orbitSummaryLines(const OrbitSummary& summary) {
         return lines;
     }
     lines.push_back(reading("Stellar irradiance", summary.stellarIrradianceWPerM2, "%.1f W/m^2"));
-    lines.push_back(reading("Orbital period", summary.orbitalPeriodS, "%.1f s (%.1f min)"));
-    lines.push_back(reading("Orbital radius", summary.radiusFromPlanetCentreM, "%.0f m (%.0f km)"));
-    lines.push_back(reading("Beta angle", summary.betaAngleRad, "%.4f rad (%.1f deg)"));
+    lines.push_back(reading("Orbital period", summary.orbitalPeriodS, "%.1f s (%.1f min)",
+                            summary.orbitalPeriodS / 60.0));
+    lines.push_back(reading("Orbital radius", summary.radiusFromPlanetCentreM, "%.0f m (%.0f km)",
+                            summary.radiusFromPlanetCentreM / 1000.0));
+    lines.push_back(reading("Beta angle", summary.betaAngleRad, "%.4f rad (%.1f deg)",
+                            summary.betaAngleRad * (180.0 / std::numbers::pi)));
     lines.push_back(reading("Phase offset", summary.phaseOffsetS, "%.1f s"));
     lines.push_back(reading("Albedo", summary.albedo, "%.3f"));
     if (!std::isfinite(summary.eclipseDurationS) || !std::isfinite(summary.sunlitDurationS)
@@ -107,8 +113,10 @@ std::vector<std::string> orbitSummaryLines(const OrbitSummary& summary) {
         lines.push_back(revisionLine(summary));
         return lines;
     }
-    lines.push_back(reading("Eclipse duration", summary.eclipseDurationS, "%.1f s (%.1f min)"));
-    lines.push_back(reading("Sunlit duration", summary.sunlitDurationS, "%.1f s (%.1f min)"));
+    lines.push_back(reading("Eclipse duration", summary.eclipseDurationS, "%.1f s (%.1f min)",
+                            summary.eclipseDurationS / 60.0));
+    lines.push_back(reading("Sunlit duration", summary.sunlitDurationS, "%.1f s (%.1f min)",
+                            summary.sunlitDurationS / 60.0));
     // The sign carries the direction, the word spells it out: an author
     // who reads a drift of zero as "not moving" rather than "moving with
     // the ground" is one sign convention away from a wrong conclusion.
