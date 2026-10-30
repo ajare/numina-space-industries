@@ -30,6 +30,11 @@ constexpr double kSecondsPerDay = 86400.0;
 inline double fractionalTurns(double turns) noexcept {
     return turns - std::floor(turns);
 }
+// Finite seconds divided by a short period can overflow. Reduce in seconds
+// first so the quotient stays bounded by one, even for subnormal periods.
+inline double phaseTurns(double seconds, double period) noexcept {
+    return fractionalTurns(std::fmod(seconds, period) / period);
+}
 }
 
 StellarExposureEvaluator::StellarExposureEvaluator(
@@ -68,7 +73,7 @@ StellarExposureEvaluator::StellarExposureEvaluator(
     // adds two numbers of order one instead of carrying a raw second count
     // into a division forever. A negative offset folds forward, which is
     // the same shift travelled the long way round the cycle.
-    phaseTurns_ = fractionalTurns(phaseOffsetSeconds_ / periodSeconds_);
+    phaseTurns_ = phaseTurns(phaseOffsetSeconds_, periodSeconds_);
     // The planet's infrared is derived, never typed: whatever stellar light
     // the world does not reflect is absorbed, spread over the whole sphere
     // and re-radiated. The Albedo guard above keeps the radicand
@@ -110,7 +115,7 @@ StellarExposure StellarExposureEvaluator::evaluate(double elapsedSeconds) const 
     // authored offset in the same units. Folding each side separately keeps
     // the elapsed term small whatever the run length; the offset is already
     // folded from the record.
-    const double turns = fractionalTurns(fractionalTurns(elapsedSeconds / periodSeconds_)
+    const double turns = fractionalTurns(phaseTurns(elapsedSeconds, periodSeconds_)
                                        + phaseTurns_);
     const double phase = kTwoPi * turns;
     // Local noon is t = 0 with the star at the zenith while the offset is

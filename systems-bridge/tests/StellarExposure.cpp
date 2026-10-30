@@ -795,6 +795,52 @@ void effectiveSinkSeesThePlanet() {
            "A dark sky warmed the Deep-space sink");
 }
 
+void extremeFinitePhases() {
+    const double largest = std::numeric_limits<double>::max();
+    for (const double period : {0.1, 0.125, std::numeric_limits<double>::min(),
+                                std::numeric_limits<double>::denorm_min(), largest}) {
+        for (const double offset : {0.0, largest, -largest, std::nextafter(largest, 0.0),
+                                    -std::nextafter(largest, 0.0)}) {
+            I scene(1, 1);
+            scene.setOrbit(O{kFullSun, period, kIssRadius, kEarthAlbedo, 0.3, offset});
+            const StellarExposureEvaluator evaluator{*scene.orbit()};
+            const StellarExposureEvaluator reduced{O{kFullSun, period, kIssRadius, kEarthAlbedo,
+                                                     0.3, std::fmod(offset, period)}};
+            require(!evaluator.dark(), "An accepted finite phase offset lost its sky");
+            for (const double elapsed : {0.0, period / 4.0, -period / 4.0, largest, -largest}) {
+                allocations = 0;
+                tracking = true;
+                const auto exposure = evaluator.evaluate(elapsed);
+                const auto repeated = evaluator.evaluate(elapsed);
+                const auto expected = reduced.evaluate(std::fmod(elapsed, period));
+                tracking = false;
+                require(allocations == 0, "Extreme finite phase evaluation allocated");
+                for (std::size_t axis = 0; axis < 3; ++axis) {
+                    require(std::isfinite(exposure.sunDirection[axis]),
+                            "A finite phase produced a non-finite sun direction");
+                    require(near(exposure.sunDirection[axis], expected.sunDirection[axis], 1e-14),
+                            "An extreme phase differs from its safely reduced equivalent");
+                }
+                require(near(length(exposure.sunDirection), 1.0, 1e-14),
+                        "An extreme finite phase lost its unit sun direction");
+                require(std::isfinite(exposure.eclipse) && exposure.eclipse >= 0.0
+                            && exposure.eclipse <= 1.0 && exposure.eclipse == expected.eclipse
+                            && exposure.sunlit == expected.sunlit,
+                        "An extreme phase changed the reduced eclipse profile");
+                require(exposure.sunDirection == repeated.sunDirection
+                            && exposure.eclipse == repeated.eclipse && exposure.sunlit == repeated.sunlit,
+                        "Extreme finite phase evaluation is not deterministic");
+                for (const auto& normal : std::array<std::array<double, 3>, 6>{{
+                         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}}) {
+                    require(std::isfinite(evaluator.directFluxWPerM2(normal, 1.0, exposure))
+                                && std::isfinite(evaluator.reflectedSunlightFluxWPerM2(normal, exposure)),
+                            "An extreme finite phase produced non-finite derived flux");
+                }
+            }
+        }
+    }
+}
+
 void refusedInputs() {
     // The evaluator never invents a sky out of numbers that cannot make one.
     const double nan = std::numeric_limits<double>::quiet_NaN();
@@ -1620,6 +1666,7 @@ int main() {
         planetShineMatchesTheReferenceTable();
         reflectedDiesInEclipseWhileInfraredContinues();
         effectiveSinkSeesThePlanet();
+        extremeFinitePhases();
         refusedInputs();
         expansionCarriesTheOrbit();
         atMostHalfTheHullIsLit();
