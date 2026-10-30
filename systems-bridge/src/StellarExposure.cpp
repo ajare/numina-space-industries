@@ -11,11 +11,10 @@ constexpr double kTwoPi = 2.0 * kPi;
 // same constant in kW; this model works in watts throughout.
 constexpr double kStefanBoltzmannWPerM2K4 = 5.670374419e-8;
 // Beta is the angle between the star and the orbital plane, so it lives in
-// (-pi/2, pi/2). Anything at or beyond the orbit pole has no sweep to make
-// and is refused as dark. The epsilon is the numerical guard behind that:
-// past it the in-plane share of the sweep is too small to divide by.
+// (-pi/2, pi/2), matching the authored-data boundary in core. Every
+// representable angle strictly inside that interval has a positive cosine,
+// including the nearest neighbours of the poles.
 constexpr double kHalfPi = 1.570796326794896619231846502829916183;
-constexpr double kMinCosBeta = 1e-9;
 // The Geostationary match tolerance, relative to the planet's sidereal
 // rotation. Tight enough that no author can type their way into the badge
 // by rounding: a tenth of a second off an Earth-sidereal period is over a
@@ -51,12 +50,11 @@ StellarExposureEvaluator::StellarExposureEvaluator(
     // Beta is refused rather than folded: an angle outside the range core
     // accepts is not a Beta angle, and quietly wrapping it would let the
     // evaluator build a sky from a record the document should never have
-    // held. The epsilon guard is the pole itself, where the in-plane share
-    // of the sweep vanishes.
+    // held. Valid near-pole angles retain their small in-plane sweep and
+    // nearly full cross-track illumination; they must not become dark.
     const double beta = orbit.betaAngleRad;
     if (!std::isfinite(beta) || beta <= -kHalfPi || beta >= kHalfPi) return;
     const double cosBeta = std::cos(beta);
-    if (cosBeta <= kMinCosBeta) return;
 
     irradianceWPerM2_ = orbit.stellarIrradianceWPerM2;
     periodSeconds_ = orbit.orbitalPeriodS;
@@ -97,6 +95,8 @@ StellarExposureEvaluator::StellarExposureEvaluator(
     // cos(phase) < -sqrt(1 - (Rp/r)^2) / cos(beta), which is
     // (1/pi) * acos(that) of the orbit. Once the argument passes one the
     // star never reaches the shadow at all, and the fraction is zero.
+    // Even at the closest valid angle to a pole, cosBeta is positive and
+    // horizon <= 1, so this quotient stays finite without an epsilon guard.
     const double sweepArgument = horizon / cosBeta;
     eclipseFraction_ = sweepArgument > 1.0 ? 0.0 : std::acos(sweepArgument) / kPi;
     dark_ = false;

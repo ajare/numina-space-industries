@@ -841,6 +841,48 @@ void extremeFinitePhases() {
     }
 }
 
+void nearPoleOrbitsKeepTheirSky() {
+    // Cover both sides of the former cos(Beta) <= 1e-9 guard, the reported
+    // reproduction, and the closest representable angle inside each pole.
+    for (const double magnitude : {kHalfPi - 2e-9, kHalfPi - 5e-10,
+                                   kHalfPi - 1e-10, std::nextafter(kHalfPi, 0.0)}) {
+        for (const double sign : {-1.0, 1.0}) {
+            const double beta = sign * magnitude;
+            I authored(1, 1);
+            O orbit{};
+            orbit.betaAngleRad = beta;
+            authored.setOrbit(orbit);
+            I loaded;
+            loaded.deserialize(authored.serialize());
+            require(loaded.orbit().has_value() && loaded.orbit()->betaAngleRad == beta,
+                    "A valid near-pole Beta did not survive loading");
+            for (const auto& record : {*authored.orbit(), *loaded.orbit()}) {
+                const StellarExposureEvaluator evaluator{record};
+                require(!evaluator.dark(), "An accepted near-pole Orbit silently lost its sky");
+                require(evaluator.eclipseFraction() == 0.0,
+                        "A near-pole Orbit invented an eclipse");
+                const double view = std::pow(core::PlanetRadiusM / record.radiusFromPlanetCentreM, 2);
+                for (const double turns : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+                    const auto exposure = evaluator.evaluate(turns * record.orbitalPeriodS);
+                    require(exposure.sunlit && exposure.eclipse == 0.0
+                                && near(length(exposure.sunDirection), 1.0, 1e-14),
+                            "Near-pole geometry lost its unit sun direction or clear sky");
+                    require(near(evaluator.directFluxWPerM2({0.0, sign, 0.0}, 1.0, exposure),
+                                 record.stellarIrradianceWPerM2 * std::sin(magnitude), 1e-9),
+                            "The pole-facing cross-track face lost direct stellar heating");
+                    require(evaluator.directFluxWPerM2({0.0, -sign, 0.0}, 1.0, exposure) == 0.0,
+                            "The opposite cross-track face received direct light");
+                    require(near(evaluator.planetInfraredFluxWPerM2({0.0, 0.0, -1.0}),
+                                 view * record.stellarIrradianceWPerM2 * (1.0 - record.albedo) / 4.0, 1e-9)
+                                && near(evaluator.reflectedSunlightFluxWPerM2({0.0, 0.0, -1.0}, exposure),
+                                        view * record.albedo * record.stellarIrradianceWPerM2, 1e-9),
+                            "An accepted near-pole Orbit lost Planet shine");
+                }
+            }
+        }
+    }
+}
+
 void refusedInputs() {
     // The evaluator never invents a sky out of numbers that cannot make one.
     const double nan = std::numeric_limits<double>::quiet_NaN();
@@ -1741,6 +1783,7 @@ int main() {
         reflectedDiesInEclipseWhileInfraredContinues();
         effectiveSinkSeesThePlanet();
         extremeFinitePhases();
+        nearPoleOrbitsKeepTheirSky();
         refusedInputs();
         expansionCarriesTheOrbit();
         atMostHalfTheHullIsLit();
