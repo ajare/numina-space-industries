@@ -96,11 +96,29 @@ independent of intermediate grid bounds. Internal Void courtyards count as
 exterior just like space. Conductance is preset
 U × area / 1000 in kW/K. Hull emitting area is the sum of linked areas, projected
 area is one quarter, and panel heat capacity is 0.4 kJ/(K·m²) times that area.
-Optical properties use the jointly calibrated core presets (ADR-0002). Solar
-profile level is constant zero: absorbed power is exactly zero with positive
-optical coefficients. No hull is emitted without a drain, and no hull choice
+Optical properties use the jointly calibrated core presets (ADR-0002). Without
+an Orbit, expansion retains a constant-zero solar profile so standalone
+consumers remain dark. With an Orbit it emits no placeholder, allowing native
+orbital exposure. No hull is emitted without a drain, and no hull choice
 means no links. Thermal expansion never emits atmosphere pathways; only
 explicitly authored Doors can create them through `expandDoors`.
+
+Native stellar-heating compatibility ([#48](https://github.com/ajare/numina-space-industries/issues/48),
+[ADR-0008](../docs/adr/0008-orbital-period-drives-hull-exposure.md)):
+
+| Orbit | `solarCycle` | Native heating |
+|---|---|---|
+| Absent | Absent | Dark |
+| Present | Absent | Orbital exposure |
+| Absent | Present | Legacy lumped profile |
+| Present | Present | Legacy lumped profile; Orbit suppressed |
+
+A supplied profile takes precedence independently of Orbit presence; existing
+profile-only scenarios need no migration or dummy Orbit. It uses Hull irradiance
+and `absorptivity × area / 4`, without per-face incidence or Planet shine, and
+retains the bare Deep-space sink. An open Door zeros the whole face's profile
+weight as before. For isolated dark-sky experiments, clear the Orbit and omit
+or zero the profile. No Hull always opts out of exterior thermal heating.
 
 When a Partition type is present, shared Interior Walls conduct between
 pressurised Sectors on the same Level. Each edge contributes its length times

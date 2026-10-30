@@ -45,7 +45,18 @@ This is the minimum-seam choice. The accepted solver, its work budgets, its nonl
 
 ## Exposure is opt-in at the wire level
 
-Three states, all deliberate: no authored `Orbit` means a dark sky and zero stellar gain, preserving the existing guarantee exactly; an authored `Orbit` drives computed exposure; an authored `Orbit` plus a `solarCycle` means the hand-authored profile overrides and the orbital model is suppressed. A missing `Orbit` means no orbit, never a default one — mirroring [ADR-0007](0007-native-structural-thermal-contract.md)'s rule that a missing Hull property means no Hull rather than the new-Installation default. New Installations do author an ISS-like orbit by default, following the `MultiLayerBlanket` precedent, which intentionally inverts the Editor playback test's existing "sky not dark" assertion; the old guarantee moves to the explicit no-orbit case rather than being lost.
+**Compatibility amendment ([#48](https://github.com/ajare/numina-space-industries/issues/48)):** the original three-state wording in this ADR and #36/#40 incorrectly made a missing `Orbit` suppress even an explicitly supplied profile. That contradicts #36's existing-profile compatibility promise and pre-orbit native behaviour. We preserve compatibility rather than require otherwise irrelevant Orbit data: `solarCycle` takes precedence regardless of Orbit presence.
+
+| Orbit | `solarCycle` | Behaviour |
+|---|---|---|
+| Absent | Absent | Dark sky, zero stellar gain |
+| Present | Absent | Computed orbital exposure |
+| Absent | Present | Legacy lumped profile heating |
+| Present | Present | Legacy lumped profile heating; orbital model suppressed |
+
+The profile owns the entire stellar term: `sum(absorptivity × area / 4) × hull irradiance × profile level`, with the authored bare Deep-space sink, no per-face cosine and no Planet shine. Open Doors retain the legacy rule of zeroing their whole face's solar weight. A zero profile remains an explicit dark override. `expandThermal` retains its zero-profile placeholder for no-Orbit Hulls so standalone compartment consumers stay dark too; native transport honours it like any other profile. No-Hull remains an absolute opt-out. Successful-step allocation and whole-call rollback guarantees are unchanged. No saved-data migration is needed.
+
+A missing `Orbit` still means no orbit, never a default one — mirroring [ADR-0007](0007-native-structural-thermal-contract.md)'s rule that a missing Hull property means no Hull rather than the new-Installation default. New Installations do author an ISS-like orbit by default, following the `MultiLayerBlanket` precedent. Isolated dark-sky experiments must clear the Orbit and omit or zero the profile, rather than expect an explicitly supplied heating profile to be ignored.
 
 ## Deliberate omissions
 

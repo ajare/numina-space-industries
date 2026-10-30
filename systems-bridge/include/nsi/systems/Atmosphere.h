@@ -43,8 +43,8 @@ struct ThermalExpansion {
     std::optional<station::HullSettings> hull;
     std::vector<station::ThermalLinkSettings> links;
     std::optional<station::ProfileSettings> solarCycle;
-    // The authored sky, carried through unchanged. Absent means no orbit and
-    // therefore no stellar gain; the bridge never substitutes a default.
+    // The authored sky, carried through unchanged. Absent means no orbital
+    // exposure, but a supplied solarCycle still heats; never an implicit default.
     std::optional<core::Installation::Orbit> orbit;
 };
 // Total exterior skin (side, roof, exposed floor underside) and shared-Wall/floor

@@ -191,16 +191,12 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
         exteriorCheckpoint_=structuralExterior_;
         if(exteriorSolar_.size()!=structuralExterior_.size())
             throw std::logic_error("Exterior solar faces do not match exterior radiation contacts");
-        // The three-state exposure rule. No authored Orbit leaves the
-        // evaluator dark: a dark sky is zero stellar gain, never a
-        // substituted default. An authored Orbit drives computed exposure.
-        // An authored Orbit plus a hand-authored solarCycle hands the whole
-        // stellar term to the profile and the evaluator is never built, so
-        // the orbital model cannot leak back in through a stray query.
-        if(geometry_.thermal.orbit) {
-            if(geometry_.thermal.solarCycle) solarCycleOverrides_=true;
-            else exposure_=StellarExposureEvaluator(*geometry_.thermal.orbit);
-        }
+        // A supplied profile owns the whole legacy stellar term, with or
+        // without an Orbit. Only an unprofiled Orbit builds the evaluator;
+        // neither input leaves the sky dark, never an implicit default.
+        if(geometry_.thermal.solarCycle) solarCycleOverrides_=true;
+        else if(geometry_.thermal.orbit)
+            exposure_=StellarExposureEvaluator(*geometry_.thermal.orbit);
         for (const auto& opening:topology.openings) {
             if(opening.door) {
                 const auto door=std::find_if(geometry_.doors.begin(),geometry_.doors.end(),[&](const auto& d){return d.structuralId==opening.face;});

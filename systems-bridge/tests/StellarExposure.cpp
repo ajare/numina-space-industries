@@ -1210,42 +1210,83 @@ void planetaryInfraredIsNotSolarAndTheAuditCloses() {
            "The eclipsed hull was not losing heat to the sink at all");
 }
 
-void noOrbitKeepsTheSkyDark() {
+void unauthoredSkyStaysDarkAndNoHullOptsOut() {
     I scene(2, 2);
     scene.setHullType(I::HullType::BareSkin);
-    // The dark-sky guarantee, re-homed: a new Installation now authors a
-    // sky by default, so the guarantee is asserted against an explicitly
-    // cleared orbit rather than against a fresh document.
+    // Dark-sky experiments clear the default Orbit and omit or zero the
+    // profile; an explicit heating profile is tested separately below.
     scene.setOrbit(std::nullopt);
-    CellAtmosphereTransport runtime(scene);
+    auto unauthored = expandCellAtmosphere(scene);
+    // Expansion retains a zero-profile placeholder for standalone consumers.
+    // Exercise the genuinely unauthored native case separately.
+    unauthored.thermal.solarCycle.reset();
+    CellAtmosphereTransport runtime(unauthored);
     require(runtime.exposureEvaluator().dark(), "Transport built a sky with no authored Orbit");
     require(!runtime.solarCycleOverrides(), "A skyless transport reported a profile override");
     advance(runtime, 30.0);
     audit(runtime);
     require(runtime.structure().paths.absorbedSolarJ == 0.0L, "Sky was not dark without an Orbit");
     require(runtime.structure().rates.absorbedSolarW == 0.0L, "A dark sky published a stellar rate");
-    // A hand-authored profile is not a substitute for an authored Orbit: the
-    // Orbit is the only thing that lights the native sky.
-    auto authored = expandCellAtmosphere(scene);
-    authored.thermal.solarCycle = station::ProfileSettings{1.0};
-    CellAtmosphereTransport overridden(authored);
-    require(overridden.advance(30.0, {}, 1u << 22, 1u << 22), "Profile-only playback refused");
-    audit(overridden);
-    require(overridden.structure().paths.absorbedSolarJ == 0.0L,
-           "A solar profile lit the native sky without an authored Orbit");
-    // The no-Hull opt-out stays absolute whatever orbit is authored.
-    I optOut(2, 2);
-    optOut.setHullType(std::nullopt);
-    optOut.setOrbit(O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo});
-    CellAtmosphereTransport none(optOut);
-    require(none.structure().bodies.empty() && none.exteriorSolarFaces().empty(),
-           "No-Hull opt-out gained exterior surface");
-    require(none.advance(30.0, {}, 1u << 22, 1u << 22) && none.structure().paths.absorbedSolarJ == 0.0L,
-           "No-Hull opt-out gained stellar input");
+    CellAtmosphereTransport placeholder(scene);
+    advance(placeholder, 0.1);
+    require(placeholder.structure().paths.absorbedSolarJ == 0.0L,
+           "The expansion's zero-profile placeholder heated the hull");
+    audit(placeholder);
+
+    // The no-Hull opt-out stays absolute for all four input combinations.
+    for (bool orbit : {false, true}) for (bool profile : {false, true}) {
+        I optOut(2, 2);
+        optOut.setHullType(std::nullopt);
+        if (!orbit) optOut.setOrbit(std::nullopt);
+        auto geometry = expandCellAtmosphere(optOut);
+        if (profile) geometry.thermal.solarCycle = station::ProfileSettings{1.0};
+        CellAtmosphereTransport none(geometry);
+        require(none.structure().bodies.empty() && none.exteriorSolarFaces().empty(),
+               "No-Hull opt-out gained exterior surface");
+        require(none.advance(0.1) && none.structure().paths.absorbedSolarJ == 0.0L,
+               "No-Hull opt-out gained stellar input");
+        audit(none);
+    }
 }
 
-// The third state of the exposure rule: an authored Orbit plus a
-// hand-authored solarCycle. The profile owns the whole stellar term and the
+void profileOnlyRetainsLegacyHeating() {
+    I scene(2, 2);
+    scene.setHullType(I::HullType::BareSkin);
+    scene.setOrbit(std::nullopt);
+    auto geometry = expandCellAtmosphere(scene);
+    geometry.thermal.solarCycle = station::ProfileSettings{1.0};
+    CellAtmosphereTransport runtime(geometry);
+    require(runtime.advance(0.1), "Profile-only reproduction refused");
+    require(near(double(runtime.structure().paths.absorbedSolarJ), 1088.8, 1e-6),
+           "Profile-only heating did not retain the legacy 1088.8 J result");
+    require(runtime.solarCycleOverrides() && runtime.exposureEvaluator().dark(),
+           "Profile-only heating did not suppress the orbital evaluator");
+    audit(runtime);
+
+    allocations = 0;
+    tracking = true;
+    const bool advanced = runtime.advance(0.1);
+    tracking = false;
+    require(advanced && allocations == 0, "Profile-only successful step allocated");
+    const auto before = committedState(runtime);
+    require(!runtime.advance(0.1, {}, 4096, 0), "Profile-only step ignored refusal budget");
+    require(committedEqual(before, committedState(runtime)), "Profile-only refusal leaked state");
+    require(runtime.advance(0.1), "Profile-only retry refused");
+    CellAtmosphereTransport twin(geometry);
+    for (int i = 0; i < 3; ++i) require(twin.advance(0.1), "Profile-only replay refused");
+    require(committedEqual(committedState(twin), committedState(runtime)),
+           "Profile-only refusal changed subsequent playback");
+    audit(runtime);
+
+    geometry.thermal.solarCycle = station::ProfileSettings{0.0};
+    CellAtmosphereTransport zero(geometry);
+    require(zero.advance(0.1) && zero.structure().paths.absorbedSolarJ == 0.0L,
+           "A profile-only zero level heated the hull");
+    audit(zero);
+}
+
+// An authored Orbit plus a hand-authored solarCycle:
+// the profile owns the whole stellar term and the
 // orbital model is suppressed, which is observable because the profile
 // contradicts what the orbital geometry would have produced at the same
 // simulated instant.
@@ -1560,6 +1601,39 @@ void anOpenDoorAdmitsNoDirectLight() {
     audit(runtime);
 }
 
+void profileDoorsRetainLegacyHeating() {
+    for (bool orbit : {false, true}) {
+        I scene(1, 3);
+        scene.setHullType(I::HullType::BareSkin);
+        if (!orbit) scene.setOrbit(std::nullopt);
+        const auto door = scene.level(0).verticalWall(0, 1);
+        scene.setDoor(0, door, true);
+        auto geometry = expandCellAtmosphere(scene);
+        geometry.thermal.solarCycle = station::ProfileSettings{1.0};
+        CellAtmosphereTransport runtime(geometry);
+        auto weight = [&runtime] {
+            double total = 0.0;
+            for (const auto& face : runtime.exteriorSolarFaces())
+                total += face.absorptivity * face.areaM2 * 0.25 * face.directScale;
+            return total;
+        };
+        const auto closedWeight = weight();
+        const double irradiance = geometry.thermal.hull->fullSunIrradianceKWPerM2 * 1000.0;
+        for (bool open : {false, true, false}) {
+            require(runtime.setDoorOpen(0, door, open), "Profile Door control refused");
+            const auto currentWeight = weight();
+            require(open ? currentWeight < closedWeight : currentWeight == closedWeight,
+                    "Profile Door pose did not remove/restore its whole solar weight");
+            const auto before = runtime.structure().paths.absorbedSolarJ;
+            require(runtime.advance(0.1), "Profile Door step refused");
+            require(near(double(runtime.structure().paths.absorbedSolarJ - before),
+                         currentWeight * irradiance * 0.1, 1e-6),
+                    "Profile Door heating did not match legacy lumped power");
+            audit(runtime);
+        }
+    }
+}
+
 void authoredDocumentIsImmutable() {
     I scene(2, 2);
     scene.setHullType(I::HullType::BareSkin);
@@ -1675,7 +1749,8 @@ int main() {
         theOrbitSetsTheIrradiance();
         planetShineSoftensTheEclipseTrough();
         planetaryInfraredIsNotSolarAndTheAuditCloses();
-        noOrbitKeepsTheSkyDark();
+        unauthoredSkyStaysDarkAndNoHullOptsOut();
+        profileOnlyRetainsLegacyHeating();
         solarCycleOverridesTheOrbit();
         successfulStepsAllocateNothingAndRefusalsRestoreEverything();
         aFullOrbitAllocatesNothingOnSuccessfulSteps();
@@ -1684,6 +1759,7 @@ int main() {
         penumbraStepsPreserveRuntimeContracts();
         identicalTimeGivesIdenticalResults();
         anOpenDoorAdmitsNoDirectLight();
+        profileDoorsRetainLegacyHeating();
         authoredDocumentIsImmutable();
         summaryReadoutsTrackTheOrbit();
         aDarkEvaluatorDerivesNothing();

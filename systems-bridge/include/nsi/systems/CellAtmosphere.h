@@ -161,10 +161,10 @@ public:
     // the same order as the solver's exterior contacts. Read-only view so
     // callers can assert lit-area geometry directly.
     std::span<const ExteriorSolarFace> exteriorSolarFaces() const noexcept {return exteriorSolar_;}
-    // The sky this transport is under; dark when no Orbit was authored.
+    // Orbital evaluator; dark without an Orbit or when a profile owns heating.
     const StellarExposureEvaluator& exposureEvaluator() const noexcept {return exposure_;}
-    // True when a hand-authored solarCycle owns the whole stellar term and
-    // the exposure evaluator was never built. The evaluator is genuinely
+    // True when a supplied solarCycle owns the whole stellar term, even
+    // without an Orbit, and the evaluator was never built. It is genuinely
     // dark in this state, which is the structural proof that the orbital
     // model is suppressed rather than merely outweighed.
     bool solarCycleOverrides() const noexcept {return solarCycleOverrides_;}
