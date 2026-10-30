@@ -2,6 +2,7 @@
 #include <serialization/SerializationException.h>
 #include <yaml-cpp/yaml.h>
 #include <array>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <limits>
@@ -319,7 +320,9 @@ void orbitPersistence() {
     // setOrbit refuses what the loader must refuse.
     const double nan=std::numeric_limits<double>::quiet_NaN();
     const double inf=std::numeric_limits<double>::infinity();
-    const std::array<O,20> invalid{
+    const std::array<O,23> invalid{
+        O{std::nextafter(O::MaxStellarIrradianceWPerM2, inf),5570.0,6791000.0},
+        O{1e305,5570.0,6791000.0},O{std::numeric_limits<double>::max(),5570.0,6791000.0},
         O{nan,5570.0,6791000.0},O{inf,5570.0,6791000.0},
         O{0.0,5570.0,6791000.0},O{-1361.0,5570.0,6791000.0},
         O{1361.0,0.0,6791000.0},O{1361.0,-5570.0,6791000.0},
@@ -350,6 +353,18 @@ void orbitPersistence() {
         try { target.deserialize(out.c_str()); } catch (const serialization::SerializationException&) { threw=true; }
         check(threw && target.orbit()==iss,"Invalid orbit rejected transactionally");
     };
+    for (double irradiance : {1e50, O::MaxStellarIrradianceWPerM2}) {
+        O large = iss;
+        large.stellarIrradianceWPerM2 = irradiance;
+        I source;
+        source.setOrbit(large);
+        I restored;
+        restored.deserialize(source.serialize());
+        check(restored.orbit() == source.orbit(), "Large supported irradiance round trips");
+    }
+    badOrbit([&](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::nextafter(O::MaxStellarIrradianceWPerM2,inf);});
+    badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=1e305;});
+    badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::max();});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=0.0;});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=-1.0;});
     badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]=0.0;});

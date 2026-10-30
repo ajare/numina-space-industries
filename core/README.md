@@ -68,6 +68,19 @@ removed, retaining at least one; if removing it would truncate a lower Sector,
 it is instead cleared to one unnamed Void Sector with no Walls, preserving
 its dimensions and offset. `removeTopLevel()` returns false in that case.
 
+## Orbit numeric support
+
+`Orbit::stellarIrradianceWPerM2` must be finite and in **(0, 1e100] W/m²**
+(`Orbit::MaxStellarIrradianceWPerM2`). This is a numerical support ceiling,
+not a physically useful irradiance range. It leaves ample double-precision
+headroom for the derived planet temperature, fourth-power sink calculations,
+and exterior flux-to-power multiplication. `Orbit::validate`, `setOrbit`, and
+YAML loading reject larger values transactionally; a bridge evaluator built
+directly from an unsupported raw Orbit stays dark. This applies even at Albedo
+one, so support does not depend on whether planetary infrared happens to vanish.
+Extreme but supported boundaries do not guarantee that the runtime solver can
+advance: its existing work limits and transactional refusal rules still apply.
+
 ## Candidate native thermal presets
 
 `<nsi/core/ThermalPresets.h>` exposes opt-in `nativeThermalSpec` overloads for

@@ -381,8 +381,9 @@ void Installation::setHullType(std::optional<HullType> type) {
     hullType_ = type;
 }
 void Installation::Orbit::validate() const {
-    require(std::isfinite(stellarIrradianceWPerM2) && stellarIrradianceWPerM2 > 0.0,
-            "Orbit Stellar irradiance must be finite and positive");
+    require(std::isfinite(stellarIrradianceWPerM2) && stellarIrradianceWPerM2 > 0.0
+                && stellarIrradianceWPerM2 <= MaxStellarIrradianceWPerM2,
+            "Orbit Stellar irradiance must be finite and within (0, 1e100] W/m^2");
     require(std::isfinite(orbitalPeriodS) && orbitalPeriodS > 0.0,
             "Orbit Orbital period must be finite and positive");
     require(std::isfinite(radiusFromPlanetCentreM) && radiusFromPlanetCentreM > PlanetRadiusM,

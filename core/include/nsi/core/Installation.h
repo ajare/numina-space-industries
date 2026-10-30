@@ -39,6 +39,12 @@ public:
     // is derived from irradiance and Albedo by energy balance rather than
     // typed: a dimmer star then cools the planet on its own.
     struct Orbit {
+        // Numerical support limit, not a physical calibration: keeps derived
+        // temperatures (~1e27 K), their fourth powers (~1e107 K^4), and
+        // per-face flux/power arithmetic far below double overflow. Shared
+        // by authored-data validation and the bridge's raw-record boundary.
+        static constexpr double MaxStellarIrradianceWPerM2 = 1e100;
+        // Supported interval: (0, MaxStellarIrradianceWPerM2], finite.
         double stellarIrradianceWPerM2{1361.0}; // Full Sun at Earth
         double orbitalPeriodS{5570.0};          // Inertial period about the planet
         double radiusFromPlanetCentreM{6791000.0}; // ISS-like altitude

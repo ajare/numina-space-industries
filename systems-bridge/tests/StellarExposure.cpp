@@ -620,6 +620,66 @@ void directFlux() {
     require(dark.directFluxWPerM2({0.0, 0.0, 1.0}, 1.0, noon) == 0.0, "Dark evaluator emitted flux");
 }
 
+void extremeIrradianceIsBounded() {
+    constexpr double limit = O::MaxStellarIrradianceWPerM2;
+    for (double irradiance : {1e50, limit}) {
+        for (double albedo : {0.0, 0.3, 1.0}) {
+            O orbit;
+            orbit.stellarIrradianceWPerM2 = irradiance;
+            orbit.albedo = albedo;
+            I installation;
+            installation.setOrbit(orbit);
+            StellarExposureEvaluator evaluator(*installation.orbit());
+            require(!evaluator.dark(), "Supported large irradiance became a dark sky");
+            const double planet = evaluator.planetInfraredTemperatureK();
+            require(std::isfinite(planet), "Accepted irradiance overflowed planet temperature");
+            const auto noon = evaluator.evaluate(0.0);
+            const auto midnight = evaluator.evaluate(orbit.orbitalPeriodS / 2.0);
+            for (const auto& normal : std::array<std::array<double, 3>, 3>{
+                     {{0.0, 0.0, -1.0}, {0.0, 0.0, 1.0}, {1.0, 0.0, 0.0}}}) {
+                const double view = evaluator.planetViewFactor(normal);
+                const double sink = evaluator.effectiveSinkTemperatureK(3.0, view);
+                require(std::isfinite(sink) && std::isfinite(std::pow(sink, 4)),
+                        "Accepted irradiance overflowed sink or downstream fourth power");
+                require(nearRel(std::pow(sink, 4),
+                                (1.0 - view) * 81.0
+                                    + view * irradiance * (1.0 - albedo) / (4.0 * kSigma), 1e-12),
+                        "Large irradiance sink lost fourth-power balance");
+                require(nearRel(evaluator.planetInfraredFluxWPerM2(normal),
+                                view * irradiance * (1.0 - albedo) / 4.0, 1e-12),
+                        "Large irradiance infrared flux lost energy balance");
+                ExteriorSolarFace face;
+                face.outwardNormal = normal;
+                face.absorptivity = 1.0;
+                face.areaM2 = 6.0;
+                for (const auto& exposure : {noon, midnight}) {
+                    const double power = face.directW(evaluator, exposure)
+                        + face.reflectedSunlightW(evaluator, exposure)
+                        + face.planetInfraredW(evaluator);
+                    require(std::isfinite(power), "Accepted irradiance overflowed face power");
+                }
+            }
+        }
+    }
+    for (double irradiance : {std::nextafter(limit, std::numeric_limits<double>::infinity()),
+                              1e305, std::numeric_limits<double>::max()}) {
+        for (double albedo : {0.0, 0.3, 1.0}) {
+            O orbit;
+            orbit.stellarIrradianceWPerM2 = irradiance;
+            orbit.albedo = albedo;
+            I installation;
+            const auto original = installation.orbit();
+            bool refused = false;
+            try { installation.setOrbit(orbit); }
+            catch (const std::invalid_argument&) { refused = true; }
+            require(refused && installation.orbit() == original,
+                    "Unsupported irradiance was not refused transactionally");
+            require(StellarExposureEvaluator(orbit).dark(),
+                    "Unsupported raw irradiance produced a live evaluator");
+        }
+    }
+}
+
 void planetInfraredIsDerived() {
     // The planet's infrared temperature is never authored: it is whatever the
     // energy balance leaves behind. A dimmer star therefore cools the planet
@@ -1777,6 +1837,7 @@ int main() {
         nadirNeverSeesDirectSun();
         phaseOffsetShiftsTheProfile();
         directFlux();
+        extremeIrradianceIsBounded();
         planetInfraredIsDerived();
         planetViewFactorIsElementToSphere();
         planetShineMatchesTheReferenceTable();

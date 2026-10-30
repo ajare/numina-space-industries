@@ -39,6 +39,7 @@ inline double phaseTurns(double seconds, double period) noexcept {
 StellarExposureEvaluator::StellarExposureEvaluator(
     const core::Installation::Orbit& orbit) noexcept {
     if (!std::isfinite(orbit.stellarIrradianceWPerM2) || orbit.stellarIrradianceWPerM2 <= 0.0
+        || orbit.stellarIrradianceWPerM2 > core::Installation::Orbit::MaxStellarIrradianceWPerM2
         || !std::isfinite(orbit.orbitalPeriodS) || orbit.orbitalPeriodS <= 0.0
         || !std::isfinite(orbit.radiusFromPlanetCentreM)
         || orbit.radiusFromPlanetCentreM <= core::PlanetRadiusM
