@@ -12,6 +12,10 @@ void require(bool v,const char* message) {if (!v) throw std::runtime_error(messa
 void near(double a,double b) {require(std::abs(a-b)<1e-8,"Incorrect thermal readout");}
 void check() {
     I single(1,1);single.setHullType(I::HullType::MultiLayerBlanket);
+    // This fixture reads the surface-cooling ramp, which is calibrated at
+    // zero solar gain; a new document now authors a live sky, so ask for
+    // darkness explicitly rather than reading a sun-warmed hull as a bug.
+    single.setOrbit(std::nullopt);
     auto a=sectorThermal(single,0,0);
     near(a.skin.sideM2,24);near(a.skin.roofM2,4);near(a.skin.floorUndersideM2,4);
     require(a.hasAtmosphere && !a.atmosphere,"Unstarted gas telemetry fabricated");

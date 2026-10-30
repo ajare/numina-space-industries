@@ -106,6 +106,12 @@ void noHullIsolation() {
 }
 void hullCooling() {
     auto cooling=[](Installation installation) {
+        // The legacy Hull tracer has no orbital model: station-systems reads
+        // a ProfileSettings and treats an absent one as full sun. This
+        // fixture's dark sky used to come from no document having an orbit
+        // at all; now it has to be asked for, or the default ISS-like sky
+        // would silently become full sun down here.
+        installation.setOrbit(std::nullopt);
         auto settings=scene(installation);
         station::StationSystemsRuntime runtime(settings,0.25f);
         advance(runtime,60);
@@ -135,6 +141,9 @@ void hullCooling() {
     // Compare the complete default skin against the previous side-only tracer
     // through the real runtime, keeping the same air and hull assembly.
     Installation standard;
+    // Same reason as the cooling fixture above: this comparison is a
+    // dark-sky area-ratio claim, so it must not inherit the default orbit.
+    standard.setOrbit(std::nullopt);
     auto complete=scene(standard);
     auto sideOnly=complete;
     const double fraction=standard.sideExteriorAreaM2(0,0)

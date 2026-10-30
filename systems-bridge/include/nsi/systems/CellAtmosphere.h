@@ -82,6 +82,17 @@ struct ExteriorSolarFace {
                   const StellarExposure& exposure) const noexcept {
         return evaluator.directFluxWPerM2(outwardNormal, absorptivity, exposure) * areaM2 * directScale;
     }
+    // Absorbed power, W, from a hand-authored solar profile rather than
+    // from the orbital model. A profile is written against the isotropic
+    // absorptivity * area / 4 average it always had, not against a sun
+    // direction this face may or may not be facing, because a hand-authored
+    // profile replaces the sky outright instead of modulating one.
+    // directScale is carried across unchanged from the pre-orbit lumped
+    // path, where an open Door zeroed the face's whole solar weight: the
+    // profile stands in for the collimated sun that Door used to block.
+    double lumpedProfileW(double irradianceWPerM2, double level) const noexcept {
+        return absorptivity * areaM2 * 0.25 * irradianceWPerM2 * level * directScale;
+    }
     // Planet shine arriving on this face, W. Both components are applied
     // whatever the Door pose: directScale models the collimated direct beam
     // no longer being intercepted by a leaf swung out of the opening, while
@@ -152,6 +163,11 @@ public:
     std::span<const ExteriorSolarFace> exteriorSolarFaces() const noexcept {return exteriorSolar_;}
     // The sky this transport is under; dark when no Orbit was authored.
     const StellarExposureEvaluator& exposureEvaluator() const noexcept {return exposure_;}
+    // True when a hand-authored solarCycle owns the whole stellar term and
+    // the exposure evaluator was never built. The evaluator is genuinely
+    // dark in this state, which is the structural proof that the orbital
+    // model is suppressed rather than merely outweighed.
+    bool solarCycleOverrides() const noexcept {return solarCycleOverrides_;}
     // Caller-bounded, nonrecursive, allocation-free local queries. Cavity index
     // identifies a geometric Interior Sector, including missing-gas presets.
     std::optional<StructuralSurfaceObservation> structuralSurface(StructuralSurfaceId) const;
@@ -204,6 +220,7 @@ private:
     std::vector<station::NativeThermalExterior> structuralExterior_;
     std::vector<ExteriorSolarFace> exteriorSolar_;
     StellarExposureEvaluator exposure_;
+    bool solarCycleOverrides_{};
     struct DoorPose {
         std::size_t door{},portal{},parkCavity{};
         StructuralOwner parkOwner{};

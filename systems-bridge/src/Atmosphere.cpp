@@ -212,7 +212,12 @@ ThermalExpansion expandThermal(const core::Installation& installation) {
         hull.emissivity = spec.emissivity;
         hull.absorptivity = spec.absorptivity;
         result.hull = hull;
-        result.solarCycle = station::ProfileSettings{0.0};
+        // The constant-zero profile is the legacy dark-sky placeholder, and
+        // it is authored only where there is no Orbit to replace it. A
+        // solarCycle reads as a hand-authored override, so emitting the
+        // placeholder beside an authored Orbit would silently suppress the
+        // orbital model the default exists to switch on.
+        if (!result.orbit) result.solarCycle = station::ProfileSettings{0.0};
     }
     return result;
 }

@@ -201,6 +201,9 @@ void runtimeColours() {
     require(installation.serialize()==original,"Render modes changed authored Installation");
 
     EditorSession session; session.newDocument(1,1);
+    // The heatmap's cooling ramp is calibrated against a dark sky; a new
+    // document now authors a live orbit, so ask for darkness explicitly.
+    session.setOrbit(std::nullopt);
     const auto dirty=session.unsavedChanges();
     const auto before=session.installation();
     SimulationPlayback playback; playback.reset(session.installation());

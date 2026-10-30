@@ -63,6 +63,10 @@ void check() {
     // closed enclosure redistributes heat without manufacturing a space sink.
     auto radiationOnly=[](const I& installation) {
         auto g=expandCellAtmosphere(installation,true);
+        // Isolate the cavity from the sky: this fixture proves a closed
+        // enclosure redistributes heat internally, not what a sun does to
+        // its skin. A new Installation authors an orbit, so clear it.
+        g.thermal.orbit=std::nullopt;
         for (auto& cell:g.mesh.cells) cell.initial={};
         g.structure->contacts.clear();
         for (auto& assembly:g.structure->assemblies) {

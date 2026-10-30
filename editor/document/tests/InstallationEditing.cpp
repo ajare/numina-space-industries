@@ -196,19 +196,24 @@ void hullHistory() {
 }
 void orbitHistory() {
     EditorSession session; session.newDocument(1,1);
-    check(!session.installation().orbit(),"New document must not author an orbit");
-    const I::Orbit iss{1361.0,5570.0,6791000.0};
-    session.setOrbit(iss);
-    check(session.installation().orbit()==iss && session.unsavedChanges() && session.canUndo(),
+    // A new document arrives already under an ISS-like sky, so the author
+    // sees day/night cycling without typing anything. The undo baseline is
+    // that default, not an absent orbit.
+    const I::Orbit kDefault{1361.0,5570.0,6791000.0,0.3,0.0,0.0};
+    check(session.installation().orbit()==kDefault,
+          "New document must author the ISS-like default orbit");
+    const I::Orbit geo{1361.0,86164.0,42164000.0,0.3,0.0,0.0};
+    session.setOrbit(geo);
+    check(session.installation().orbit()==geo && session.unsavedChanges() && session.canUndo(),
           "Orbit edit did not dirty the document");
-    session.setOrbit(iss); // No extra history for the same value.
+    session.setOrbit(geo); // No extra history for the same value.
     session.undo();
-    check(!session.installation().orbit() && !session.unsavedChanges() && !session.canUndo(),
-          "Undo orbit did not restore the baseline");
-    session.redo(); check(session.installation().orbit()==iss,"Redo orbit");
+    check(session.installation().orbit()==kDefault && !session.unsavedChanges() && !session.canUndo(),
+          "Undo orbit did not restore the default baseline");
+    session.redo(); check(session.installation().orbit()==geo,"Redo orbit");
     session.setOrbit(std::nullopt);
     check(!session.installation().orbit(),"Explicit no orbit command");
-    session.undo(); check(session.installation().orbit()==iss,"Undo no orbit");
+    session.undo(); check(session.installation().orbit()==geo,"Undo no orbit");
     session.redo(); check(!session.installation().orbit(),"Redo no orbit");
     // Numbers the loader would refuse never reach the document at all.
     const auto untouched=session.installation();

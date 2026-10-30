@@ -263,6 +263,9 @@ void temperatureHistory() {
     using station::editor::SimulationPlayback;
     I installation(2,1);
     installation.toggleWall(0,installation.level(0).verticalWall(1,0));
+    // The history under test is a cooling ramp, calibrated at zero solar
+    // gain; a new document now authors a live sky, so ask for darkness.
+    installation.setOrbit(std::nullopt);
     SimulationPlayback playback;
     playback.reset(installation);
     const auto initial=playback.runtime()->snapshot();
@@ -356,10 +359,11 @@ void temperatureHistory() {
 
 void hullPlayback() {
     using I=nsi::core::Installation;
-    auto temperature=[](I::HullType type) {
+    auto temperature=[](I::HullType type,const std::optional<I::Orbit>& orbit) {
         station::editor::EditorSession session;
         session.newDocument(1,1);
         session.setHullType(type);
+        session.setOrbit(orbit);
         station::editor::SimulationPlayback playback;
         playback.synchronize(session.installation());
         playback.setSpeedIndex(4);
@@ -370,12 +374,27 @@ void hullPlayback() {
         require(state.healthy && !structure.bodies.empty(),"Playback omitted local Hull panels");
         require(!state.thermal.hull && state.thermalLinks.empty(),"Playback published legacy Hull");
         require(structure.paths.exteriorRadiationJ>0,"Playback Hull did not radiate");
-        require(structure.paths.absorbedSolarJ==0,"Playback sky not dark");
-        return state.atmospheres[0].temperatureC;
+        return std::pair{state.atmospheres[0].temperatureC,structure.paths.absorbedSolarJ};
     };
-    const auto bare=temperature(I::HullType::BareSkin);
-    const auto blanket=temperature(I::HullType::MultiLayerBlanket);
-    require(bare<blanket-1.0 && blanket<20.0,"Playback did not wire Hull drain links");
+    // The Hull drain links are calibrated at zero solar gain, so this
+    // fixture asks for a cleared orbit. That darkness used to come from no
+    // document having an orbit at all; now it has to be said out loud.
+    const auto bare=temperature(I::HullType::BareSkin,std::nullopt);
+    const auto blanket=temperature(I::HullType::MultiLayerBlanket,std::nullopt);
+    require(bare.first<blanket.first-1.0 && blanket.first<20.0,
+           "Playback did not wire Hull drain links");
+    require(bare.second==0.0L && blanket.second==0.0L,
+           "A cleared orbit did not keep the playback sky dark");
+    // The inversion the default orbit brings: the same fixture under the
+    // default ISS-like sky is lit, and BareSkin takes far more of it than
+    // the blanket does.
+    const I::Orbit iss{1361.0,5570.0,6791000.0};
+    const auto litBare=temperature(I::HullType::BareSkin,iss);
+    const auto litBlanket=temperature(I::HullType::MultiLayerBlanket,iss);
+    require(litBare.second>0.0L && litBlanket.second>0.0L,
+           "The default orbit did not light the playback sky");
+    require(litBare.second>litBlanket.second,
+           "Bare skin and the blanket absorbed the default sky identically");
 }
 void orbitPlayback() {
     using I=nsi::core::Installation;

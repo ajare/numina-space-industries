@@ -259,9 +259,20 @@ void persistence() {
 }
 void orbitPersistence() {
     using O=I::Orbit;
-    // A missing Orbit means no orbit, never a default one.
-    check(!I(1,1).orbit(),"New Installation must not author an orbit");
-    const O iss{1361.0,5570.0,6791000.0};
+    // A new Installation authors the ISS-like sky its fields already carry,
+    // following the MultiLayerBlanket new-Installation default: full Sun at
+    // Earth, a 92.8 minute inertial period at ISS altitude, an Earth-like
+    // Albedo and a coplanar star at Local noon.
+    const O iss{1361.0,5570.0,6791000.0,0.3,0.0,0.0};
+    check(I(1,1).orbit()==iss,"New Installation must author the ISS-like default orbit");
+    check(I(1,1).orbit()->betaAngleRad==0.0,"Default orbit must start coplanar");
+    check(I(1,1).orbit()->phaseOffsetS==0.0,"Default orbit must open at Local noon");
+    // Absent still means no orbit, never a substituted default: the author
+    // who clears the orbit gets the old dark sky back unchanged.
+    I dark(1,1); dark.setOrbit(std::nullopt);
+    check(!dark.orbit(),"Explicitly cleared orbit must stay absent");
+    check(!YAML::Load(dark.serialize())["orbit"].IsDefined(),
+          "Cleared orbit must not be written back out");
     I i(1,1); i.setOrbit(iss);
     check(i.orbit()==iss,"Authored orbit retained");
     roundTrip(i);

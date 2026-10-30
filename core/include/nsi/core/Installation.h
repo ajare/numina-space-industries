@@ -195,8 +195,12 @@ public:
     void setHullType(std::optional<HullType> type);
     std::optional<PartitionType> partitionType() const noexcept { return partitionType_; }
     void setPartitionType(std::optional<PartitionType> type);
-    // No authored Orbit means no orbit, never a default one: the sky stays
-    // dark and the Installation absorbs no stellar energy.
+    // A new Installation authors the ISS-like Orbit its fields already
+    // carry, following the MultiLayerBlanket new-Installation default, so
+    // the author sees day/night thermal cycling without typing anything.
+    // Absent still means no orbit and never a substituted default: the sky
+    // stays dark and the Installation absorbs no stellar energy. Loading
+    // never applies this default - see deserialize.
     std::optional<Orbit> orbit() const noexcept { return orbit_; }
     void setOrbit(std::optional<Orbit> orbit);
     struct ExteriorSkin {
@@ -232,7 +236,10 @@ private:
     std::string name_;
     std::optional<HullType> hullType_ = HullType::MultiLayerBlanket;
     std::optional<PartitionType> partitionType_ = PartitionType::InsulatedPartition;
-    std::optional<Orbit> orbit_{};
+    // The member initialisers above are the ISS-like sky: full Sun at
+    // Earth, a 92.8 minute inertial period at ISS altitude, an Earth-like
+    // Albedo and a coplanar star at Local noon. Authored on creation only.
+    std::optional<Orbit> orbit_ = Orbit{};
     std::vector<Level> levels_;
     void reindex();
 };

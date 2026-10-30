@@ -715,6 +715,11 @@ CellAtmosphereExpansion tiltedGeometry(double betaDegrees, double phaseOffsetSec
 void expansionCarriesTheOrbit() {
     I scene(1, 1);
     scene.setHullType(I::HullType::BareSkin);
+    // A new Installation authors the ISS-like default, so the expansion
+    // carries it. Only an explicitly cleared orbit produces no orbit.
+    require(expandThermal(scene).orbit==scene.orbit(),
+            "Bridge did not carry the authored default Orbit");
+    scene.setOrbit(std::nullopt);
     require(!expandThermal(scene).orbit, "Unauthored orbit must not appear in the expansion");
     const O orbit{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo};
     scene.setOrbit(orbit);
@@ -874,6 +879,9 @@ void stellarEnergyReachesTheLedger() {
     // The same Installation under no orbit stays cold by comparison.
     I dark(2, 2);
     dark.setHullType(I::HullType::BareSkin);
+    // The contrast needs a genuinely dark control: a fresh Installation now
+    // authors a sky, so the orbit has to be cleared to get one.
+    dark.setOrbit(std::nullopt);
     CellAtmosphereTransport darkRuntime(dark);
     advance(darkRuntime, 60.0);
     audit(darkRuntime);
@@ -1016,8 +1024,13 @@ void planetaryInfraredIsNotSolarAndTheAuditCloses() {
 void noOrbitKeepsTheSkyDark() {
     I scene(2, 2);
     scene.setHullType(I::HullType::BareSkin);
+    // The dark-sky guarantee, re-homed: a new Installation now authors a
+    // sky by default, so the guarantee is asserted against an explicitly
+    // cleared orbit rather than against a fresh document.
+    scene.setOrbit(std::nullopt);
     CellAtmosphereTransport runtime(scene);
     require(runtime.exposureEvaluator().dark(), "Transport built a sky with no authored Orbit");
+    require(!runtime.solarCycleOverrides(), "A skyless transport reported a profile override");
     advance(runtime, 30.0);
     audit(runtime);
     require(runtime.structure().paths.absorbedSolarJ == 0.0L, "Sky was not dark without an Orbit");
@@ -1040,6 +1053,98 @@ void noOrbitKeepsTheSkyDark() {
            "No-Hull opt-out gained exterior surface");
     require(none.advance(30.0, {}, 1u << 22, 1u << 22) && none.structure().paths.absorbedSolarJ == 0.0L,
            "No-Hull opt-out gained stellar input");
+}
+
+// The third state of the exposure rule: an authored Orbit plus a
+// hand-authored solarCycle. The profile owns the whole stellar term and the
+// orbital model is suppressed, which is observable because the profile
+// contradicts what the orbital geometry would have produced at the same
+// simulated instant.
+void solarCycleOverridesTheOrbit() {
+    // An orbit whose phase offset parks the whole run inside the eclipse.
+    // The orbital model alone would deliver exactly nothing; a profile at
+    // full level must still deliver full sun.
+    I eclipsed(2, 2);
+    eclipsed.setHullType(I::HullType::BareSkin);
+    eclipsed.setOrbit(O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0, kIssPeriod / 2.0});
+    const auto litByOrbitOnly = expandCellAtmosphere(eclipsed);
+    CellAtmosphereTransport orbitOnly(litByOrbitOnly);
+    advance(orbitOnly, 30.0);
+    require(!orbitOnly.solarCycleOverrides(),
+           "An Orbit with no authored profile must not report an override");
+    require(orbitOnly.structure().paths.absorbedSolarJ == 0.0L,
+           "The eclipsed Orbit alone delivered stellar energy before the override");
+
+    auto overriddenExpansion = litByOrbitOnly;
+    overriddenExpansion.thermal.solarCycle = station::ProfileSettings{1.0};
+    CellAtmosphereTransport overridden(overriddenExpansion);
+    require(overridden.solarCycleOverrides(), "Authored profile did not take the override");
+    require(overridden.exposureEvaluator().dark(),
+           "The exposure evaluator was built despite the profile override");
+    advance(overridden, 30.0);
+    audit(overridden);
+    require(overridden.structure().paths.absorbedSolarJ > 0.0L,
+           "The profile override delivered no stellar energy through an eclipse");
+
+    // And the reverse: a profile at zero holds the hull dark through full
+    // daylight, where the same orbit alone would have baked it.
+    I noon(2, 2);
+    noon.setHullType(I::HullType::BareSkin);
+    noon.setOrbit(O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo});
+    const auto noonGeometry = expandCellAtmosphere(noon);
+    CellAtmosphereTransport sunlit(noonGeometry);
+    advance(sunlit, 30.0);
+    require(sunlit.structure().paths.absorbedSolarJ > 0.0L,
+           "The unoverridden noon Orbit delivered no stellar energy");
+    auto darkProfile = noonGeometry;
+    darkProfile.thermal.solarCycle = station::ProfileSettings{0.0};
+    CellAtmosphereTransport held(darkProfile);
+    require(held.solarCycleOverrides(), "A zero profile did not take the override");
+    advance(held, 30.0);
+    audit(held);
+    require(held.structure().paths.absorbedSolarJ == 0.0L,
+           "A zero profile did not hold the hull dark through daylight");
+
+    // The override is the legacy lumped application, so it is analytic:
+    // sum(alpha * area / 4) * irradiance * level, with no per-face cosine
+    // and no Planet shine. Assert that identity against the faces directly.
+    I profiled(2, 2);
+    profiled.setHullType(I::HullType::BareSkin);
+    profiled.setOrbit(O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo});
+    auto profiledGeometry = expandCellAtmosphere(profiled);
+    profiledGeometry.thermal.solarCycle = station::ProfileSettings{0.5};
+    CellAtmosphereTransport lumped(profiledGeometry);
+    advance(lumped, 10.0);
+    double lumpedWeight = 0.0;
+    for (const auto& face : lumped.exteriorSolarFaces())
+        lumpedWeight += face.absorptivity * face.areaM2 * 0.25;
+    const double expected = lumpedWeight * kFullSun * 0.5 * 10.0;
+    require(expected > 0.0 && std::abs(double(lumped.structure().paths.absorbedSolarJ) - expected) < 1e-6 * expected,
+           "The profile override did not follow the lumped alpha * area / 4 rule");
+    // The override leaves the sink bare: no Planet shine folded in, so a
+    // nadir face radiates toward the authored Deep-space sink and not the
+    // warm world the orbital model would have shown it.
+    require(lumped.exposureEvaluator().planetViewFactor({0.0, 0.0, -1.0}) == 0.0,
+           "Planet shine survived the profile override");
+
+    // The override is new code in the hot thermal loop, so it holds the
+    // same allocation-free contract as the orbital path.
+    require(lumped.advance(0.1), "Override warm-up step refused");
+    tracking = true;
+    const bool overrideAdvanced = lumped.advance(0.1);
+    tracking = false;
+    require(overrideAdvanced && allocations == 0,
+           "A profile-override thermal step allocated heap memory");
+
+    // And the same determinism contract: a second transport over the same
+    // authored profile, replayed to the same instant, lands on the same
+    // stellar energy.
+    CellAtmosphereTransport twin(profiledGeometry);
+    advance(twin, 10.0);
+    require(twin.advance(0.1) && twin.advance(0.1), "Override replay step refused");
+    require(twin.structure().paths.absorbedSolarJ == lumped.structure().paths.absorbedSolarJ,
+           "Two identical profile-override replays disagreed");
+    audit(twin);
 }
 
 void successfulStepsAllocateNothingAndRefusalsRestoreEverything() {
@@ -1154,6 +1259,7 @@ int main() {
         planetShineSoftensTheEclipseTrough();
         planetaryInfraredIsNotSolarAndTheAuditCloses();
         noOrbitKeepsTheSkyDark();
+        solarCycleOverridesTheOrbit();
         successfulStepsAllocateNothingAndRefusalsRestoreEverything();
         identicalTimeGivesIdenticalResults();
         anOpenDoorAdmitsNoDirectLight();
