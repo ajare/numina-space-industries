@@ -524,6 +524,22 @@ int runEditor() {
             if (ImGui::InputDouble("Planet albedo", &albedo, 0, 0, "%.3f"))
                 edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
                          next.albedo = albedo; session.setOrbit(next); });
+            // Beta: the angle between the star and the orbital plane. Zero
+            // is the coplanar worst-case eclipse; growing it shallows the
+            // shadow, lights the cross-track hull faces, and past the
+            // radius-dependent critical angle misses the orbit entirely.
+            double beta = orbit->betaAngleRad;
+            if (ImGui::InputDouble("Beta angle rad", &beta, 0, 0, "%.4f"))
+                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
+                         next.betaAngleRad = beta; session.setOrbit(next); });
+            // Slides the whole exposure profile along the orbit so a run
+            // can open part-way through an eclipse instead of always at
+            // Local noon. It moves when, never what: the eclipse keeps its
+            // size whatever is typed here.
+            double phaseOffset = orbit->phaseOffsetS;
+            if (ImGui::InputDouble("Phase offset s", &phaseOffset, 0, 0, "%.1f"))
+                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
+                         next.phaseOffsetS = phaseOffset; session.setOrbit(next); });
         }
         ImGui::EndDisabled();
         ImGui::EndDisabled();

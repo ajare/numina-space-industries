@@ -227,6 +227,34 @@ void orbitHistory() {
     check(session.installation().orbit()->albedo==0.0,"Albedo 0 was not authored");
     session.setOrbit(I::Orbit{1361.0,5570.0,6791000.0,1.0});
     check(session.installation().orbit()->albedo==1.0,"Albedo 1 was not authored");
+    // Beta and the phase offset ride the same command and the same undo
+    // discipline as the rest of the record.
+    const auto unshifted=session.installation().orbit();
+    const I::Orbit tilted{1361.0,5570.0,6791000.0,0.3,0.61,1234.5};
+    session.setOrbit(tilted);
+    check(session.installation().orbit()==tilted,"Beta and phase offset were not authored");
+    session.undo();
+    check(session.installation().orbit()==unshifted,"Undo did not restore the unshifted orbit");
+    session.redo();
+    check(session.installation().orbit()==tilted,"Redo did not restore the Beta and phase offset");
+    // A Beta the model cannot sweep, and a phase offset that is not a
+    // number of seconds, never reach the document.
+    const auto authored=session.installation();
+    const double nan=std::numeric_limits<double>::quiet_NaN();
+    const double inf=std::numeric_limits<double>::infinity();
+    for (const auto invalid : {I::Orbit{1361.0,5570.0,6791000.0,0.3,1.5707963267948966,0.0},
+                              I::Orbit{1361.0,5570.0,6791000.0,0.3,-1.58,0.0},
+                              I::Orbit{1361.0,5570.0,6791000.0,0.3,nan,0.0},
+                              I::Orbit{1361.0,5570.0,6791000.0,0.3,0.0,nan},
+                              I::Orbit{1361.0,5570.0,6791000.0,0.3,0.0,inf}}) {
+        bool refused=false;
+        try { session.setOrbit(invalid); } catch (const std::exception&) { refused=true; }
+        check(refused && session.installation()==authored,
+              "Invalid Beta or phase offset reached the document");
+    }
+    // A Beta just inside the pole is legal, however steep.
+    session.setOrbit(I::Orbit{1361.0,5570.0,6791000.0,0.3,1.5707,0.0});
+    check(session.installation().orbit()->betaAngleRad==1.5707,"A steep legal Beta was refused");
 }
 void history() {
     EditorSession session; session.newDocument(3,1);

@@ -278,6 +278,28 @@ void orbitPersistence() {
     // Both endpoints of the closed interval are legal and survive.
     I black(1,1); black.setOrbit(O{1361.0,5570.0,6791000.0,0.0}); roundTrip(black);
     I mirror(1,1); mirror.setOrbit(O{1361.0,5570.0,6791000.0,1.0}); roundTrip(mirror);
+    // Beta and the phase offset default to the coplanar star and Local noon
+    // at t = 0, and a non-default pair survives the round trip intact.
+    check(O{}.betaAngleRad==0.0 && O{}.phaseOffsetS==0.0,
+          "Beta and phase offset must default to coplanar and unshifted");
+    I tilted(1,1); tilted.setOrbit(O{1361.0,5570.0,6791000.0,0.3,0.61,1234.5}); roundTrip(tilted);
+    const auto tiltedNode=YAML::Load(tilted.serialize());
+    check(tiltedNode["orbit"]["betaAngleRad"].as<double>()==0.61,"Beta angle persisted");
+    check(tiltedNode["orbit"]["phaseOffsetS"].as<double>()==1234.5,"Phase offset persisted");
+    // A negative Beta and a negative offset are both legal: they shift the
+    // tilt and the clock the other way, not into a different model.
+    I mirrored(1,1); mirrored.setOrbit(O{1361.0,5570.0,6791000.0,0.3,-0.61,-1234.5});
+    roundTrip(mirrored);
+    check(YAML::Load(mirrored.serialize())["orbit"]["betaAngleRad"].as<double>()==-0.61,
+          "Negative Beta angle persisted");
+    check(YAML::Load(mirrored.serialize())["orbit"]["phaseOffsetS"].as<double>()==-1234.5,
+          "Negative phase offset persisted");
+    // Zero is a value, not an absence: an authored zero Beta - the
+    // worst-case eclipse - is written out rather than skipped.
+    check(YAML::Load(i.serialize())["orbit"].IsMap()
+              && YAML::Load(i.serialize())["orbit"]["betaAngleRad"].IsScalar()
+              && YAML::Load(i.serialize())["orbit"]["phaseOffsetS"].IsScalar(),
+          "Default Beta and phase offset must still be written");
     // Absent key loads as no orbit rather than a substituted default.
     auto bare=YAML::Load(i.serialize()); bare.remove("orbit");
     YAML::Emitter bareOut; bareOut<<bare;
@@ -286,7 +308,7 @@ void orbitPersistence() {
     // setOrbit refuses what the loader must refuse.
     const double nan=std::numeric_limits<double>::quiet_NaN();
     const double inf=std::numeric_limits<double>::infinity();
-    const std::array<O,12> invalid{
+    const std::array<O,20> invalid{
         O{nan,5570.0,6791000.0},O{inf,5570.0,6791000.0},
         O{0.0,5570.0,6791000.0},O{-1361.0,5570.0,6791000.0},
         O{1361.0,0.0,6791000.0},O{1361.0,-5570.0,6791000.0},
@@ -295,7 +317,19 @@ void orbitPersistence() {
         // Albedo is a fraction of the light that arrives: the closed
         // interval [0, 1] is the whole legal range.
         O{1361.0,5570.0,6791000.0,-0.1},O{1361.0,5570.0,6791000.0,1.1},
-        O{1361.0,5570.0,6791000.0,nan},O{1361.0,5570.0,6791000.0,inf}};
+        O{1361.0,5570.0,6791000.0,nan},O{1361.0,5570.0,6791000.0,inf},
+        // Beta is an angle between a direction and a plane: the open
+        // interval (-pi/2, pi/2). The pole itself leaves no sweep to make.
+        O{1361.0,5570.0,6791000.0,0.3,1.5707963267948966},
+        O{1361.0,5570.0,6791000.0,0.3,-1.5707963267948966},
+        O{1361.0,5570.0,6791000.0,0.3,1.58},
+        O{1361.0,5570.0,6791000.0,0.3,3.1416},
+        O{1361.0,5570.0,6791000.0,0.3,nan},
+        O{1361.0,5570.0,6791000.0,0.3,inf},
+        // The phase offset only shifts the cycle, so any finite value is
+        // legal - but not a non-finite one.
+        O{1361.0,5570.0,6791000.0,0.3,0.0,nan},
+        O{1361.0,5570.0,6791000.0,0.3,0.0,inf}};
     for (const auto& orbit:invalid) refused([&]{ i.setOrbit(orbit); });
     check(i.orbit()==iss,"Rejected setOrbit left the authored orbit intact");
     auto badOrbit=[&](auto change) {
@@ -324,6 +358,28 @@ void orbitPersistence() {
     badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]="92 minutes";});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::infinity();});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::quiet_NaN();});
+    // Beta and the phase offset are validated on the way in exactly as the
+    // rest of the record is.
+    badOrbit([](auto n){n["orbit"]["betaAngleRad"]=1.5707963267948966;});
+    badOrbit([](auto n){n["orbit"]["betaAngleRad"]=-1.58;});
+    badOrbit([](auto n){n["orbit"]["betaAngleRad"]=std::numeric_limits<double>::quiet_NaN();});
+    badOrbit([](auto n){n["orbit"]["betaAngleRad"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["betaAngleRad"]="steep";});
+    badOrbit([](auto n){n["orbit"]["phaseOffsetS"]=std::numeric_limits<double>::quiet_NaN();});
+    badOrbit([](auto n){n["orbit"]["phaseOffsetS"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["phaseOffsetS"]="half an orbit";});
+    // A document authored before Beta and the phase offset existed is not a
+    // partial record: absent means the documented default, which is the
+    // very behaviour that was current when it was written.
+    {
+        auto n=YAML::Load(i.serialize());
+        n["orbit"].remove("betaAngleRad"); n["orbit"].remove("phaseOffsetS");
+        YAML::Emitter out; out<<n;
+        I target; target.deserialize(out.c_str());
+        check(target.orbit().has_value() && target.orbit()->betaAngleRad==0.0
+                  && target.orbit()->phaseOffsetS==0.0,
+              "A pre-Beta orbit must load as coplanar and unshifted");
+    }
 }
 }
 int main() {

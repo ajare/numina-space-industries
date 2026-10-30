@@ -31,14 +31,13 @@ public:
     struct PartitionSpec { double transmittanceWPerM2K; };
     static PartitionSpec partitionSpec(PartitionType type);
     // The authored sky. Pure intensive authored data - irradiance, a period,
-    // a radius and a reflectivity - with no temperatures, no runtime
-    // inventories and no solver state, exactly as the Hull's radiative
-    // properties already are. The planet's rotation is deliberately absent:
-    // it drives neither eclipse nor exposure (ADR-0008). Its infrared
-    // temperature is likewise absent, because it is derived from irradiance
-    // and Albedo by energy balance rather than typed: a dimmer star then
-    // cools the planet on its own. Beta angle and phase offset arrive with
-    // their own slices; until then Beta is zero.
+    // a radius, a reflectivity, a Beta angle and a phase offset - with no
+    // temperatures, no runtime inventories and no solver state, exactly as
+    // the Hull's radiative properties already are. The planet's rotation is
+    // deliberately absent: it drives neither eclipse nor exposure
+    // (ADR-0008). Its infrared temperature is likewise absent, because it
+    // is derived from irradiance and Albedo by energy balance rather than
+    // typed: a dimmer star then cools the planet on its own.
     struct Orbit {
         double stellarIrradianceWPerM2{1361.0}; // Full Sun at Earth
         double orbitalPeriodS{5570.0};          // Inertial period about the planet
@@ -48,6 +47,22 @@ public:
         // the planet's infrared is derived from it by energy balance, so a
         // reflective world both throws back more sunlight and glows less.
         double albedo{0.3};
+        // Beta angle: the angle between the star's direction and the
+        // orbital plane, in radians, on the open interval (-pi/2, pi/2).
+        // Zero is coplanar - the deepest eclipse the model can hand out, so
+        // it is the default and the author relaxes it deliberately. Growing
+        // Beta both shallows the eclipse and tilts direct sunlight onto the
+        // cross-track hull faces; past the radius-dependent critical angle
+        // there is no eclipse at all. The pole itself is refused: a star
+        // sitting on the orbit normal leaves no in-plane sweep to make.
+        double betaAngleRad{0.0};
+        // Shifts the whole exposure profile along the orbit in seconds, so
+        // a run can open part-way through an eclipse instead of always at
+        // Local noon. It moves when things happen, never what happens: the
+        // eclipse fraction, the lit arc and every flux are untouched.
+        // Zero keeps t = 0 at Local noon. Any finite value is legal - the
+        // evaluator folds it into the cycle.
+        double phaseOffsetS{0.0};
         // Throws std::invalid_argument for numbers no sky can be built from.
         void validate() const;
         bool operator==(const Orbit&) const = default;

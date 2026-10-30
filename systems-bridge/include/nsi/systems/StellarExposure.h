@@ -28,26 +28,31 @@ struct StellarExposure {
 // See ADR-0008: the planet's rotation drives nothing, so it is not an input.
 class StellarExposureEvaluator {
 public:
-    // Beta is fixed at zero for this slice. The parameter keeps the geometry
-    // written as real geometry rather than a hard-coded coplanar sun, and
-    // defaults to the worst-case eclipse the model wants until Beta is
-    // authored in its own slice.
+    // Beta is authored on the Orbit record itself: the angle between the
+    // star and the orbital plane, in radians. It is what tilts a constant
+    // cross-track component of sin(beta) into the sun direction, shallows
+    // the eclipse, and decides whether there is any eclipse at all.
     // No authored Orbit: a dark sky that answers zero to every flux query,
     // including Planet shine, and leaves the Deep-space sink as it was given.
     StellarExposureEvaluator() noexcept = default;
-    explicit StellarExposureEvaluator(const core::Installation::Orbit& orbit,
-                                     double betaRadians = 0.0) noexcept;
+    explicit StellarExposureEvaluator(const core::Installation::Orbit& orbit) noexcept;
 
     // Dark means the authored numbers cannot produce a sky: every flux query
     // then answers zero.
     bool dark() const noexcept { return dark_; }
     double stellarIrradianceWPerM2() const noexcept { return irradianceWPerM2_; }
-    // Fraction of one Orbital period spent inside the planet's shadow. At
-    // Beta = 0 this is asin(Rp/r)/pi.
+    // Fraction of one Orbital period spent inside the planet's shadow. It
+    // depends on the radius and Beta alone, never on the phase offset: the
+    // offset moves the eclipse along the clock, it does not resize it.
     double eclipseFraction() const noexcept { return eclipseFraction_; }
+    // The authored Beta angle and phase offset, as the record carried them.
+    double betaAngleRadians() const noexcept { return betaRadians_; }
+    double phaseOffsetSeconds() const noexcept { return phaseOffsetSeconds_; }
 
-    // elapsedSeconds is simulated time since Local noon, which is t = 0 with
-    // the sunlit arc centred on it.
+    // elapsedSeconds is simulated time since Local noon, which is t = 0
+    // while the authored phase offset is zero. A non-zero offset shifts the
+    // whole profile: the exposure at elapsed t under an offset o is the
+    // exposure at t + o with no offset.
     StellarExposure evaluate(double elapsedSeconds) const noexcept;
 
     // Absorbed direct stellar flux in W/m^2 for one Structural surface with
@@ -55,6 +60,17 @@ public:
     // max(0, n . s) * alpha * irradiance * (1 - eclipse). Never negative: a
     // surface turned away from the star receives nothing, which is what
     // keeps at most half the hull lit.
+    //
+    // One gate rides on top of the cosine: a surface whose normal points
+    // below the local horizon (n.z < 0) receives nothing while the star is
+    // at or below that horizon. The planet is treated as filling the whole
+    // below-horizon sky for a surface that faces it, so the nadir-facing
+    // underside never takes direct sunlight at any Beta and Planet shine is
+    // the only external heat down there (ADR-0008). A real point element
+    // would still catch a grazing beam in the thin annulus just outside the
+    // planet's limb; this model deliberately collapses it, because an
+    // author reading their nadir hull as sunlit would be reading a lie
+    // about what the underside is ever exposed to.
     double directFluxWPerM2(const std::array<double, 3>& outwardNormal,
                             double absorptivity,
                             const StellarExposure& exposure) const noexcept;
@@ -101,13 +117,20 @@ private:
     double irradianceWPerM2_{};
     double periodSeconds_{};
     double albedo_{};
+    double betaRadians_{};
+    double phaseOffsetSeconds_{};
+    // The phase offset expressed in turns of the orbit and already folded
+    // into [0, 1), so evaluate() only has to fold the elapsed turns and
+    // add two numbers of order one.
+    double phaseTurns_{};
     double planetTemperatureK_{};
     // (Rp/r)^2, the view factor of a surface facing the planet outright.
     double planetViewScale_{};
     double eclipseFraction_{};
-    // Zenith cosine below which the star is hidden: -k, with
-    // k = sqrt(1 - (Rp/r)^2) / cos(beta). Below -1 the shadow is never
-    // reached and there is no eclipse at all.
+    // The zenith cosine below which the star is hidden: -sqrt(1 - (Rp/r)^2).
+    // A fixed property of the shadow cylinder and the orbit radius, not of
+    // Beta: Beta decides how far down the star ever gets, and therefore
+    // whether it ever reaches this line at all.
     double umbraZenithCosine_{-2.0};
     double sunCrossTrack_{};     // sin(beta), constant through the orbit
     double sunPlaneScale_{1.0};  // cos(beta), the in-plane share of the sweep

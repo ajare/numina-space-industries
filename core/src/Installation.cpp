@@ -392,6 +392,16 @@ void Installation::Orbit::validate() const {
     // mirror with no infrared left to emit.
     require(std::isfinite(albedo) && albedo >= 0.0 && albedo <= 1.0,
             "Orbit Albedo must be finite and within [0, 1]");
+    // Beta is an angle between a direction and a plane, so the open
+    // interval is the whole legal range. The endpoints are refused rather
+    // than clamped: a star parked on the orbit pole has no in-plane sweep
+    // left, and an angle beyond it is not a Beta angle at all.
+    constexpr double kHalfPi = 1.570796326794896619231846502829916183;
+    require(std::isfinite(betaAngleRad) && betaAngleRad > -kHalfPi && betaAngleRad < kHalfPi,
+            "Orbit Beta angle must be finite and within (-pi/2, pi/2)");
+    // The phase offset only ever shifts the cycle, so any finite number of
+    // seconds is meaningful: the evaluator folds it. Non-finite is not.
+    require(std::isfinite(phaseOffsetS), "Orbit phase offset must be finite");
 }
 void Installation::setOrbit(std::optional<Orbit> orbit) {
     if (orbit) orbit->validate();
@@ -471,6 +481,8 @@ std::string Installation::serialize() const {
         o["orbitalPeriodS"] = orbit_->orbitalPeriodS;
         o["radiusFromPlanetCentreM"] = orbit_->radiusFromPlanetCentreM;
         o["albedo"] = orbit_->albedo;
+        o["betaAngleRad"] = orbit_->betaAngleRad;
+        o["phaseOffsetS"] = orbit_->phaseOffsetS;
         root["orbit"] = o;
     }
     root["levels"]=YAML::Node(YAML::NodeType::Sequence);
@@ -558,6 +570,14 @@ void Installation::deserialize(const std::string& text) {
             o.orbitalPeriodS = number(on, "orbitalPeriodS");
             o.radiusFromPlanetCentreM = number(on, "radiusFromPlanetCentreM");
             o.albedo = number(on, "albedo");
+            // Beta and the phase offset were added to a record that already
+            // existed, so an authored Orbit written before them is not a
+            // partial record: absent means the documented default, which is
+            // a coplanar star (the worst-case eclipse) and Local noon at
+            // t = 0 - exactly the behaviour that was current when those
+            // documents were written. The keys are always written back out.
+            o.betaAngleRad = on["betaAngleRad"] ? on["betaAngleRad"].as<double>() : 0.0;
+            o.phaseOffsetS = on["phaseOffsetS"] ? on["phaseOffsetS"].as<double>() : 0.0;
             o.validate();
             orbit = o;
         }
