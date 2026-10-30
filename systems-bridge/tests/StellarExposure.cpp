@@ -26,6 +26,7 @@ constexpr double kSigma = 5.670374419e-8;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDegToRad = kPi / 180.0;
 constexpr double kHalfPi = 1.57079632679489661923;
+constexpr double kSecondsPerDay = 86400.0;
 // The source-slice cap is 0.1 s per whole call, so a long simulated hop has
 // to be walked rather than jumped.
 constexpr double kMaxHopSeconds = 300.0;
@@ -1233,6 +1234,82 @@ void authoredDocumentIsImmutable() {
     require(scene.serialize() == authored, "Playback mutated the authored document");
     require(scene.orbit() == orbit, "Playback changed the authored orbit");
 }
+
+// The readouts the Orbit summary is built from - durations, Ground drift
+// and the Geostationary condition - stay owned here rather than being
+// re-derived by whatever draws them.
+void summaryReadoutsTrackTheOrbit() {
+    const StellarExposureEvaluator low{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo}};
+    require(near(low.eclipseDurationSeconds() + low.sunlitDurationSeconds(), kIssPeriod, 1e-9),
+            "Eclipse and sunlit durations do not sum to the Orbital period");
+    require(near(low.eclipseDurationSeconds(), low.eclipseFraction() * kIssPeriod, 1e-12),
+            "Eclipse duration is not the eclipse fraction over the Orbital period");
+    // The spec's reference table: 35.9 min of eclipse for an ISS-like
+    // orbit at Beta = 0.
+    require(near(low.eclipseDurationSeconds() / 60.0, 35.9, 0.2),
+            "ISS-like eclipse duration left the reference table");
+    require(near(low.groundDriftDegreesPerDay(),
+                 kSecondsPerDay * 360.0 * (1.0 / kIssPeriod - 1.0 / core::PlanetSiderealRotationS),
+                 1e-6),
+            "Ground drift is not the residue between the orbital and sidereal rates");
+    require(low.groundDriftDegreesPerDay() > 0.0, "an under-synchronous orbit did not drift east");
+    require(!low.geostationary(), "an ISS-like period read as Geostationary");
+    require(near(low.orbitalPeriodSeconds(), kIssPeriod, 1e-12)
+              && near(low.radiusFromPlanetCentreMeters(), kIssRadius, 1e-9),
+            "the evaluator will not report the authored period and radius");
+
+    const StellarExposureEvaluator held{O{kFullSun, core::PlanetSiderealRotationS, kGeoRadius,
+                                        kEarthAlbedo}};
+    require(held.geostationary(), "a sidereal Orbital period did not read as Geostationary");
+    require(near(held.groundDriftDegreesPerDay(), 0.0, 1e-9),
+            "a Geostationary orbit still reported Ground drift");
+    // And the other row of the same table: 69.3 min of eclipse at
+    // geostationary, Beta = 0.
+    require(near(held.eclipseDurationSeconds() / 60.0, 69.3, 0.5),
+            "geostationary eclipse duration left the reference table");
+
+    // Either side of the match the condition goes, and the drift comes
+    // back with it.
+    for (double delta : {-0.1, 0.1, -1.0, 1.0}) {
+        const StellarExposureEvaluator off{O{kFullSun, core::PlanetSiderealRotationS + delta,
+                                           kGeoRadius, kEarthAlbedo}};
+        require(!off.geostationary(),
+                "the Geostationary condition survived a mismatched Orbital period");
+        require(std::abs(off.groundDriftDegreesPerDay()) > 1e-5,
+                "a period off the sidereal rotation still reported no drift");
+    }
+    // Past synchronous the residue changes sign: the ground outruns the
+    // Installation and its sub-point creeps west.
+    const StellarExposureEvaluator slow{O{kFullSun, core::PlanetSiderealRotationS * 1.5, kGeoRadius,
+                                        kEarthAlbedo}};
+    require(slow.groundDriftDegreesPerDay() < 0.0, "a super-synchronous orbit did not drift west");
+
+    // Beta shortens the eclipse the same way it shortens the fraction, and
+    // the pair still sums to the period. The phase offset moves the
+    // eclipse along the clock and never resizes it.
+    const StellarExposureEvaluator shallow{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.6}};
+    require(shallow.eclipseDurationSeconds() < low.eclipseDurationSeconds(),
+            "growing Beta did not shorten the eclipse duration");
+    require(near(shallow.eclipseDurationSeconds() + shallow.sunlitDurationSeconds(), kIssPeriod, 1e-9),
+            "a tilted orbit stopped summing to the Orbital period");
+    const StellarExposureEvaluator offset{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.6,
+                                          900.0}};
+    require(near(offset.eclipseDurationSeconds(), shallow.eclipseDurationSeconds(), 1e-12),
+            "the phase offset resized the eclipse duration instead of moving it");
+}
+
+// With no sky there is nothing to derive, and the answer is unavailable
+// rather than a zero that would read as a sunlit, driftless orbit.
+void aDarkEvaluatorDerivesNothing() {
+    const StellarExposureEvaluator dark;
+    require(dark.dark(), "a default-constructed evaluator should be dark");
+    require(std::isnan(dark.eclipseDurationSeconds()) && std::isnan(dark.sunlitDurationSeconds()),
+            "a dark evaluator invented eclipse or sunlit durations");
+    require(std::isnan(dark.groundDriftDegreesPerDay()), "a dark evaluator invented Ground drift");
+    require(std::isnan(dark.orbitalPeriodSeconds()) && std::isnan(dark.radiusFromPlanetCentreMeters()),
+            "a dark evaluator reported a period and radius it was never given");
+    require(!dark.geostationary(), "a dark evaluator claimed Geostationary");
+}
 }
 
 int main() {
@@ -1264,6 +1341,8 @@ int main() {
         identicalTimeGivesIdenticalResults();
         anOpenDoorAdmitsNoDirectLight();
         authoredDocumentIsImmutable();
+        summaryReadoutsTrackTheOrbit();
+        aDarkEvaluatorDerivesNothing();
         std::cout << "Stellar exposure and lit-hull heating passed\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

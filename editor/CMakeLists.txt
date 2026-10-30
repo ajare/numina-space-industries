@@ -107,6 +107,8 @@ add_executable(editor
     src/DeckGridWidget.cpp
     src/InstallationRenderControls.cpp
     src/GasInjectorControls.cpp
+    src/OrbitSummary.cpp
+    src/StellarExposureTrace.cpp
     src/SectorThermalPanel.cpp
     src/StructuralPanel.cpp
     src/SectorAtmospherePanel.cpp
@@ -148,11 +150,19 @@ add_custom_target(editor-font-assets
 add_dependencies(editor editor-font-assets)
 
 if(BUILD_TESTING)
-    add_executable(editor-structural-view-test tests/StructuralViewTest.cpp src/StructuralPanel.cpp)
+    add_executable(editor-structural-view-test tests/StructuralViewTest.cpp src/StructuralPanel.cpp src/StellarExposureTrace.cpp)
     target_link_libraries(editor-structural-view-test PRIVATE editor-simulation editor::implot)
     add_test(NAME editor-structural-view COMMAND editor-structural-view-test)
     set_tests_properties(editor-structural-view PROPERTIES
         LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
+    add_executable(editor-orbit-summary-test
+        tests/OrbitSummaryTest.cpp src/OrbitSummary.cpp src/StellarExposureTrace.cpp src/StructuralPanel.cpp)
+    target_link_libraries(editor-orbit-summary-test PRIVATE
+        editor-simulation editor::document editor::implot)
+    add_test(NAME editor-orbit-summary COMMAND editor-orbit-summary-test)
+    set_tests_properties(editor-orbit-summary PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 60)
 
     add_executable(editor-sector-node-view-test tests/SectorSystemsTest.cpp)
     target_link_libraries(editor-sector-node-view-test PRIVATE editor-sector-systems editor-simulation editor::document)
@@ -195,7 +205,7 @@ if(BUILD_TESTING)
     # evidence tooling, not part of the portable numerical/public API.
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_executable(editor-integrated-thermal-benchmark
-            tests/IntegratedThermalBenchmark.cpp src/StructuralPanel.cpp
+            tests/IntegratedThermalBenchmark.cpp src/StructuralPanel.cpp src/StellarExposureTrace.cpp
             src/SectorThermalPanel.cpp src/SectorAtmospherePanel.cpp src/SimulationTimingPanel.cpp)
         target_include_directories(editor-integrated-thermal-benchmark PRIVATE "${PROJECT_SOURCE_DIR}/systems-bridge/tests")
         target_link_libraries(editor-integrated-thermal-benchmark PRIVATE editor-simulation editor::implot)

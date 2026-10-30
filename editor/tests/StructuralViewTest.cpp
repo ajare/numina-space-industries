@@ -139,7 +139,7 @@ void ui() {
         ImGui::NewFrame();ImGui::SetNextWindowSize({1200,2200});ImGui::Begin("Structure inspector");
         drawStructuralPanel(p,{0,0,0},view);
         auto* plot=ImPlot::GetPlot("###StructuralHistory");
-        require(plot && plot->Items.GetLegendCount()==6,"Surface UI omitted directional/min/max histories");
+        require(plot && plot->Items.GetLegendCount()==7,"Surface UI omitted directional/min/max histories or the exposure trace");
         require(plot->Axes[ImAxis_X1].Range.Max==60,"History axis not simulation-time window");
         ImGui::End();ImGui::Render();require(ImGui::GetDrawData()->TotalVtxCount>0,"Structural UI failed render");
     }

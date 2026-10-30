@@ -16,6 +16,14 @@ constexpr double kStefanBoltzmannWPerM2K4 = 5.670374419e-8;
 // past it the in-plane share of the sweep is too small to divide by.
 constexpr double kHalfPi = 1.570796326794896619231846502829916183;
 constexpr double kMinCosBeta = 1e-9;
+// The Geostationary match tolerance, relative to the planet's sidereal
+// rotation. Tight enough that no author can type their way into the badge
+// by rounding: a tenth of a second off an Earth-sidereal period is over a
+// thousand times the tolerance, while the constant itself survives a
+// document round trip bit for bit.
+constexpr double kGeostationaryTolerance = 1e-9;
+constexpr double kDegreesPerTurn = 360.0;
+constexpr double kSecondsPerDay = 86400.0;
 // A turn is a whole cycle; folding into [0, 1) keeps every phase argument
 // small without ever wrapping a negative into a positive by accident.
 inline double fractionalTurns(double turns) noexcept {
@@ -46,6 +54,7 @@ StellarExposureEvaluator::StellarExposureEvaluator(
 
     irradianceWPerM2_ = orbit.stellarIrradianceWPerM2;
     periodSeconds_ = orbit.orbitalPeriodS;
+    radiusMeters_ = orbit.radiusFromPlanetCentreM;
     albedo_ = orbit.albedo;
     betaRadians_ = beta;
     phaseOffsetSeconds_ = orbit.phaseOffsetS;
@@ -115,6 +124,25 @@ StellarExposure StellarExposureEvaluator::evaluate(double elapsedSeconds) const 
     exposure.eclipse = exposure.sunDirection[2] < umbraZenithCosine_ ? 1.0 : 0.0;
     exposure.sunlit = exposure.eclipse == 0.0;
     return exposure;
+}
+
+double StellarExposureEvaluator::groundDriftDegreesPerDay() const noexcept {
+    if (dark_) return kUnavailable;
+    // Two angular rates over the same axis: the sub-point is carried east by
+    // the orbit at 360 degrees per Orbital period, and the surface carries
+    // it back west at 360 degrees per sidereal rotation. The residue is
+    // the drift an observer on the ground would measure, and it is exactly
+    // zero when the two periods match - which is why the badge and this
+    // number are shown together. Nothing in the thermal model reads either
+    // rate: ADR-0008 puts the planet's rotation outside it entirely.
+    return kDegreesPerTurn * kSecondsPerDay
+         * (1.0 / periodSeconds_ - 1.0 / core::PlanetSiderealRotationS);
+}
+
+bool StellarExposureEvaluator::geostationary() const noexcept {
+    if (dark_) return false;
+    return std::abs(periodSeconds_ - core::PlanetSiderealRotationS)
+         <= kGeostationaryTolerance * core::PlanetSiderealRotationS;
 }
 
 double StellarExposureEvaluator::directFluxWPerM2(const std::array<double, 3>& outwardNormal,

@@ -1,4 +1,5 @@
 #include "StructuralPanel.h"
+#include "StellarExposureTrace.h"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
@@ -80,6 +81,11 @@ void drawStructuralPanel(const SimulationPlayback& playback,nsi::systems::Struct
             ImPlot::SetupAxes("Simulation time (s)","Surface temperature (C)",0,ImPlotAxisFlags_AutoFit);
             const double now=history.back().seconds;
             ImPlot::SetupAxisLimits(ImAxis_X1,std::max(0.0,now-60),std::max(60.0,now),ImGuiCond_Always);
+            // The sky rides its own axis. Exposure is a 0..1 fraction, so on
+            // the temperature scale it would either flatten to a straight
+            // line or flatten the hull curves with it.
+            ImPlot::SetupAxis(ImAxis_Y2,"Stellar exposure",ImPlotAxisFlags_AuxDefault);
+            ImPlot::SetupAxisLimits(ImAxis_Y2,0.0,1.0,ImGuiCond_Always);
             struct Series {std::span<const StructuralSample> samples;double StructuralSample::*field;};
             auto plot=[&](const char* name,double StructuralSample::*field) {
                 Series series{history,field};
@@ -88,9 +94,12 @@ void drawStructuralPanel(const SimulationPlayback& playback,nsi::systems::Struct
             plot("Area mean",&StructuralSample::meanC);plot("Floor",&StructuralSample::floorC);
             plot("Ceiling",&StructuralSample::ceilingC);plot("Sides",&StructuralSample::sidesC);
             plot("Minimum",&StructuralSample::minimumC);plot("Maximum",&StructuralSample::maximumC);
+            drawStellarExposureTrace(playback.exposureHistory(),
+                exposureTraceLabel(state.modelRevision,state.presetRevision));
             ImPlot::EndPlot();
         }
         ImGui::TextWrapped("History is the selected Sector's exposed surfaces, independent of Cell selection; unavailable measurements are gaps. Pausing/refusal adds no samples; Reset clears history.");
+        ImGui::TextWrapped("Shaded bands are Eclipse and the stepped line is Stellar exposure on the right axis, both read from the evaluator the hull is actually under; a gap means no orbital sky, not a zero.");
     }
     ImGui::TextWrapped("Radiation: visibility-free diffuse well-mixed Sector cavity approximation. Door leaves use binary poses: open surfaces park at a deterministic Interior endpoint; no hinge simulation. Apertures use clear area, not gas Cd.");
     if (ImGui::InputInt("Surface page (16 per page)",&view.page)) {view.page=std::max(0,view.page);view.surface=0;}

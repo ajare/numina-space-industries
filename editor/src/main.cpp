@@ -22,6 +22,7 @@
 #include "EditorEvents.h"
 #include "DeckGridWidget.h"
 #include "NativeFileDialogs.h"
+#include "OrbitSummary.h"
 #include "SimulationPlayback.h"
 #include "SectorSystemsView.h"
 #include "SectorThermalPanel.h"
@@ -543,6 +544,11 @@ int runEditor() {
         }
         ImGui::EndDisabled();
         ImGui::EndDisabled();
+        // The environment read back beside the numbers that made it, drawn
+        // outside the edit lock so it stays legible through a run. Derived
+        // values come off the evaluator the hull is actually under.
+        station::editor::drawOrbitSummary(session.installation(),
+            simulation.runtime() ? &simulation.runtime()->model() : nullptr);
         const auto level_label="Level "+std::to_string(active_level);
         if (ImGui::BeginCombo("Level",level_label.c_str())) {
             for (std::size_t l=0;l<session.installation().levelCount();++l) {

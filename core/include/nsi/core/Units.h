@@ -26,4 +26,12 @@ inline constexpr double CellVolumeM3{CellAreaM2 * LevelHeightM};
 // ground) and sets how much of the sky the planet fills. Earth-like.
 inline constexpr double PlanetRadiusM{6371000.0};
 
+// The same world's sidereal rotation period in seconds, Earth-like. ADR-0008
+// settles that the planet's rotation drives nothing in the thermal model:
+// the shadow cylinder is fixed in the inertial frame, so this is
+// deliberately not an authored input and no thermal quantity may read it.
+// It exists for one purpose, the author-facing derived readouts that cannot
+// be stated without it - the Geostationary condition and Ground drift.
+inline constexpr double PlanetSiderealRotationS{86164.0};
+
 } // namespace nsi::core

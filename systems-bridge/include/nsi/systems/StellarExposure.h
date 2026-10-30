@@ -3,6 +3,7 @@
 #include <nsi/core/Installation.h>
 #include <nsi/core/Units.h>
 #include <array>
+#include <limits>
 
 namespace nsi::systems {
 
@@ -48,6 +49,41 @@ public:
     // The authored Beta angle and phase offset, as the record carried them.
     double betaAngleRadians() const noexcept { return betaRadians_; }
     double phaseOffsetSeconds() const noexcept { return phaseOffsetSeconds_; }
+    // The authored Orbital period and orbital radius, as the record carried
+    // them. Unavailable with no sky, so a summary cannot print a period of
+    // zero for an Installation that has no orbit at all.
+    double orbitalPeriodSeconds() const noexcept { return dark_ ? kUnavailable : periodSeconds_; }
+    double radiusFromPlanetCentreMeters() const noexcept {
+        return dark_ ? kUnavailable : radiusMeters_;
+    }
+
+    // How much of one orbit the sky spends in each half, in seconds. Both
+    // come from the eclipse fraction times the Orbital period, so they always
+    // sum to the period and neither needs the phase offset: the offset moves
+    // the eclipse along the clock, it never resizes it.
+    double eclipseDurationSeconds() const noexcept {
+        return dark_ ? kUnavailable : eclipseFraction_ * periodSeconds_;
+    }
+    double sunlitDurationSeconds() const noexcept {
+        return dark_ ? kUnavailable : periodSeconds_ - eclipseFraction_ * periodSeconds_;
+    }
+
+    // Ground drift: the apparent motion of the Installation's sub-point
+    // across the surface, degrees per day. The sub-point rides with the
+    // Installation at 360 degrees per Orbital period while the ground turns
+    // beneath it at 360 degrees per sidereal rotation; the residue is what
+    // an author on the surface would watch. Positive means the Installation
+    // outruns the surface and its sub-point creeps east, negative means the
+    // surface outruns it. Exactly zero at Geostationary, which is the only
+    // reason to show it. This is a readout, not a thermal input: ADR-0008
+    // keeps the planet's rotation out of the exposure model entirely.
+    double groundDriftDegreesPerDay() const noexcept;
+
+    // The Geostationary condition: Orbital period equal to the planet's
+    // sidereal rotation. A displayed condition and never a mode - it gates
+    // nothing, changes nothing, and disappears the moment the two periods
+    // part.
+    bool geostationary() const noexcept;
 
     // elapsedSeconds is simulated time since Local noon, which is t = 0
     // while the authored phase offset is zero. A non-zero offset shifts the
@@ -114,8 +150,15 @@ public:
     double effectiveSinkTemperatureK(double spaceTemperatureK, double viewFactor) const noexcept;
 
 private:
+    // What a derived quantity answers when there is no sky to derive it
+    // from. Never zero: a zero eclipse duration would read as a permanently
+    // sunlit orbit and a zero drift as Geostationary, both of which are
+    // claims about a world this Installation has not authored.
+    static constexpr double kUnavailable = std::numeric_limits<double>::quiet_NaN();
+
     double irradianceWPerM2_{};
     double periodSeconds_{};
+    double radiusMeters_{};
     double albedo_{};
     double betaRadians_{};
     double phaseOffsetSeconds_{};

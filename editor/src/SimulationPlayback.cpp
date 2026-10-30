@@ -16,6 +16,7 @@ void SimulationPlayback::synchronize(const nsi::core::Installation* installation
         structuralHistory_.clear();
         pressureHistory_.clear();
         atmosphereHistory_.clear();
+        exposureHistory_.clear();
         source_.reset();
         remainder_ = 0;pendingStepSeconds_.reset();pendingInjection_.reset();injected_=false;
     } else if (!source_ || *source_ != *installation) reset(*installation);
@@ -29,6 +30,7 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     structuralHistory_.clear();
     pressureHistory_.clear();
     atmosphereHistory_.clear();
+    exposureHistory_.clear();
     source_ = installation;
     remainder_ = 0;pendingStepSeconds_.reset();pendingInjection_.reset();injected_=false;
     runtime_=std::make_unique<CellPlaybackRuntime>(installation,observationOptions_,lifecycleSource_);
@@ -96,6 +98,18 @@ void SimulationPlayback::recordAtmosphereHistory(bool instantaneous) {
     const auto& structure=runtime_->structuralSnapshot();
     if (structure.enabled) for (std::size_t cavity=0;cavity<structure.cavities;++cavity)
         record(structuralHistory_[cavity],structuralSample(structure.observedSeconds,runtime_->structuralSector(cavity)));
+    // The sky the transport is actually under, sampled at the same
+    // committed instant as the hull temperatures it will be read against.
+    // No authored Orbit, or a hand-authored solar profile that owns the
+    // whole stellar term, leaves no orbital exposure to report: NaN draws
+    // a gap instead of inventing an eclipse nobody authored.
+    const auto& transport=runtime_->model();
+    const auto& evaluator=transport.exposureEvaluator();
+    const double observed=structure.enabled ? structure.observedSeconds : snapshot.elapsedSeconds;
+    record(exposureHistory_,ExposureSample{observed,
+        evaluator.dark() || transport.solarCycleOverrides()
+            ? std::numeric_limits<double>::quiet_NaN()
+            : 1.0-evaluator.evaluate(observed).eclipse});
     for (const auto& air : snapshot.atmospheres) {
         record(temperatureHistory_[air.id],TemperatureSample{snapshot.elapsedSeconds,
             air.spatial && !air.resolvedGas ? std::numeric_limits<double>::quiet_NaN() : air.temperatureC});

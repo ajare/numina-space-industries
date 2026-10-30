@@ -3,6 +3,7 @@
 #include "TemperatureSample.h"
 #include "StructuralView.h"
 #include "PressureSample.h"
+#include "ExposureSample.h"
 #include "SectorAtmosphere.h"
 #include <nsi/core/Installation.h>
 #include "CellPlaybackRuntime.h"
@@ -54,6 +55,10 @@ public:
     std::span<const TemperatureSample> temperatureHistory(const std::string& atmosphereId) const;
     std::span<const PressureSample> pressureHistory(const std::string& atmosphereId) const;
     std::span<const AtmosphereSample> atmosphereHistory(const std::string& atmosphereId) const;
+    // The committed Stellar exposure trace, one sample per committed
+    // observation and shared by every Sector because the sky is one thing.
+    // NaN where no orbital sky is available, which renders as a gap.
+    std::span<const ExposureSample> exposureHistory() const noexcept { return exposureHistory_; }
 private:
     void recordAtmosphereHistory(bool instantaneous=false);
     struct DoorState { bool open=false; };
@@ -62,6 +67,7 @@ private:
     std::map<std::string, std::vector<TemperatureSample>> temperatureHistory_;
     std::map<std::string, std::vector<PressureSample>> pressureHistory_;
     std::map<std::string, std::vector<AtmosphereSample>> atmosphereHistory_;
+    std::vector<ExposureSample> exposureHistory_;
     static constexpr double historySeconds = 60.0;
     static constexpr double historySampleIntervalSeconds = 0.1;
     static constexpr double updateIntervalSeconds = 0.1;
