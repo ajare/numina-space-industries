@@ -386,23 +386,31 @@ void Installation::Orbit::validate() const {
             "Orbit Stellar irradiance must be finite and within (0, 1e100] W/m^2");
     require(std::isfinite(orbitalPeriodS) && orbitalPeriodS > 0.0,
             "Orbit Orbital period must be finite and positive");
-    require(std::isfinite(radiusFromPlanetCentreM) && radiusFromPlanetCentreM > PlanetRadiusM,
+    // The world is authored now, so the ground a Hull cannot be inside of
+    // is the authored one rather than a constant. Checked first: with a
+    // non-finite world radius the ordering test below would fail for the
+    // wrong reason and blame the orbit.
+    require(std::isfinite(planetRadiusM) && planetRadiusM > 0.0,
+            "Orbit planet radius must be finite and positive");
+    require(std::isfinite(radiusFromPlanetCentreM) && radiusFromPlanetCentreM > planetRadiusM,
             "Orbit radius must be finite and greater than the planet radius");
     // A reflectivity is a fraction of the light that arrives, so the closed
     // interval is the whole legal range: 0 is a black world, 1 a perfect
     // mirror with no infrared left to emit.
     require(std::isfinite(albedo) && albedo >= 0.0 && albedo <= 1.0,
             "Orbit Albedo must be finite and within [0, 1]");
-    // Beta is an angle between a direction and a plane, so the open
-    // interval is the whole legal range. The endpoints are refused rather
-    // than clamped: a star parked on the orbit pole has no in-plane sweep
-    // left, and an angle beyond it is not a Beta angle at all.
-    constexpr double kHalfPi = 1.570796326794896619231846502829916183;
-    require(std::isfinite(betaAngleRad) && betaAngleRad > -kHalfPi && betaAngleRad < kHalfPi,
-            "Orbit Beta angle must be finite and within (-pi/2, pi/2)");
+    // Axial tilt is an angle, so the open interval is the whole legal
+    // range. The endpoints are refused rather than clamped: a star parked on
+    // the orbit pole has no in-plane sweep left, and an angle beyond it is
+    // not a tilt at all.
+    require(std::isfinite(axialTiltDeg) && axialTiltDeg > -MaxAxialTiltDegrees
+                && axialTiltDeg < MaxAxialTiltDegrees,
+            "Orbit Axial tilt must be finite and within (-90, 90) degrees");
     // The phase offset only ever shifts the cycle, so any finite number of
     // seconds is meaningful: the evaluator folds it. Non-finite is not.
-    require(std::isfinite(phaseOffsetS), "Orbit phase offset must be finite");
+    // The phase offset is only a position on the cycle, so any finite
+    // percentage is meaningful: the evaluator folds it. Non-finite is not.
+    require(std::isfinite(phaseOffsetPercent), "Orbit phase offset must be finite");
 }
 void Installation::setOrbit(std::optional<Orbit> orbit) {
     if (orbit) orbit->validate();
@@ -482,8 +490,9 @@ std::string Installation::serialize() const {
         o["orbitalPeriodS"] = orbit_->orbitalPeriodS;
         o["radiusFromPlanetCentreM"] = orbit_->radiusFromPlanetCentreM;
         o["albedo"] = orbit_->albedo;
-        o["betaAngleRad"] = orbit_->betaAngleRad;
-        o["phaseOffsetS"] = orbit_->phaseOffsetS;
+        o["axialTiltDeg"] = orbit_->axialTiltDeg;
+        o["phaseOffsetPercent"] = orbit_->phaseOffsetPercent;
+        o["planetRadiusM"] = orbit_->planetRadiusM;
         root["orbit"] = o;
     }
     root["levels"]=YAML::Node(YAML::NodeType::Sequence);
@@ -571,14 +580,31 @@ void Installation::deserialize(const std::string& text) {
             o.orbitalPeriodS = number(on, "orbitalPeriodS");
             o.radiusFromPlanetCentreM = number(on, "radiusFromPlanetCentreM");
             o.albedo = number(on, "albedo");
-            // Beta and the phase offset were added to a record that already
-            // existed, so an authored Orbit written before them is not a
-            // partial record: absent means the documented default, which is
-            // a coplanar star (the worst-case eclipse) and Local noon at
-            // t = 0 - exactly the behaviour that was current when those
-            // documents were written. The keys are always written back out.
-            o.betaAngleRad = on["betaAngleRad"] ? on["betaAngleRad"].as<double>() : 0.0;
-            o.phaseOffsetS = on["phaseOffsetS"] ? on["phaseOffsetS"].as<double>() : 0.0;
+            // The tilt and the phase offset were added to a record that
+            // already existed, so an authored Orbit written before them is
+            // not a partial record: absent means the documented default,
+            // which is no tilt - the star over the equator, the worst-case
+            // eclipse - and Local noon at t = 0, exactly the behaviour that
+            // was current when those documents were written. The keys are
+            // always written back out. The tilt was first authored as a
+            // Beta angle in radians; that key is refused rather than read
+            // as no tilt, so a stale save cannot quietly re-tune the sky.
+            require(!on["betaAngleRad"],
+                    "Orbit betaAngleRad is no longer supported: author axialTiltDeg in degrees");
+            // Likewise the phase offset was first authored as raw seconds.
+            // Refused rather than read as a percentage, which would put the
+            // run somewhere else in the cycle than the author wrote.
+            require(!on["phaseOffsetS"],
+                    "Orbit phaseOffsetS is no longer supported: author phaseOffsetPercent "
+                    "as a percentage of the Orbital period");
+            o.axialTiltDeg = on["axialTiltDeg"] ? on["axialTiltDeg"].as<double>() : 0.0;
+            o.phaseOffsetPercent = on["phaseOffsetPercent"] ? on["phaseOffsetPercent"].as<double>() : 0.0;
+            // Absent means Earth, which is the world every document written
+            // before this field existed was actually about. Not a
+            // substitute: the truth about those records, stated as the
+            // default so they load unchanged.
+            o.planetRadiusM = on["planetRadiusM"] ? on["planetRadiusM"].as<double>()
+                                                 : PlanetRadiusM;
             o.validate();
             orbit = o;
         }

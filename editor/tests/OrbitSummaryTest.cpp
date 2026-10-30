@@ -56,12 +56,13 @@ I sceneWith(const std::optional<O>& orbit) {
 // than just the labels or the unformatted summary fields.
 void summaryFormatsNumericValues() {
     const auto lines = orbitSummaryLines(orbitSummary(I(2, 2)));
-    const std::array<std::string_view, 8> expected{
+    const std::array<std::string_view, 9> expected{
         "Stellar irradiance  1361.0 W/m^2",
         "Orbital period  5570.0 s (92.8 min)",
         "Orbital radius  6791000 m (6791 km)",
-        "Beta angle  0.0000 rad (0.0 deg)",
-        "Phase offset  0.0 s",
+        "Axial tilt  +0.00 deg",
+        "Planet radius  6371000 m (6371 km)",
+        "Phase offset  0.0 deg of orbit (0.0 s)",
         "Albedo  0.300",
         "Eclipse duration  2158.2 s (36.0 min)",
         "Sunlit duration  3411.8 s (56.9 min)"};
@@ -71,12 +72,12 @@ void summaryFormatsNumericValues() {
         require(found, std::string("incorrect formatted reading: ").append(text).c_str());
     }
 
-    // A nonzero, signed Beta angle catches a missing radians-to-degrees
-    // conversion that the zero default cannot expose. This sky has no eclipse.
+    // A nonzero, signed tilt catches a sign or formatting slip the zero
+    // default cannot expose. This sky is past its shadow either way.
     const auto tilted = orbitSummaryLines(orbitSummary(
-        sceneWith(O{1361.0, 6000.0, 42164000.0, 0.3, -0.5, 120.0})));
-    require(hasLine(tilted, "Beta angle  -0.5000 rad (-28.6 deg)"),
-            "nonzero Beta angle was not converted to degrees");
+        sceneWith(O{1361.0, 6000.0, 42164000.0, 0.3, -23.44, 120.0})));
+    require(hasLine(tilted, "Axial tilt  -23.44 deg"),
+            "a nonzero signed axial tilt was not read out as authored");
     require(hasLine(tilted, "Eclipse duration  0.0 s (0.0 min)"),
             "zero eclipse duration was not formatted correctly");
     require(hasLine(tilted, "Sunlit duration  6000.0 s (100.0 min)"),
@@ -85,30 +86,74 @@ void summaryFormatsNumericValues() {
     auto unavailable = orbitSummary(I(2, 2));
     unavailable.orbitalPeriodS = kNaN;
     unavailable.radiusFromPlanetCentreM = std::numeric_limits<double>::infinity();
-    unavailable.betaAngleRad = -std::numeric_limits<double>::infinity();
+    unavailable.axialTiltDeg = -std::numeric_limits<double>::infinity();
     unavailable.eclipseDurationS = kNaN;
     const auto gaps = orbitSummaryLines(unavailable);
     require(hasLine(gaps, "Orbital period  unavailable")
                 && hasLine(gaps, "Orbital radius  unavailable")
-                && hasLine(gaps, "Beta angle  unavailable"),
+                && hasLine(gaps, "Axial tilt  unavailable"),
             "nonfinite authored values were formatted as numbers");
     require(hasLine(gaps, "Derived values unavailable")
                 && !hasLine(gaps, "Eclipse duration") && !hasLine(gaps, "Sunlit duration"),
             "unavailable durations were formatted as numbers");
 }
 
+// The slider speaks degrees and the document speaks a percentage of the
+// Orbital period, and the two have to land on the same point of the cycle
+// however the author wound it. Folding is what makes 370 deg and 10 deg
+// the same start; a round trip through the slider must not drift.
+void phaseAngleFoldsRoundTheCycle() {
+    // The four cardinal points, exact in both directions.
+    const std::array<std::pair<double, double>, 4> cardinal{
+        {{0.0, 0.0}, {25.0, 90.0}, {50.0, 180.0}, {75.0, 270.0}}};
+    for (const auto& [percent, degrees] : cardinal) {
+        require(phaseAngleFromOffsetPercent(percent) == degrees,
+                "a cardinal phase offset did not read as its slider angle");
+        require(offsetPercentFromPhaseAngle(degrees) == percent,
+                "a slider angle did not write back as the authored percentage");
+    }
+    // Whole turns, and turns travelled backwards, land where the folded
+    // value does: the cycle has no seam to fall out of. The sum is taken
+    // in double before the fold sees it, so what arrives is already a hair
+    // off the value it was built from - the fold is exact, the addition is
+    // not - which is why these ask for near rather than equality.
+    for (const double percent : {10.0, 33.333333333333336, 99.999}) {
+        const double angle = phaseAngleFromOffsetPercent(percent);
+        require(angle >= 0.0 && angle < 360.0, "a folded phase angle left the slider");
+        require(offsetPercentFromPhaseAngle(angle) == percent,
+                "a round trip through the slider drifted off the authored phase");
+        require(near(phaseAngleFromOffsetPercent(percent + 100.0), angle, 1e-9),
+                "a whole extra turn of phase offset read as a different start");
+        require(near(phaseAngleFromOffsetPercent(percent - 100.0), angle, 1e-9),
+                "a whole turn travelled backwards read as a different start");
+        require(near(offsetPercentFromPhaseAngle(angle + 360.0),
+                    offsetPercentFromPhaseAngle(angle), 1e-9),
+                "a whole extra turn on the slider wrote a different phase");
+    }
+    // Winding the slider backwards folds forward instead of off the end.
+    require(phaseAngleFromOffsetPercent(-25.0) == 270.0,
+            "a negative phase offset did not fold forward");
+    require(offsetPercentFromPhaseAngle(-90.0) == 75.0,
+            "a slider angle turned backwards did not fold forward");
+    // A value with no angle in it says so rather than claiming Local noon.
+    require(std::isnan(phaseAngleFromOffsetPercent(kNaN)),
+            "a non-finite phase offset read as an angle");
+    require(std::isnan(offsetPercentFromPhaseAngle(kNaN)),
+            "a non-finite dial angle wrote a phase offset");
+}
+
 // The authored numbers sit beside the derived ones, and every derived one
 // is the evaluator's own rather than a second opinion.
 void summaryShowsAuthoredBesideDerived() {
-    const O orbit{1361.0, 5570.0, 6791000.0, 0.3, 0.25, 120.0};
+    const O orbit{1361.0, 5570.0, 6791000.0, 0.3, 12.5, 2.0};
     const auto scene = sceneWith(orbit);
     const auto summary = orbitSummary(scene);
     require(summary.authored && !summary.overridden, "an authored orbit was not reported as authored");
     require(summary.stellarIrradianceWPerM2 == 1361.0, "authored Stellar irradiance lost");
     require(summary.orbitalPeriodS == 5570.0, "authored Orbital period lost");
     require(summary.radiusFromPlanetCentreM == 6791000.0, "authored orbital radius lost");
-    require(summary.betaAngleRad == 0.25, "authored Beta angle lost");
-    require(summary.phaseOffsetS == 120.0, "authored phase offset lost");
+    require(summary.axialTiltDeg == 12.5, "authored axial tilt lost");
+    require(summary.phaseOffsetPercent == 2.0, "authored phase offset lost");
     require(summary.albedo == 0.3, "authored Albedo lost");
 
     const nsi::systems::StellarExposureEvaluator evaluator(orbit);
@@ -126,8 +171,9 @@ void summaryShowsAuthoredBesideDerived() {
     require(!summary.geostationary, "an ISS-like period claimed Geostationary");
 
     const auto lines = orbitSummaryLines(summary);
-    const std::array<std::string_view, 9> labels{"Stellar irradiance", "Orbital period",
-                                               "Orbital radius", "Beta angle", "Phase offset",
+    const std::array<std::string_view, 10> labels{"Stellar irradiance", "Orbital period",
+                                               "Orbital radius", "Axial tilt", "Planet radius",
+                                               "Phase offset",
                                                "Albedo", "Eclipse duration", "Sunlit duration",
                                                "Ground drift"};
     for (const auto& label : labels)
@@ -196,15 +242,26 @@ void derivedValuesFollowEveryEdit() {
     session.setOrbit(O{1361.0, 6000.0, 42164000.0, 0.3, 0.5});
     const auto tilted = orbitSummary(session.installation());
     require(tilted.eclipseDurationS < slower.eclipseDurationS,
-            "growing Beta did not shorten the eclipse");
+            "growing the axial tilt did not shorten the eclipse");
     require(near(tilted.groundDriftDegPerDay, slower.groundDriftDegPerDay, 1e-9),
-            "a Beta edit moved Ground drift");
+            "an axial tilt edit moved Ground drift");
 
-    session.setOrbit(O{1361.0, 6000.0, 42164000.0, 0.3, 0.5, 900.0});
+    session.setOrbit(O{1361.0, 6000.0, 42164000.0, 0.3, 0.5, 15.0});
     const auto shifted = orbitSummary(session.installation());
-    require(shifted.phaseOffsetS == 900.0, "phase offset edit not read back");
+    require(shifted.phaseOffsetPercent == 15.0, "phase offset edit not read back");
     require(near(shifted.eclipseDurationS, tilted.eclipseDurationS, 1e-12),
             "the phase offset resized the eclipse instead of moving it");
+
+    // Swapping the world swaps the sky. The authored radius is the shadow
+    // cylinder, so a Jovian world at the same altitude is eclipsed far
+    // more of the time, and the summary reads the new ground out too.
+    session.setOrbit(O{50.3, 6000.0, 69911000.0 + 420000.0, 0.503, 3.1, 0.0, 69911000.0});
+    const auto jovian = orbitSummary(session.installation());
+    require(jovian.planetRadiusM == 69911000.0, "a world radius edit was not read back");
+    require(jovian.eclipseDurationS > shifted.eclipseDurationS * 1.2,
+            "a world eleven times wider did not lengthen the eclipse");
+    require(hasLine(orbitSummaryLines(jovian), "Planet radius  69911000 m (69911 km)"),
+            "the Jovian world radius was not read out");
 
     session.setOrbit(O{1361.0, core::PlanetSiderealRotationS, 42164000.0, 0.3, 0.0, 0.0});
     const auto synchronous = orbitSummary(session.installation());
@@ -273,7 +330,7 @@ void traceMatchesThePublishedEvaluator() {
 void tracePreservesPartialPenumbra() {
     O orbit{1361.0, 5570.0, 6791000.0};
     const nsi::systems::StellarExposureEvaluator evaluator(orbit);
-    orbit.phaseOffsetS = orbit.orbitalPeriodS * (0.5 - evaluator.eclipseFraction() / 2.0);
+    orbit.phaseOffsetPercent = (0.5 - evaluator.eclipseFraction() / 2.0) * 100.0;
     SimulationPlayback playback(std::nullopt);
     playback.reset(sceneWith(orbit));
     const auto trace = playback.exposureHistory();
@@ -427,6 +484,7 @@ void graphCarriesTheLabelledTrace() {
 int main() {
     try {
         summaryFormatsNumericValues();
+        phaseAngleFoldsRoundTheCycle();
         summaryShowsAuthoredBesideDerived();
         badgeOnlyAtTheSiderealMatch();
         derivedValuesFollowEveryEdit();

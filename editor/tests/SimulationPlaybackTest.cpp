@@ -422,16 +422,16 @@ void orbitPlayback() {
     // The same run opened part-way through an eclipse: the authored phase
     // offset puts the shadow over the whole first minute of playback,
     // where the unshifted run was in full daylight.
-    const auto shifted=run(I::Orbit{1361.0,5570.0,6791000.0,0.3,0.61,2785.0});
+    const auto shifted=run(I::Orbit{1361.0,5570.0,6791000.0,0.3,23.44,50.0});
     require(shifted.first==0.0L,
            "The authored phase offset did not open playback inside the eclipse");
     require(shifted.second>0.0L,"The eclipsed playback Hull stopped radiating");
-    // Tilted but unshifted: Beta reaches the playback hull and changes
+    // Tilted but unshifted: the axial tilt reaches the playback hull and changes
     // the load it takes, because the star is no longer overhead.
-    const auto tilted=run(I::Orbit{1361.0,5570.0,6791000.0,0.3,0.61,0.0});
+    const auto tilted=run(I::Orbit{1361.0,5570.0,6791000.0,0.3,23.44,0.0});
     require(tilted.first>0.0L,"A tilted orbit delivered no stellar energy to the playback hull");
     require(std::abs(double(tilted.first-lit.first))>1e-3*std::abs(double(lit.first)),
-           "Beta made no difference to the load the playback hull took");
+           "The axial tilt made no difference to the load the playback hull took");
 }
 void observationControls() {
     using namespace station::editor;using I=nsi::core::Installation;

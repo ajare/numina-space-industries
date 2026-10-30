@@ -15,8 +15,8 @@ eclipse still has exactly zero direct and reflected input.
 
 For grazing eclipses shorter than the ramp, the two ramps overlap: the peak
 blocked fraction is geometric eclipse duration divided by ramp duration.
-This avoids forcing totality and tends continuously to zero at critical Beta.
-Above critical Beta there is no eclipse or penumbra. This is a timing model,
+This avoids forcing totality and tends continuously to zero at critical tilt.
+Above critical tilt there is no eclipse or penumbra. This is a timing model,
 not a resolved solar-disc occultation or planetary illumination model.
 
 The summary's Eclipse/Sunlit durations remain the geometric values, equivalently

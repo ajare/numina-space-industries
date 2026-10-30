@@ -62,9 +62,9 @@ measured cost of the exposure model itself rather than an assumed one.
 | Scenario | Authored sky |
 |---|---|
 | `rest` | No `Orbit` at all — dark sky, zero stellar term, evaluator never built. The pre-feature control. |
-| `sustained-sunlit` | `Orbit` at Beta 80°, past the 69.7° shadow angle for this radius: never eclipsed, direct plus reflected light the whole cycle. |
-| `eclipse-transition` | `Orbit` at Beta 0°, walked (untimed) to the eclipse-entry instant so the timed window straddles the crossing. |
-| `full-orbit` | `Orbit` at Beta 0°, one complete cycle walked from Local noon: 600 updates at 1x, 60 at 10x. |
+| `sustained-sunlit` | `Orbit` at 80° axial tilt, past the 69.7° shadow angle for this radius: never eclipsed, direct plus reflected light the whole cycle. |
+| `eclipse-transition` | `Orbit` at 0° axial tilt, walked (untimed) to the eclipse-entry instant so the timed window straddles the crossing. |
+| `full-orbit` | `Orbit` at 0° axial tilt, one complete cycle walked from Local noon: 600 updates at 1x, 60 at 10x. |
 | `rest-recheck` | The `rest` control measured again at the end of the matrix. Not a fifth sky — the host-drift control. |
 
 The cycle is **compressed to a 60 s Orbital period**. Orbital period and

@@ -266,8 +266,8 @@ void orbitPersistence() {
     // Albedo and a coplanar star at Local noon.
     const O iss{1361.0,5570.0,6791000.0,0.3,0.0,0.0};
     check(I(1,1).orbit()==iss,"New Installation must author the ISS-like default orbit");
-    check(I(1,1).orbit()->betaAngleRad==0.0,"Default orbit must start coplanar");
-    check(I(1,1).orbit()->phaseOffsetS==0.0,"Default orbit must open at Local noon");
+    check(I(1,1).orbit()->axialTiltDeg==0.0,"Default orbit must start coplanar");
+    check(I(1,1).orbit()->phaseOffsetPercent==0.0,"Default orbit must open at Local noon");
     // Absent still means no orbit, never a substituted default: the author
     // who clears the orbit gets the old dark sky back unchanged.
     I dark(1,1); dark.setOrbit(std::nullopt);
@@ -290,28 +290,39 @@ void orbitPersistence() {
     // Both endpoints of the closed interval are legal and survive.
     I black(1,1); black.setOrbit(O{1361.0,5570.0,6791000.0,0.0}); roundTrip(black);
     I mirror(1,1); mirror.setOrbit(O{1361.0,5570.0,6791000.0,1.0}); roundTrip(mirror);
-    // Beta and the phase offset default to the coplanar star and Local noon
-    // at t = 0, and a non-default pair survives the round trip intact.
-    check(O{}.betaAngleRad==0.0 && O{}.phaseOffsetS==0.0,
-          "Beta and phase offset must default to coplanar and unshifted");
-    I tilted(1,1); tilted.setOrbit(O{1361.0,5570.0,6791000.0,0.3,0.61,1234.5}); roundTrip(tilted);
+    // The axial tilt and the phase offset default to no tilt - the star
+    // over the equator - and Local noon at t = 0, and a non-default pair
+    // survives the round trip intact.
+    check(O{}.axialTiltDeg==0.0 && O{}.phaseOffsetPercent==0.0,
+          "Axial tilt and phase offset must default to none and unshifted");
+    I tilted(1,1); tilted.setOrbit(O{1361.0,5570.0,6791000.0,0.3,23.44,22.5}); roundTrip(tilted);
     const auto tiltedNode=YAML::Load(tilted.serialize());
-    check(tiltedNode["orbit"]["betaAngleRad"].as<double>()==0.61,"Beta angle persisted");
-    check(tiltedNode["orbit"]["phaseOffsetS"].as<double>()==1234.5,"Phase offset persisted");
-    // A negative Beta and a negative offset are both legal: they shift the
-    // tilt and the clock the other way, not into a different model.
-    I mirrored(1,1); mirrored.setOrbit(O{1361.0,5570.0,6791000.0,0.3,-0.61,-1234.5});
+    check(tiltedNode["orbit"]["axialTiltDeg"].as<double>()==23.44,"Axial tilt persisted in degrees");
+    check(tiltedNode["orbit"]["phaseOffsetPercent"].as<double>()==22.5,"Phase offset persisted as a percentage");
+    // A negative tilt and a negative offset are both legal: they lean the
+    // world and shift the clock the other way, not into a different model.
+    I mirrored(1,1); mirrored.setOrbit(O{1361.0,5570.0,6791000.0,0.3,-23.44,-22.5});
     roundTrip(mirrored);
-    check(YAML::Load(mirrored.serialize())["orbit"]["betaAngleRad"].as<double>()==-0.61,
-          "Negative Beta angle persisted");
-    check(YAML::Load(mirrored.serialize())["orbit"]["phaseOffsetS"].as<double>()==-1234.5,
+    check(YAML::Load(mirrored.serialize())["orbit"]["axialTiltDeg"].as<double>()==-23.44,
+          "Negative axial tilt persisted");
+    check(YAML::Load(mirrored.serialize())["orbit"]["phaseOffsetPercent"].as<double>()==-22.5,
           "Negative phase offset persisted");
-    // Zero is a value, not an absence: an authored zero Beta - the
+    // Zero is a value, not an absence: an authored zero tilt - the
     // worst-case eclipse - is written out rather than skipped.
     check(YAML::Load(i.serialize())["orbit"].IsMap()
-              && YAML::Load(i.serialize())["orbit"]["betaAngleRad"].IsScalar()
-              && YAML::Load(i.serialize())["orbit"]["phaseOffsetS"].IsScalar(),
-          "Default Beta and phase offset must still be written");
+              && YAML::Load(i.serialize())["orbit"]["axialTiltDeg"].IsScalar()
+              && YAML::Load(i.serialize())["orbit"]["phaseOffsetPercent"].IsScalar(),
+          "Default axial tilt and phase offset must still be written");
+    // The world radius persists, and a non-Earth world survives a save
+    // whole: a Jovian sky stays a Jovian sky rather than quietly falling
+    // back to a ground it was never orbiting.
+    I jovian(1,1);
+    jovian.setOrbit(O{50.3,5570.0,70331000.0,0.503,3.1,0.0,69911000.0});
+    roundTrip(jovian);
+    check(YAML::Load(jovian.serialize())["orbit"]["planetRadiusM"].as<double>()==69911000.0,
+          "World radius persisted");
+    check(YAML::Load(i.serialize())["orbit"]["planetRadiusM"].IsScalar(),
+          "Default world radius must still be written");
     // Absent key loads as no orbit rather than a substituted default.
     auto bare=YAML::Load(i.serialize()); bare.remove("orbit");
     YAML::Emitter bareOut; bareOut<<bare;
@@ -332,12 +343,13 @@ void orbitPersistence() {
         // interval [0, 1] is the whole legal range.
         O{1361.0,5570.0,6791000.0,-0.1},O{1361.0,5570.0,6791000.0,1.1},
         O{1361.0,5570.0,6791000.0,nan},O{1361.0,5570.0,6791000.0,inf},
-        // Beta is an angle between a direction and a plane: the open
-        // interval (-pi/2, pi/2). The pole itself leaves no sweep to make.
-        O{1361.0,5570.0,6791000.0,0.3,1.5707963267948966},
-        O{1361.0,5570.0,6791000.0,0.3,-1.5707963267948966},
-        O{1361.0,5570.0,6791000.0,0.3,1.58},
-        O{1361.0,5570.0,6791000.0,0.3,3.1416},
+        // The axial tilt is an angle, so the open interval (-90, 90)
+        // degrees is the whole legal range. The pole itself leaves no
+        // in-plane sweep to make.
+        O{1361.0,5570.0,6791000.0,0.3,90.0},
+        O{1361.0,5570.0,6791000.0,0.3,-90.0},
+        O{1361.0,5570.0,6791000.0,0.3,90.5},
+        O{1361.0,5570.0,6791000.0,0.3,180.0},
         O{1361.0,5570.0,6791000.0,0.3,nan},
         O{1361.0,5570.0,6791000.0,0.3,inf},
         // The phase offset only shifts the cycle, so any finite value is
@@ -384,27 +396,76 @@ void orbitPersistence() {
     badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]="92 minutes";});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::infinity();});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::quiet_NaN();});
-    // Beta and the phase offset are validated on the way in exactly as the
-    // rest of the record is.
-    badOrbit([](auto n){n["orbit"]["betaAngleRad"]=1.5707963267948966;});
-    badOrbit([](auto n){n["orbit"]["betaAngleRad"]=-1.58;});
-    badOrbit([](auto n){n["orbit"]["betaAngleRad"]=std::numeric_limits<double>::quiet_NaN();});
-    badOrbit([](auto n){n["orbit"]["betaAngleRad"]=std::numeric_limits<double>::infinity();});
-    badOrbit([](auto n){n["orbit"]["betaAngleRad"]="steep";});
-    badOrbit([](auto n){n["orbit"]["phaseOffsetS"]=std::numeric_limits<double>::quiet_NaN();});
-    badOrbit([](auto n){n["orbit"]["phaseOffsetS"]=std::numeric_limits<double>::infinity();});
-    badOrbit([](auto n){n["orbit"]["phaseOffsetS"]="half an orbit";});
-    // A document authored before Beta and the phase offset existed is not a
-    // partial record: absent means the documented default, which is the
-    // very behaviour that was current when it was written.
+    // The axial tilt and the phase offset are validated on the way in
+    // exactly as the rest of the record is.
+    badOrbit([](auto n){n["orbit"]["axialTiltDeg"]=90.0;});
+    badOrbit([](auto n){n["orbit"]["axialTiltDeg"]=-90.5;});
+    badOrbit([](auto n){n["orbit"]["axialTiltDeg"]=std::numeric_limits<double>::quiet_NaN();});
+    badOrbit([](auto n){n["orbit"]["axialTiltDeg"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["axialTiltDeg"]="steep";});
+    badOrbit([](auto n){n["orbit"]["phaseOffsetPercent"]=std::numeric_limits<double>::quiet_NaN();});
+    badOrbit([](auto n){n["orbit"]["phaseOffsetPercent"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["phaseOffsetPercent"]="half an orbit";});
+    // The world radius is validated like every other number, and the orbit
+    // cannot sit at or below the authored ground: a Hull buried inside its
+    // own planet has no sky, and no eclipse geometry worth the name.
+    badOrbit([](auto n){n["orbit"]["planetRadiusM"]=0.0;});
+    badOrbit([](auto n){n["orbit"]["planetRadiusM"]=-6371000.0;});
+    badOrbit([](auto n){n["orbit"]["planetRadiusM"]=std::numeric_limits<double>::quiet_NaN();});
+    badOrbit([](auto n){n["orbit"]["planetRadiusM"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["planetRadiusM"]="the Earth";});
+    badOrbit([](auto n){n["orbit"]["planetRadiusM"]
+                            =n["orbit"]["radiusFromPlanetCentreM"].template as<double>();});
+    badOrbit([](auto n){n["orbit"]["planetRadiusM"]=1.0e12;});
+    // A document authored before the tilt and the phase offset existed is
+    // not a partial record: absent means the documented default, which is
+    // the very behaviour that was current when it was written.
     {
         auto n=YAML::Load(i.serialize());
-        n["orbit"].remove("betaAngleRad"); n["orbit"].remove("phaseOffsetS");
+        n["orbit"].remove("axialTiltDeg"); n["orbit"].remove("phaseOffsetPercent");
         YAML::Emitter out; out<<n;
         I target; target.deserialize(out.c_str());
-        check(target.orbit().has_value() && target.orbit()->betaAngleRad==0.0
-                  && target.orbit()->phaseOffsetS==0.0,
-              "A pre-Beta orbit must load as coplanar and unshifted");
+        check(target.orbit().has_value() && target.orbit()->axialTiltDeg==0.0
+                  && target.orbit()->phaseOffsetPercent==0.0,
+              "A pre-tilt orbit must load with no tilt and unshifted");
+    }
+    // Nor is a record written before the world radius was authored a
+    // partial one. Absent means Earth, which is the world it was actually
+    // about - the same ground, not a substitute.
+    {
+        auto n=YAML::Load(i.serialize());
+        n["orbit"].remove("planetRadiusM");
+        YAML::Emitter out; out<<n;
+        I target; target.deserialize(out.c_str());
+        check(target.orbit().has_value()
+                  && target.orbit()->planetRadiusM==nsi::core::PlanetRadiusM,
+              "A pre-radius orbit must load with the Earth it orbited");
+    }
+    // The tilt was first authored as a Beta angle in radians. That key is
+    // refused outright rather than read as no tilt, so a stale save cannot
+    // quietly re-tune the sky it describes.
+    {
+        auto n=YAML::Load(i.serialize());
+        n["orbit"].remove("axialTiltDeg");
+        n["orbit"]["betaAngleRad"]=0.61;
+        YAML::Emitter out; out<<n;
+        bool refused=false;
+        try { I target; target.deserialize(out.c_str()); }
+        catch (const std::exception&) { refused=true; }
+        check(refused,"A stale betaAngleRad key must be refused, not read as no tilt");
+    }
+    // The phase offset was first authored as raw seconds. Read as a
+    // percentage it would put the run somewhere else in the cycle than the
+    // author wrote, so it is refused rather than reinterpreted.
+    {
+        auto n=YAML::Load(i.serialize());
+        n["orbit"].remove("phaseOffsetPercent");
+        n["orbit"]["phaseOffsetS"]=2228.0;
+        YAML::Emitter out; out<<n;
+        bool refused=false;
+        try { I target; target.deserialize(out.c_str()); }
+        catch (const std::exception&) { refused=true; }
+        check(refused,"A stale phaseOffsetS key must be refused, not read as a percentage");
     }
 }
 }

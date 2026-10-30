@@ -31,6 +31,8 @@
 #include "station/editor/EditorSession.h"
 #include "station/editor/Installation.h"
 
+#include <nsi/core/WorldPresets.h>
+
 #include <SDL.h>
 
 #include <algorithm>
@@ -495,55 +497,176 @@ int runEditor() {
         if (ImGui::Combo("Partition type", &partitionIndex, partitionNames, 4))
             edit([&]{ session.setPartitionType(partitionIndex == 0 ? std::nullopt
                 : std::optional(static_cast<PartitionType>(partitionIndex - 1))); });
-        // The authored sky. No Orbit means no orbit: a dark sky and zero
+        ImGui::EndDisabled();
+        // The authored sky splits into the world and the ride around it.
+        // The star's light and the planet's answer to it - how much it
+        // reflects, how far it leans - hold whatever path the Installation
+        // takes; the period, the radius and the point on the cycle a run
+        // opens at belong to the path. Both sections draw outside the
+        // shared edit lock so they open and close during a run like every
+        // other section in this window, and the widgets inside take the
+        // lock themselves. No orbit means no orbit: a dark sky and zero
         // stellar gain, never a substituted default.
+        const bool editable = session.editingEnabled();
         using Orbit = nsi::core::Installation::Orbit;
         const auto orbit = session.installation().orbit();
         bool authorOrbit = orbit.has_value();
+        ImGui::BeginDisabled(!editable);
         if (ImGui::Checkbox("Author an orbit", &authorOrbit))
             edit([&]{ session.setOrbit(authorOrbit
                 ? std::optional<Orbit>{orbit.value_or(Orbit{})}
                 : std::optional<Orbit>{}); });
-        ImGui::BeginDisabled(!authorOrbit);
-        if (orbit) {
-            double irradiance = orbit->stellarIrradianceWPerM2;
-            if (ImGui::InputDouble("Stellar irradiance W/m^2", &irradiance, 0, 0, "%.1f"))
-                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
-                         next.stellarIrradianceWPerM2 = irradiance; session.setOrbit(next); });
-            double period = orbit->orbitalPeriodS;
-            if (ImGui::InputDouble("Orbital period s", &period, 0, 0, "%.1f"))
-                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
-                         next.orbitalPeriodS = period; session.setOrbit(next); });
-            double radius = orbit->radiusFromPlanetCentreM;
-            if (ImGui::InputDouble("Orbit radius from planet centre m", &radius, 0, 0, "%.0f"))
-                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
-                         next.radiusFromPlanetCentreM = radius; session.setOrbit(next); });
-            // The only authored half of Planet shine. The planet's infrared
-            // is derived from this and the irradiance, so there is nothing
-            // else to type and nothing that can go stale.
-            double albedo = orbit->albedo;
-            if (ImGui::InputDouble("Planet albedo", &albedo, 0, 0, "%.3f"))
-                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
-                         next.albedo = albedo; session.setOrbit(next); });
-            // Beta: the angle between the star and the orbital plane. Zero
-            // is the coplanar worst-case eclipse; growing it shallows the
-            // shadow, lights the cross-track hull faces, and past the
-            // radius-dependent critical angle misses the orbit entirely.
-            double beta = orbit->betaAngleRad;
-            if (ImGui::InputDouble("Beta angle rad", &beta, 0, 0, "%.4f"))
-                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
-                         next.betaAngleRad = beta; session.setOrbit(next); });
-            // Slides the whole exposure profile along the orbit so a run
-            // can open part-way through an eclipse instead of always at
-            // Local noon. It moves when, never what: the eclipse keeps its
-            // size whatever is typed here.
-            double phaseOffset = orbit->phaseOffsetS;
-            if (ImGui::InputDouble("Phase offset s", &phaseOffset, 0, 0, "%.1f"))
-                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
-                         next.phaseOffsetS = phaseOffset; session.setOrbit(next); });
+        ImGui::EndDisabled();
+        // The numbers stay locked while there is no orbit to edit, and stay
+        // locked through a run whatever the checkbox reads. The lock opens
+        // inside each header, never around one, so a header still collapses
+        // when its fields cannot be touched.
+        const bool locked = !editable || !authorOrbit;
+        auto writeOrbit = [&](double Orbit::*field, double value) {
+            edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
+                     next.*field = value; session.setOrbit(next); });
+        };
+        // Every field in the two sky groups is 128px wide. The labels are
+        // long, so a shared width lines the inputs up in one column
+        // instead of letting each one end wherever its label happens to
+        // stop; a field added to either group later inherits it.
+        constexpr float kSkyFieldWidthPx = 128.0f;
+        if (ImGui::CollapsingHeader("Star and planet", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::PushItemWidth(kSkyFieldWidthPx);
+            // The world this group describes, drawn above the lock and
+            // outside the record's presence: Deep space is a place you
+            // could otherwise get stuck in, and this is the way out.
+            //
+            // Deep space is not a row in the planet catalogue - it is the
+            // absence of one, which is exactly the state the model already
+            // carries for a dark sky. No Orbit record means no star to
+            // light the hull and no planet to occlude it, reflect it or
+            // shine on it; the hull is left radiating to the deep-space
+            // sink and nothing else. It is deliberately not a world with
+            // zero irradiance and zero radius, because a world with no
+            // radius is not a world and the model rightly refuses one.
+            //
+            // Picking a planet writes the four fields below and leaves the
+            // ride alone: the Orbital period and the phase offset stay
+            // exactly as authored, because which world you are about does
+            // not decide how fast you travel around it. If the new world
+            // would swallow the current orbit, the orbit radius moves out
+            // with the ground and keeps the altitude above the surface.
+            // Coming back from Deep space starts from the documented
+            // defaults, since clearing threw the old ride away with the
+            // rest of the record.
+            static const std::string kWorldItems = [] {
+                std::string items = "Deep space";
+                for (const auto& world : nsi::core::kWorldPresets) {
+                    items += '\0';
+                    items += world.name;
+                }
+                items += '\0';
+                items += "Custom";
+                items += '\0';
+                return items;
+            }();
+            constexpr int kDeepSpaceItem = 0;
+            const int kCustomItem = 1 + static_cast<int>(nsi::core::kWorldPresets.size());
+            int worldIndex = kDeepSpaceItem;
+            if (orbit) {
+                const auto matched = nsi::core::worldPresetMatching(*orbit);
+                worldIndex = matched == nsi::core::kNoWorldPreset
+                               ? kCustomItem
+                               : static_cast<int>(matched) + 1;
+            }
+            ImGui::BeginDisabled(!editable);
+            if (ImGui::Combo("World", &worldIndex, kWorldItems.c_str())) {
+                if (worldIndex == kDeepSpaceItem)
+                    edit([&]{ session.setOrbit(std::optional<Orbit>{}); });
+                else if (worldIndex != kCustomItem)
+                    edit([&]{ session.setOrbit(nsi::core::applyWorldPreset(
+                        session.installation().orbit().value_or(Orbit{}),
+                        static_cast<std::size_t>(worldIndex - 1))); });
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Deep space: no star and no planet. Clears the Orbit\n"
+                                 "record and leaves the hull radiating to the\n"
+                                 "deep-space sink alone. A planet sets irradiance,\n"
+                                 "albedo, tilt and planet radius, and leaves the\n"
+                                 "Orbital period and phase offset as authored.");
+            ImGui::EndDisabled();
+            ImGui::BeginDisabled(locked);
+            if (orbit) {
+                double irradiance = orbit->stellarIrradianceWPerM2;
+                if (ImGui::InputDouble("Stellar irradiance W/m^2", &irradiance, 0, 0, "%.1f"))
+                    writeOrbit(&Orbit::stellarIrradianceWPerM2, irradiance);
+                // The only authored half of Planet shine. The planet's
+                // infrared is derived from this and the irradiance, so
+                // there is nothing else to type and nothing that can go
+                // stale.
+                double albedo = orbit->albedo;
+                if (ImGui::InputDouble("Planet albedo", &albedo, 0, 0, "%.3f"))
+                    writeOrbit(&Orbit::albedo, albedo);
+                // Axial tilt in degrees: how far the planet leans toward
+                // the star while the Installation rides its equator, which
+                // is the latitude the star sits directly over. Zero is the
+                // worst-case eclipse; growing it shallows the shadow, lifts
+                // sunlight onto the cross-track hull faces, and past the
+                // radius-dependent critical tilt misses the orbit entirely.
+                double tilt = orbit->axialTiltDeg;
+                if (ImGui::InputDouble("Axial tilt (deg)", &tilt, 0, 0, "%.2f"))
+                    writeOrbit(&Orbit::axialTiltDeg, tilt);
+                // The world's own radius, which is the radius of the
+                // shadow cylinder: it decides how much of the orbit is
+                // eclipsed, so it is the field that turns an Earth-shaped
+                // sky into a Jovian one. Kilometres, because that is the
+                // scale a world gets discussed at; metres on the wire.
+                double planetRadiusKm = orbit->planetRadiusM / 1000.0;
+                if (ImGui::InputDouble("Planet radius (km)", &planetRadiusKm, 0, 0, "%.1f"))
+                    writeOrbit(&Orbit::planetRadiusM, planetRadiusKm * 1000.0);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Stored as %.0f m", orbit->planetRadiusM);
+            }
+            ImGui::EndDisabled();
+            ImGui::PopItemWidth();
         }
-        ImGui::EndDisabled();
-        ImGui::EndDisabled();
+        if (ImGui::CollapsingHeader("Orbit", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::PushItemWidth(kSkyFieldWidthPx);
+            ImGui::BeginDisabled(locked);
+            if (orbit) {
+                // Authored in hours and kilometres: nobody plans a ride in
+                // seconds and metres, and the whole number is only ever a
+                // rounding of what is stored. Each widget says what it is
+                // holding on hover, so the exact seconds and metres are
+                // never more than a mouse away, and the summary below
+                // reads them back unconverted.
+                double periodHours = orbit->orbitalPeriodS / 3600.0;
+                if (ImGui::InputDouble("Orbital period (h)", &periodHours, 0, 0, "%.3f"))
+                    writeOrbit(&Orbit::orbitalPeriodS, periodHours * 3600.0);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Stored as %.1f s", orbit->orbitalPeriodS);
+                double radiusKm = orbit->radiusFromPlanetCentreM / 1000.0;
+                if (ImGui::InputDouble("Orbit radius from planet centre (km)", &radiusKm, 0, 0, "%.0f"))
+                    writeOrbit(&Orbit::radiusFromPlanetCentreM, radiusKm * 1000.0);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Stored as %.0f m", orbit->radiusFromPlanetCentreM);
+                // Where in the cycle the run opens, as an angle: 0 deg is
+                // Local noon, 180 deg local midnight, so 144 deg opens
+                // part-way into the eclipse. It moves when, never what -
+                // the eclipse keeps its size whatever the slider reads -
+                // and it folds, so a turn past the end lands where the
+                // turn began. ImGui's angle slider is a linear slider in
+                // degrees since 1.87; the round knob it used to draw is
+                // gone, and the fold does the round part instead.
+                float phaseDeg = static_cast<float>(
+                    station::editor::phaseAngleFromOffsetPercent(orbit->phaseOffsetPercent));
+                if (ImGui::SliderAngle("Phase offset (deg)", &phaseDeg, 0.0f, 360.0f, "%.1f deg"))
+                    writeOrbit(&Orbit::phaseOffsetPercent,
+                               station::editor::offsetPercentFromPhaseAngle(phaseDeg));
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("0 deg = Local noon, 180 deg = local midnight.\n"
+                                     "Moves where in the cycle the run starts,\n"
+                                     "never what the cycle does.");
+            }
+            ImGui::EndDisabled();
+            ImGui::PopItemWidth();
+        }
         // The environment read back beside the numbers that made it, drawn
         // outside the edit lock so it stays legible through a run. Derived
         // values come off the evaluator the hull is actually under.

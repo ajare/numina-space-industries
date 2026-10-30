@@ -10,11 +10,12 @@ constexpr double kTwoPi = 2.0 * kPi;
 // Stefan-Boltzmann in W/(m^2 K^4), the SI form. station-systems carries the
 // same constant in kW; this model works in watts throughout.
 constexpr double kStefanBoltzmannWPerM2K4 = 5.670374419e-8;
-// Beta is the angle between the star and the orbital plane, so it lives in
-// (-pi/2, pi/2), matching the authored-data boundary in core. Every
-// representable angle strictly inside that interval has a positive cosine,
-// including the nearest neighbours of the poles.
-constexpr double kHalfPi = 1.570796326794896619231846502829916183;
+// The authored axial tilt lives in (-90, 90) degrees, matching the
+// authored-data boundary in core. Every representable value strictly inside
+// that interval has a positive cosine once converted, including the nearest
+// neighbours of the poles.
+constexpr double kMaxTiltDegrees = 90.0;
+constexpr double kDegToRad = kPi / 180.0;
 // The Geostationary match tolerance, relative to the planet's sidereal
 // rotation. Tight enough that no author can type their way into the badge
 // by rounding: a tenth of a second off an Earth-sidereal period is over a
@@ -42,37 +43,48 @@ StellarExposureEvaluator::StellarExposureEvaluator(
         || orbit.stellarIrradianceWPerM2 > core::Installation::Orbit::MaxStellarIrradianceWPerM2
         || !std::isfinite(orbit.orbitalPeriodS) || orbit.orbitalPeriodS <= 0.0
         || !std::isfinite(orbit.radiusFromPlanetCentreM)
-        || orbit.radiusFromPlanetCentreM <= core::PlanetRadiusM
+        // The world is authored now, so the boundary is authored too. A
+        // Hull at or below the authored ground line has no sky, and a
+        // world with no radius, or no finite one, cannot make a sky
+        // either. Refused here exactly as core refuses it on the way in.
+        || !std::isfinite(orbit.planetRadiusM) || orbit.planetRadiusM <= 0.0
+        || orbit.radiusFromPlanetCentreM <= orbit.planetRadiusM
         // An Albedo outside [0, 1] would take the energy balance under zero
         // and hand back a NaN planet temperature, so it is refused here as
         // loudly as core refuses it on the way in.
         || !(orbit.albedo >= 0.0) || !(orbit.albedo <= 1.0)
-        || !std::isfinite(orbit.phaseOffsetS)) return; // dark_ stays true
-    // Beta is refused rather than folded: an angle outside the range core
-    // accepts is not a Beta angle, and quietly wrapping it would let the
-    // evaluator build a sky from a record the document should never have
-    // held. Valid near-pole angles retain their small in-plane sweep and
-    // nearly full cross-track illumination; they must not become dark.
-    const double beta = orbit.betaAngleRad;
-    if (!std::isfinite(beta) || beta <= -kHalfPi || beta >= kHalfPi) return;
-    const double cosBeta = std::cos(beta);
+        || !std::isfinite(orbit.phaseOffsetPercent)) return; // dark_ stays true
+    // The tilt is refused rather than folded: a value outside the range core
+    // accepts is not a tilt, and quietly wrapping it would let the evaluator
+    // build a sky from a record the document should never have held. Valid
+    // near-pole values retain their small in-plane sweep and nearly full
+    // cross-track illumination; they must not become dark.
+    const double tilt = orbit.axialTiltDeg;
+    if (!std::isfinite(tilt) || tilt <= -kMaxTiltDegrees || tilt >= kMaxTiltDegrees) return;
+    const double tiltRadians = tilt * kDegToRad;
+    const double cosTilt = std::cos(tiltRadians);
 
     irradianceWPerM2_ = orbit.stellarIrradianceWPerM2;
     periodSeconds_ = orbit.orbitalPeriodS;
     radiusMeters_ = orbit.radiusFromPlanetCentreM;
     albedo_ = orbit.albedo;
-    betaRadians_ = beta;
-    phaseOffsetSeconds_ = orbit.phaseOffsetS;
+    axialTiltDeg_ = tilt;
+    tiltRadians_ = tiltRadians;
+    planetRadiusM_ = orbit.planetRadiusM;
+    phaseOffsetPercent_ = orbit.phaseOffsetPercent;
     // The two halves of the sweep, fixed for the whole orbit: the star's
     // cross-track component never moves, and its in-plane share is what
     // rotates at the orbital rate.
-    sunCrossTrack_ = std::sin(beta);
-    sunPlaneScale_ = cosBeta;
+    sunCrossTrack_ = std::sin(tiltRadians);
+    sunPlaneScale_ = cosTilt;
     // Fold the offset into whole turns once, here, so the per-step path
-    // adds two numbers of order one instead of carrying a raw second count
-    // into a division forever. A negative offset folds forward, which is
-    // the same shift travelled the long way round the cycle.
-    phaseTurns_ = phaseTurns(phaseOffsetSeconds_, periodSeconds_);
+    // adds two numbers of order one instead of carrying a raw value into a
+    // division forever. Reduce the percentage with fmod first: a huge
+    // authored value has no fractional bits left by the time it is divided,
+    // so the reduction has to happen while they still mean something. A
+    // negative offset folds forward, which is the same shift travelled the
+    // long way round the cycle.
+    phaseTurns_ = fractionalTurns(std::fmod(phaseOffsetPercent_, 100.0) / 100.0);
     // The planet's infrared is derived, never typed: whatever stellar light
     // the world does not reflect is absorbed, spread over the whole sphere
     // and re-radiated. The Albedo guard above keeps the radicand
@@ -85,20 +97,22 @@ StellarExposureEvaluator::StellarExposureEvaluator(
     // it whenever the perpendicular distance from the axis falls under Rp,
     // which reduces to a fixed zenith-cosine boundary on the sun direction:
     // the station is in shadow exactly when the star sits below
-    // -sqrt(1 - (Rp/r)^2). Beta does not move that boundary.
-    const double ratio = core::PlanetRadiusM / orbit.radiusFromPlanetCentreM;
+    // -sqrt(1 - (Rp/r)^2). The tilt does not move that boundary. Rp is
+    // the authored world radius, so a wide world casts a wide shadow and a
+    // narrow one lets the orbit nearly past it.
+    const double ratio = orbit.planetRadiusM / orbit.radiusFromPlanetCentreM;
     planetViewScale_ = ratio * ratio;
     const double horizon = std::sqrt(std::max(0.0, 1.0 - ratio * ratio));
-    // What Beta moves is how far down the star ever travels - its lowest
-    // zenith cosine is -cos(beta) - and therefore how much of the sweep
+    // What the tilt moves is how far down the star ever travels - its lowest
+    // zenith cosine is -cos(tilt) - and therefore how much of the sweep
     // spends time past the boundary. Reading the same geometry off the
     // sweep: the star is under the boundary while
-    // cos(phase) < -sqrt(1 - (Rp/r)^2) / cos(beta), which is
+    // cos(phase) < -sqrt(1 - (Rp/r)^2) / cos(tilt), which is
     // (1/pi) * acos(that) of the orbit. Once the argument passes one the
     // star never reaches the shadow at all, and the fraction is zero.
-    // Even at the closest valid angle to a pole, cosBeta is positive and
+    // Even at the closest valid tilt to a pole, cosTilt is positive and
     // horizon <= 1, so this quotient stays finite without an epsilon guard.
-    const double sweepArgument = horizon / cosBeta;
+    const double sweepArgument = horizon / cosTilt;
     eclipseFraction_ = sweepArgument > 1.0 ? 0.0 : std::acos(sweepArgument) / kPi;
     dark_ = false;
 }
@@ -122,8 +136,8 @@ StellarExposure StellarExposureEvaluator::evaluate(double elapsedSeconds) const 
     // Local noon is t = 0 with the star at the zenith while the offset is
     // zero. The Installation travels along +x, so the star falls behind it:
     // the sweep runs toward -x, and the cross-track component is fixed at
-    // sin(beta) all the way round, which is what lets the cross-track hull
-    // faces see direct light as Beta grows.
+    // sin(tilt) all the way round, which is what lets the cross-track hull
+    // faces see direct light as the tilt grows.
     exposure.sunDirection = {-sunPlaneScale_ * std::sin(phase),
                             sunCrossTrack_,
                             sunPlaneScale_ * std::cos(phase)};
@@ -131,7 +145,8 @@ StellarExposure StellarExposureEvaluator::evaluate(double elapsedSeconds) const 
     // in orbital phase. Each isolated edge is a linear ramp centred on the
     // geometric crossing, lasting 0.533 * period / 360 seconds. Subtracting
     // the two edges also handles grazing eclipses: overlapping ramps make a
-    // partial plateau whose height tends continuously to zero as Beta clears
+    // partial plateau whose height tends continuously to zero as the tilt
+    // clears
     // the shadow. The integrated eclipse remains the geometric duration.
     const double fromMidnight = std::abs(turns - 0.5);
     const double halfShadow = eclipseFraction_ / 2.0;
@@ -167,7 +182,7 @@ double StellarExposureEvaluator::directFluxWPerM2(const std::array<double, 3>& o
     // The horizon gate. A surface that faces the planet never sees a star
     // that is at or below its own horizon: the planet is exactly what fills
     // that view, so the nadir-facing underside takes no direct sunlight at
-    // any Beta and Planet shine is all it has. Vertical normals (n.z = 0)
+    // any tilt and Planet shine is all it has. Vertical normals (n.z = 0)
     // are untouched and keep grazing the low sun right up to the horizon.
     if (outwardNormal[2] < 0.0 && exposure.sunDirection[2] <= 0.0) return 0.0;
     const double incidence = outwardNormal[0] * exposure.sunDirection[0]

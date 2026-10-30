@@ -21,9 +21,13 @@ inline constexpr double DoorOpeningAreaM2{DoorWidthM * DoorHeightM};
 inline constexpr double CellAreaM2{CellWidthM * CellDepthM};
 inline constexpr double CellVolumeM3{CellAreaM2 * LevelHeightM};
 
-// Every Installation orbits one world; there is no planet catalogue. The
-// radius bounds the authored orbital radius (a Hull cannot sit inside the
-// ground) and sets how much of the sky the planet fills. Earth-like.
+// The world an Installation orbits is authored now: Orbit::planetRadiusM,
+// with a catalogue of the eight planets in WorldPresets.h. This constant
+// is the default a record falls back to when it names no world, which is
+// truthful rather than a substitute - every document written before the
+// field existed was orbiting exactly this. It still bounds the authored
+// orbital radius (a Hull cannot sit inside the ground) and still sets how
+// much of the sky the planet fills. Earth-like.
 inline constexpr double PlanetRadiusM{6371000.0};
 
 // The same world's sidereal rotation period in seconds, Earth-like. ADR-0008

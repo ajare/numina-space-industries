@@ -108,9 +108,9 @@ _Avoid_: Solar constant, luminosity, fullSunIrradianceKWPerM2 (legacy wire name 
 The fraction of full stellar irradiance reaching one hull surface at an instant, after eclipse and incidence. Zero means none; one means full sun at normal incidence.
 _Avoid_: Sunlight level, solar intensity, insolation
 
-**Beta angle**:
-The angle between the star's direction and the Installation's orbital plane. It decides whether eclipse occurs at all, how deep it is, and how much direct light the cross-track faces receive.
-_Avoid_: Solar declination (a planet-surface frame concept), axial tilt, inclination
+**Axial tilt**:
+The planet's lean toward its star, in degrees, held fixed while the Installation orbits the planet's equator - a permanent solstice. It is the latitude the star sits directly over, which is the same thing as the angle between the star and the Installation's orbital plane, and it decides whether eclipse occurs at all, how deep it is, and how much direct light the cross-track faces receive. Zero puts the star over the equator for the worst-case eclipse.
+_Avoid_: Beta angle (the same geometry under its astronomy name), inclination (the orbit's tilt, not the planet's), declination (which swings with a season this model does not have)
 
 **Eclipse**:
 The interval in which the planet blocks the Installation's direct view of the star. It is a shadow, not night, and unrelated to the Void atmosphere preset.
@@ -135,6 +135,10 @@ _Avoid_: Sunrise, orbit start
 **Ground drift**:
 The apparent motion of the Installation's sub-point across the planet's surface, in degrees per day. A derived readout for the author; zero means Geostationary.
 _Avoid_: Relative speed (as an input), orbital drift
+
+**World preset**:
+One of the eight planets of the Sun authored as the body an Installation orbits — its stellar irradiance, Bond albedo, axial tilt and radius, applied together. The Sun itself is never a world preset: in this model the star and the orbited body are separate things, and every preset row already carries the Sun at that world's distance. **Deep space** ends the list rather than joining it: no star and no planet, which is no Orbit record at all rather than a world with zero radius.
+_Avoid_: Star preset (the star is the irradiance, not the world), system preset (ambiguous with the atmosphere preset), empty world / null planet (Deep space is an absent record, not a zeroed one)
 
 **Thermal transmittance (U-value)**:
 Heat flow per unit surface area per unit temperature difference through a hull or partition assembly, measured in W/(m²·K).

@@ -25,7 +25,6 @@ constexpr double kEarthAlbedo = 0.3;
 constexpr double kSigma = 5.670374419e-8;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDegToRad = kPi / 180.0;
-constexpr double kHalfPi = 1.57079632679489661923;
 constexpr double kSecondsPerDay = 86400.0;
 // The source-slice cap is 0.1 s per whole call, so a long simulated hop has
 // to be walked rather than jumped.
@@ -78,6 +77,13 @@ double sampledEclipseFraction(const StellarExposureEvaluator& evaluator, double 
     return static_cast<double>(eclipsed) / samples;
 }
 
+// The authored phase offset is a percentage of the Orbital period; these
+// fixtures reason in seconds, so convert at the boundary rather than
+// mentally rescaling every offset in the file.
+double offsetPercent(double seconds, double periodSeconds) {
+    return seconds / periodSeconds * 100.0;
+}
+
 // A compressed thermal cycle. Orbital period and orbital radius are
 // independent authored inputs (ADR-0008: no Kepler, no gravity model), so
 // shortening the period leaves the eclipse fraction - and with it the whole
@@ -86,12 +92,12 @@ double sampledEclipseFraction(const StellarExposureEvaluator& evaluator, double 
 // walkable inside a test budget instead of an hour of simulated clock.
 constexpr double kCyclePeriod = 60.0;
 
-CellAtmosphereExpansion cycleGeometry(double periodSeconds = kCyclePeriod, double betaDegrees = 0.0,
+CellAtmosphereExpansion cycleGeometry(double periodSeconds = kCyclePeriod, double tiltDegrees = 0.0,
                                      double phaseOffsetSeconds = 0.0) {
     I scene(2, 2);
     scene.setHullType(I::HullType::BareSkin);
-    scene.setOrbit(O{kFullSun, periodSeconds, kIssRadius, kEarthAlbedo,
-                    betaDegrees * kDegToRad, phaseOffsetSeconds});
+    scene.setOrbit(O{kFullSun, periodSeconds, kIssRadius, kEarthAlbedo, tiltDegrees,
+                    offsetPercent(phaseOffsetSeconds, periodSeconds)});
     return expandCellAtmosphere(scene);
 }
 
@@ -189,8 +195,8 @@ void sunGeometry() {
             const double t = (cycle + step / 97.0) * kIssPeriod;
             const auto exposure = iss.evaluate(t);
             require(nearRel(length(exposure.sunDirection), 1.0, 1e-12), "Sun direction left the unit sphere");
-            // Beta = 0 keeps the sweep inside the x-z plane.
-            require(std::abs(exposure.sunDirection[1]) < 1e-12, "Beta = 0 must have no cross-track sun");
+            // zero tilt keeps the sweep inside the x-z plane.
+            require(std::abs(exposure.sunDirection[1]) < 1e-12, "zero tilt must have no cross-track sun");
             const auto wrapped = iss.evaluate(t - kIssPeriod);
             require(vectorNear(exposure.sunDirection, wrapped.sunDirection, 1e-9),
                    "Sweep is not periodic in the Orbital period");
@@ -240,9 +246,11 @@ void penumbraRamps() {
 }
 
 void grazingPenumbraIsContinuous() {
-    const double critical = std::asin(core::PlanetRadiusM / kIssRadius);
+    // Degrees, like the authored field: the critical tilt for this radius,
+    // approached from just below so each pass is a shallower graze.
+    const double critical = std::asin(core::PlanetRadiusM / kIssRadius) / kDegToRad;
     double previousPeak = 1.0;
-    for (double gap : {1e-7, 1e-9, 1e-11, 1e-13}) {
+    for (double gap : {1e-5, 1e-7, 1e-9, 1e-11}) {
         const StellarExposureEvaluator evaluator{O{kFullSun, kIssPeriod, kIssRadius,
                                                   kEarthAlbedo, critical - gap}};
         const double peak = evaluator.evaluate(kIssPeriod / 2.0).eclipse;
@@ -256,7 +264,7 @@ void grazingPenumbraIsContinuous() {
     }
     const StellarExposureEvaluator clear{O{kFullSun, kIssPeriod, kIssRadius,
                                           kEarthAlbedo, critical + 1e-10}};
-    require(clear.evaluate(kIssPeriod / 2.0).eclipse == 0.0, "Penumbra survived above critical Beta");
+    require(clear.evaluate(kIssPeriod / 2.0).eclipse == 0.0, "Penumbra survived above critical tilt");
 }
 
 void eclipseFraction() {
@@ -279,7 +287,7 @@ void eclipseFraction() {
     require(std::abs(sampledEclipseFraction(geo, kGeoPeriod) - geo.eclipseFraction()) < 2.0 / 20000.0,
            "Instantaneous eclipse disagrees with the orbit-average fraction (GEO)");
     // Eclipse is centred on local midnight, and local noon is never eclipsed.
-    require(iss.evaluate(kIssPeriod / 2.0).eclipse == 1.0, "Local midnight must be eclipsed at Beta = 0");
+    require(iss.evaluate(kIssPeriod / 2.0).eclipse == 1.0, "Local midnight must be eclipsed at zero tilt");
     require(iss.evaluate(0.0).eclipse == 0.0, "Local noon must never be eclipsed");
     // The shadow cylinder extends forever, so any orbit clear of the surface
     // is grazed a little; a high one barely at all, and monotonically less.
@@ -293,40 +301,42 @@ void eclipseFraction() {
 // (1/pi) * acos( sqrt(1 - (Rp/r)^2) / cos(beta) ), and zero once that
 // argument exceeds one. The reference table's 69.7 deg and 8.7 deg are
 // independent anchors read off the design, not off this implementation.
-void eclipseFractionFollowsBeta() {
-    const auto analytic = [](double radius, double beta) {
+void eclipseFractionFollowsTilt() {
+    const auto analytic = [](double radius, double tiltDegrees) {
         const double ratio = core::PlanetRadiusM / radius;
-        const double argument = std::sqrt(1.0 - ratio * ratio) / std::cos(beta);
+        const double argument
+            = std::sqrt(1.0 - ratio * ratio) / std::cos(tiltDegrees * kDegToRad);
         return argument > 1.0 ? 0.0 : std::acos(argument) / kPi;
     };
     double previousIss = analytic(kIssRadius, 0.0) + 1.0;
     double previousGeo = analytic(kGeoRadius, 0.0) + 1.0;
     for (double degrees = 0.0; degrees <= 89.0; degrees += 1.0) {
-        const double beta = degrees * kDegToRad;
-        const StellarExposureEvaluator iss{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, beta}};
-        const StellarExposureEvaluator geo{O{kFullSun, kGeoPeriod, kGeoRadius, kEarthAlbedo, beta}};
-        require(!iss.dark() && !geo.dark(), "A legal Beta angle was refused");
-        require(nearRel(iss.eclipseFraction(), analytic(kIssRadius, beta), 1e-12),
-               "ISS eclipse fraction left (1/pi) acos(sqrt(1-(Rp/r)^2)/cos beta)");
-        require(nearRel(geo.eclipseFraction(), analytic(kGeoRadius, beta), 1e-12),
-               "Geostationary eclipse fraction left (1/pi) acos(sqrt(1-(Rp/r)^2)/cos beta)");
-        // Beta only ever takes eclipse away: never negative, never more than
-        // the coplanar worst case, and never rising as Beta climbs.
+        const StellarExposureEvaluator iss{
+            O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, degrees}};
+        const StellarExposureEvaluator geo{
+            O{kFullSun, kGeoPeriod, kGeoRadius, kEarthAlbedo, degrees}};
+        require(!iss.dark() && !geo.dark(), "A legal axial tilt was refused");
+        require(nearRel(iss.eclipseFraction(), analytic(kIssRadius, degrees), 1e-12),
+               "ISS eclipse fraction left (1/pi) acos(sqrt(1-(Rp/r)^2)/cos tilt)");
+        require(nearRel(geo.eclipseFraction(), analytic(kGeoRadius, degrees), 1e-12),
+               "Geostationary eclipse fraction left (1/pi) acos(sqrt(1-(Rp/r)^2)/cos tilt)");
+        // tilt only ever takes eclipse away: never negative, never more than
+        // the coplanar worst case, and never rising as tilt climbs.
         require(iss.eclipseFraction() <= analytic(kIssRadius, 0.0) + 1e-12
                    && geo.eclipseFraction() <= analytic(kGeoRadius, 0.0) + 1e-12,
-               "Beta increased the eclipse above its coplanar worst case");
+               "Tilt increased the eclipse above its coplanar worst case");
         require(iss.eclipseFraction() <= previousIss + 1e-12,
-               "ISS eclipse rose as Beta grew");
+               "ISS eclipse rose as tilt grew");
         require(geo.eclipseFraction() <= previousGeo + 1e-12,
-               "Geostationary eclipse rose as Beta grew");
+               "Geostationary eclipse rose as tilt grew");
         previousIss = iss.eclipseFraction();
         previousGeo = geo.eclipseFraction();
         // The summary still describes what the hull sees, tilted and all.
         require(std::abs(sampledEclipseFraction(iss, kIssPeriod) - iss.eclipseFraction())
                    < 2.0 / 20000.0,
-               "Instantaneous eclipse disagrees with the Beta-tilted average (ISS)");
+               "Instantaneous eclipse disagrees with the tilt-weighted average (ISS)");
     }
-    // The tabulated critical angles, to the tenth of a degree: the Beta
+    // The tabulated critical angles, to the tenth of a degree: the tilt
     // above which each radius is not eclipsed at all.
     const auto criticalDegrees = [](double radius) {
         const double ratio = core::PlanetRadiusM / radius;
@@ -335,42 +345,42 @@ void eclipseFractionFollowsBeta() {
     const double issCritical = criticalDegrees(kIssRadius);
     const double geoCritical = criticalDegrees(kGeoRadius);
     require(std::abs(issCritical - 69.7) <= 0.05,
-           "The ISS-like critical Beta is not the tabulated 69.7 deg");
+           "The ISS-like critical tilt is not the tabulated 69.7 deg");
     require(std::abs(geoCritical - 8.7) <= 0.05,
-           "The geostationary critical Beta is not the tabulated 8.7 deg");
+           "The geostationary critical tilt is not the tabulated 8.7 deg");
     // A tenth of a degree either side of each boundary: a shadow below it,
     // none above it.
     const StellarExposureEvaluator issLast{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo,
-                                           (issCritical - 0.1) * kDegToRad}};
+                                           issCritical - 0.1}};
     const StellarExposureEvaluator issClear{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo,
-                                            (issCritical + 0.1) * kDegToRad}};
+                                            issCritical + 0.1}};
     require(issLast.eclipseFraction() > 0.0,
-           "An ISS-like orbit stopped being eclipsed before its critical Beta");
+           "An ISS-like orbit stopped being eclipsed before its critical tilt");
     require(issClear.eclipseFraction() == 0.0,
-           "An ISS-like orbit was still eclipsed above its critical Beta");
+           "An ISS-like orbit was still eclipsed above its critical tilt");
     const StellarExposureEvaluator geoLast{O{kFullSun, kGeoPeriod, kGeoRadius, kEarthAlbedo,
-                                           (geoCritical - 0.1) * kDegToRad}};
+                                           geoCritical - 0.1}};
     const StellarExposureEvaluator geoClear{O{kFullSun, kGeoPeriod, kGeoRadius, kEarthAlbedo,
-                                            (geoCritical + 0.1) * kDegToRad}};
+                                            geoCritical + 0.1}};
     require(geoLast.eclipseFraction() > 0.0,
-           "A geostationary orbit stopped being eclipsed before its critical Beta");
+           "A geostationary orbit stopped being eclipsed before its critical tilt");
     require(geoClear.eclipseFraction() == 0.0,
-           "A geostationary orbit was still eclipsed above its critical Beta");
+           "A geostationary orbit was still eclipsed above its critical tilt");
     // And the eclipse is really gone above the boundary, not merely small:
     // a whole orbit of sampling finds no shadow at all.
     for (int step = 0; step <= 4000; ++step) {
         const double t = step * kIssPeriod / 4000.0;
-        require(issClear.evaluate(t).sunlit, "A shadow survived above the critical Beta (ISS)");
-        require(geoClear.evaluate(t).sunlit, "A shadow survived above the critical Beta (GEO)");
+        require(issClear.evaluate(t).sunlit, "A shadow survived above the critical tilt (ISS)");
+        require(geoClear.evaluate(t).sunlit, "A shadow survived above the critical tilt (GEO)");
     }
     // Continuity at the boundary. Approaching from below, the eclipsed arc
     // shrinks smoothly toward nothing; there is no step to fall off.
-    const double betaCritical = std::acos(std::sqrt(1.0
-        - std::pow(core::PlanetRadiusM / kIssRadius, 2)));
+    const double tiltCritical = std::acos(std::sqrt(1.0
+        - std::pow(core::PlanetRadiusM / kIssRadius, 2))) / kDegToRad;
     double shrinking = 1.0;
-    for (double slack = 8e-3; slack >= 1e-7; slack *= 0.5) {
+    for (double slack = 0.45; slack >= 5e-6; slack *= 0.5) {
         const StellarExposureEvaluator near{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo,
-                                            betaCritical - slack}};
+                                            tiltCritical - slack}};
         const double fraction = near.eclipseFraction();
         require(fraction > 0.0, "The eclipse vanished before it reached the boundary");
         require(fraction < shrinking, "The eclipse did not close smoothly toward the boundary");
@@ -382,112 +392,179 @@ void eclipseFractionFollowsBeta() {
     // On the boundary itself it is zero, which is where the limit was
     // already heading, and above it stays zero: continuous, not a jump.
     const StellarExposureEvaluator onBoundary{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo,
-                                              betaCritical}};
+                                              tiltCritical}};
     require(onBoundary.eclipseFraction() < 1e-6, "The eclipse did not close at the boundary");
     require(onBoundary.eclipseFraction() <= shrinking + 1e-6,
            "The eclipse jumped at the boundary instead of closing");
 }
 
-// Beta is not only an eclipse knob: it tilts a constant cross-track share
+// The world radius is authored now, so it is the shadow cylinder's radius
+// and it moves the eclipse exactly the way the orbit radius does - because
+// in the formula they are one ratio. This is the whole reason the field
+// exists: without it a Jovian preset was an Earth casting an Earth's
+// shadow about a Jovian-sized orbit, which is not a slightly wrong sky
+// but a different one.
+void eclipseFollowsTheAuthoredWorldRadius() {
+    const auto analytic = [](double planetRadius, double orbitRadius) {
+        return std::asin(planetRadius / orbitRadius) / kPi;
+    };
+    // The default is the constant, so every record written before the
+    // field existed still computes exactly what it used to.
+    const StellarExposureEvaluator earthDefault{O{kFullSun, kIssPeriod, kIssRadius}};
+    require(near(earthDefault.planetRadiusMeters(), core::PlanetRadiusM, 1e-12),
+           "The default world radius is not the planet constant");
+    require(nearRel(earthDefault.eclipseFraction(), analytic(core::PlanetRadiusM, kIssRadius), 1e-12),
+           "The default world stopped matching the analytic eclipse");
+    // A Jovian world with the same 420 km of altitude: 69911 km of shadow
+    // cylinder instead of 6371 km. The eclipse fraction runs up toward its
+    // ceiling of a half, which is as much as any circular orbit can get -
+    // the shadow is a half-space, so half the revolution is always in sun.
+    const double jovianRadius = 69911000.0;
+    const double jovianOrbit = jovianRadius + 420000.0;
+    const StellarExposureEvaluator jovian{
+        O{kFullSun, kIssPeriod, jovianOrbit, kEarthAlbedo, 0.0, 0.0, jovianRadius}};
+    require(!jovian.dark(), "A low Jovian orbit was refused a sky");
+    require(nearRel(jovian.eclipseFraction(), analytic(jovianRadius, jovianOrbit), 1e-12),
+           "The Jovian eclipse departed from asin(Rp/r)/pi");
+    require(jovian.eclipseFraction() > 0.46 && jovian.eclipseFraction() < 0.47,
+           "A low Jovian orbit did not ride just under the half-orbit ceiling");
+    require(jovian.eclipseFraction() > earthDefault.eclipseFraction(),
+           "A world eleven times wider did not deepen the eclipse");
+    // A Mercurian world at the same orbit radius barely occludes at all.
+    const double mercurialRadius = 2439700.0;
+    const StellarExposureEvaluator mercurial{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0, 0.0, mercurialRadius}};
+    require(mercurial.eclipseFraction() < earthDefault.eclipseFraction(),
+           "A small world did not shrink the eclipse");
+    require(nearRel(mercurial.eclipseFraction(), analytic(mercurialRadius, kIssRadius), 1e-12),
+           "The Mercurian eclipse departed from asin(Rp/r)/pi");
+    // And the world cannot be as big as the orbit or bigger: that is a
+    // Hull buried in a planet, not a sky, and it is refused rather than
+    // rounded into a permanent eclipse.
+    const StellarExposureEvaluator buried{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0, 0.0, kIssRadius}};
+    require(buried.dark(), "An orbit at the world's own surface was not refused");
+    const StellarExposureEvaluator inside{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0, 0.0, kIssRadius + 1.0e6}};
+    require(inside.dark(), "An orbit inside the world was not refused");
+    // A world with no radius, or no finite one, makes no shadow either.
+    for (const double radius : {0.0, -core::PlanetRadiusM,
+                               std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::infinity()}) {
+        const StellarExposureEvaluator noWorld{
+            O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0, 0.0, radius}};
+        require(noWorld.dark(), "A world with no usable radius was given a sky");
+    }
+}
+
+// tilt is not only an eclipse knob: it tilts a constant cross-track share
 // of the star into the sky, which is the only reason the cross-track hull
 // faces ever get direct light at all.
-void betaTiltsTheSunAcrossTrack() {
-    const double beta = 35.0 * kDegToRad;
-    const StellarExposureEvaluator tilted{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, beta}};
-    require(!tilted.dark(), "Beta 35 deg was refused");
-    require(near(tilted.betaAngleRadians(), beta, 1e-12), "Evaluator dropped the authored Beta");
+void tiltLiftsTheSunAcrossTrack() {
+    const double tiltDegrees = 35.0;
+    const double tilt = tiltDegrees * kDegToRad;
+    const StellarExposureEvaluator tilted{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, tiltDegrees}};
+    require(!tilted.dark(), "Tilt 35 deg was refused");
+    require(near(tilted.axialTiltDegrees(), tiltDegrees, 1e-12),
+            "Evaluator dropped the authored axial tilt");
     for (int step = 0; step <= 997; ++step) {
         const double t = step * kIssPeriod / 997.0;
         const auto s = tilted.evaluate(t).sunDirection;
         // The cross-track component is fixed all the way round the orbit.
-        require(near(s[1], std::sin(beta), 1e-12), "The cross-track sun component moved");
+        require(near(s[1], std::sin(tilt), 1e-12), "The cross-track sun component moved");
         // What is left of the star still sweeps the whole circle in-plane.
-        require(nearRel(std::sqrt(s[0] * s[0] + s[2] * s[2]), std::cos(beta), 1e-12),
-               "The in-plane sweep lost its cos(beta) share");
-        require(nearRel(length(s), 1.0, 1e-12), "Beta put the star off the unit sphere");
+        require(nearRel(std::sqrt(s[0] * s[0] + s[2] * s[2]), std::cos(tilt), 1e-12),
+               "The in-plane sweep lost its cos(tilt) share");
+        require(nearRel(length(s), 1.0, 1e-12), "Tilt put the star off the unit sphere");
     }
-    // Local noon is still in the zenith plane, lifted only by Beta.
-    require(vectorNear(tilted.evaluate(0.0).sunDirection, {0.0, std::sin(beta), std::cos(beta)}, 1e-12),
+    // Local noon is still in the zenith plane, lifted only by tilt.
+    require(vectorNear(tilted.evaluate(0.0).sunDirection, {0.0, std::sin(tilt), std::cos(tilt)}, 1e-12),
            "Local noon did not put the tilted star in the zenith plane");
     // The sweep rate is the Orbital period, unchanged by the tilt.
     require(vectorNear(tilted.evaluate(kIssPeriod).sunDirection,
                      tilted.evaluate(0.0).sunDirection, 1e-9),
-           "Beta changed the sweep period");
+           "Tilt changed the sweep period");
     require(vectorNear(tilted.evaluate(2.0 * kIssPeriod).sunDirection,
                      tilted.evaluate(0.0).sunDirection, 1e-9),
-           "Beta broke the sweep's periodicity");
-    // A mirrored Beta mirrors the cross-track component and leaves the
-    // eclipse exactly as it was, because the shadow only knows cos(beta).
-    const StellarExposureEvaluator mirrored{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, -beta}};
-    require(near(mirrored.evaluate(0.0).sunDirection[1], -std::sin(beta), 1e-12),
-           "A negative Beta did not mirror the cross-track component");
+           "Tilt broke the sweep's periodicity");
+    // A mirrored tilt mirrors the cross-track component and leaves the
+    // eclipse exactly as it was, because the shadow only knows cos(tilt).
+    const StellarExposureEvaluator mirrored{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, -tiltDegrees}};
+    require(near(mirrored.evaluate(0.0).sunDirection[1], -std::sin(tilt), 1e-12),
+           "A negative tilt did not mirror the cross-track component");
     require(near(mirrored.eclipseFraction(), tilted.eclipseFraction(), 1e-12),
-           "A mirrored Beta changed the eclipse fraction");
+           "A mirrored tilt changed the eclipse fraction");
 }
 
-// The cross-track faces come alive with Beta; the nadir underside never
-// gets a share of the direct beam, whatever Beta is doing.
-void crossTrackFacesLightUpWithBeta() {
+// The cross-track faces come alive with tilt; the nadir underside never
+// gets a share of the direct beam, whatever tilt is doing.
+void crossTrackFacesLightUpWithTilt() {
     const double alpha = 0.4;
     const StellarExposureEvaluator coplanar{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo}};
-    // At Beta = 0 no cross-track normal ever sees the direct beam.
+    // At zero tilt no cross-track normal ever sees the direct beam.
     for (int step = 0; step <= 997; ++step) {
         const double t = step * kIssPeriod / 997.0;
         const auto exposure = coplanar.evaluate(t);
         require(coplanar.directFluxWPerM2({0.0, 1.0, 0.0}, alpha, exposure) == 0.0,
-               "A cross-track face caught direct light at Beta = 0");
+               "A cross-track face caught direct light at zero tilt");
         require(coplanar.directFluxWPerM2({0.0, -1.0, 0.0}, alpha, exposure) == 0.0,
-               "The opposite cross-track face caught direct light at Beta = 0");
+               "The opposite cross-track face caught direct light at zero tilt");
     }
-    // Growing Beta hands the +y faces an ever-larger share, exactly
+    // Growing tilt hands the +y faces an ever-larger share, exactly
     // sin(beta) at Local noon, and monotonically so.
     double previous = -1.0;
     for (double degrees = 0.0; degrees <= 85.0; degrees += 5.0) {
         const double beta = degrees * kDegToRad;
-        const StellarExposureEvaluator tilted{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, beta}};
+        const StellarExposureEvaluator tilted{
+            O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, degrees}};
         const double flux = tilted.directFluxWPerM2({0.0, 1.0, 0.0}, alpha, tilted.evaluate(0.0));
         require(nearRel(flux, std::sin(beta) * alpha * kFullSun, 1e-12),
                "Cross-track incidence at Local noon is not sin(beta)");
-        require(flux > previous, "Cross-track direct flux did not grow with Beta");
+        require(flux > previous, "Cross-track direct flux did not grow with tilt");
         previous = flux;
     }
     require(previous > 0.99 * alpha * kFullSun,
-           "The cross-track faces never got near full sun however far Beta went");
-    // The tilt picks a side: +y takes the light for a positive Beta, -y
-    // for a negative one, and neither face gets it at Beta = 0.
-    const double beta = 35.0 * kDegToRad;
-    const StellarExposureEvaluator north{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, beta}};
-    const StellarExposureEvaluator south{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, -beta}};
+           "The cross-track faces never got near full sun however far tilt went");
+    // The tilt picks a side: +y takes the light for a positive tilt, -y
+    // for a negative one, and neither face gets it at zero tilt.
+    const double tiltDegrees = 35.0;
+    const double beta = tiltDegrees * kDegToRad;
+    const StellarExposureEvaluator north{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, tiltDegrees}};
+    const StellarExposureEvaluator south{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, -tiltDegrees}};
     const auto noon = north.evaluate(0.0);
     const auto mirroredNoon = south.evaluate(0.0);
     require(north.directFluxWPerM2({0.0, 1.0, 0.0}, alpha, noon) > 0.0,
-           "A positive Beta left the +y face dark");
+           "A positive tilt left the +y face dark");
     require(north.directFluxWPerM2({0.0, -1.0, 0.0}, alpha, noon) == 0.0,
-           "A positive Beta lit the -y face");
+           "A positive tilt lit the -y face");
     require(south.directFluxWPerM2({0.0, -1.0, 0.0}, alpha, mirroredNoon) > 0.0,
-           "A negative Beta left the -y face dark");
+           "A negative tilt left the -y face dark");
     require(south.directFluxWPerM2({0.0, 1.0, 0.0}, alpha, mirroredNoon) == 0.0,
-           "A negative Beta lit the +y face");
+           "A negative tilt lit the +y face");
     require(near(north.directFluxWPerM2({0.0, 1.0, 0.0}, alpha, noon),
                 south.directFluxWPerM2({0.0, -1.0, 0.0}, alpha, mirroredNoon), 1e-12),
            "The mirrored cross-track faces took unequal shares");
 }
 
 // The nadir-facing underside has Planet shine and nothing else. This is the
-// gate that makes that a guarantee rather than an accident of Beta = 0.
+// gate that makes that a guarantee rather than an accident of zero tilt.
 void nadirNeverSeesDirectSun() {
     const double alpha = 0.4;
     const std::array<double, 3> nadir{0.0, 0.0, -1.0};
     for (double degrees = 0.0; degrees <= 89.0; degrees += 1.0) {
         const StellarExposureEvaluator tilted{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo,
-                                              degrees * kDegToRad}};
+                                              degrees}};
         for (int step = 0; step <= 997; ++step) {
             const double t = step * kIssPeriod / 997.0;
             require(tilted.directFluxWPerM2(nadir, alpha, tilted.evaluate(t)) == 0.0,
                    "The nadir normal received direct flux");
         }
         // Non-vacuity: the roof is taking full sun at every one of these
-        // Betas, so the nadir reading is a gate and not a dead evaluator.
+        // tilts, so the nadir reading is a gate and not a dead evaluator.
         require(tilted.directFluxWPerM2({0.0, 0.0, 1.0}, alpha, tilted.evaluate(0.0)) > 0.0,
                "The fixture went dark while testing the nadir gate");
         // And the underside is not left with nothing: Planet shine still
@@ -528,7 +605,8 @@ void nadirNeverSeesDirectSun() {
 void phaseOffsetShiftsTheProfile() {
     const StellarExposureEvaluator reference{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo}};
     const double offset = 0.4 * kIssPeriod;
-    const StellarExposureEvaluator shifted{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0, offset}};
+    const StellarExposureEvaluator shifted{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0, offsetPercent(offset, kIssPeriod)}};
     require(!shifted.dark(), "A phase offset was refused");
     require(near(shifted.phaseOffsetSeconds(), offset, 1e-12), "Evaluator dropped the authored phase offset");
     // The whole profile moves: the shifted exposure at t is the unshifted
@@ -555,18 +633,18 @@ void phaseOffsetShiftsTheProfile() {
            "Zero offset no longer opens at Local noon");
     require(!shifted.evaluate(0.0).sunlit, "A 0.4-period offset did not open the run inside the eclipse");
     const StellarExposureEvaluator midnight{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0,
-                                            kIssPeriod / 2.0}};
+                                            50.0}};
     require(!midnight.evaluate(0.0).sunlit, "A half-period offset did not open the run at local midnight");
     require(vectorNear(midnight.evaluate(kIssPeriod / 2.0).sunDirection, {0.0, 0.0, 1.0}, 1e-9),
            "A half-period offset did not return to Local noon half an orbit later");
     // Offsets fold: whole extra periods change nothing, and a negative
     // offset is the same shift travelled the long way round the cycle.
     const StellarExposureEvaluator wrapped{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0,
-                                           offset + 3.0 * kIssPeriod}};
+                                           offsetPercent(offset, kIssPeriod) + 300.0}};
     const StellarExposureEvaluator backwards{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0,
-                                              -offset}};
+                                              -offsetPercent(offset, kIssPeriod)}};
     const StellarExposureEvaluator forwardsLong{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0,
-                                                kIssPeriod - offset}};
+                                                100.0 - offsetPercent(offset, kIssPeriod)}};
     for (int step = 0; step <= 997; ++step) {
         const double t = step * kIssPeriod / 997.0;
         require(vectorNear(wrapped.evaluate(t).sunDirection, shifted.evaluate(t).sunDirection, 1e-9),
@@ -575,10 +653,11 @@ void phaseOffsetShiftsTheProfile() {
                "A negative offset is not the folded-forward positive shift");
     }
     // A tilted and shifted orbit shifts just the same.
-    const double beta = 35.0 * kDegToRad;
-    const StellarExposureEvaluator tiltedReference{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, beta}};
-    const StellarExposureEvaluator tiltedShifted{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, beta,
-                                                 offset}};
+    const StellarExposureEvaluator tiltedReference{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 35.0}};
+    const StellarExposureEvaluator tiltedShifted{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 35.0,
+          offsetPercent(offset, kIssPeriod)}};
     for (int step = 0; step <= 997; ++step) {
         const double t = step * kIssPeriod / 997.0;
         require(vectorNear(tiltedShifted.evaluate(t).sunDirection,
@@ -604,9 +683,9 @@ void directFlux() {
     require(iss.directFluxWPerM2({0.0, 0.0, -1.0}, alpha, noon) == 0.0,
            "A face turned away from the star received flux");
     require(iss.directFluxWPerM2({0.0, 1.0, 0.0}, alpha, noon) == 0.0,
-           "Cross-track face received light at Beta = 0");
+           "Cross-track face received light at zero tilt");
     require(iss.directFluxWPerM2({0.0, 1.0, 0.0}, alpha, raking) == 0.0,
-           "Cross-track face received light at Beta = 0 later in the orbit");
+           "Cross-track face received light at zero tilt later in the orbit");
     // Eclipse puts every surface in the dark, whichever way it faces.
     const auto midnight = iss.evaluate(kIssPeriod / 2.0);
     for (const auto& face : std::array<std::array<double, 3>, 6>{{{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}}})
@@ -865,7 +944,7 @@ void extremeFinitePhases() {
             scene.setOrbit(O{kFullSun, period, kIssRadius, kEarthAlbedo, 0.3, offset});
             const StellarExposureEvaluator evaluator{*scene.orbit()};
             const StellarExposureEvaluator reduced{O{kFullSun, period, kIssRadius, kEarthAlbedo,
-                                                     0.3, std::fmod(offset, period)}};
+                                                     0.3, std::fmod(offset, 100.0)}};
             require(!evaluator.dark(), "An accepted finite phase offset lost its sky");
             for (const double elapsed : {0.0, period / 4.0, -period / 4.0, largest, -largest}) {
                 allocations = 0;
@@ -902,20 +981,20 @@ void extremeFinitePhases() {
 }
 
 void nearPoleOrbitsKeepTheirSky() {
-    // Cover both sides of the former cos(Beta) <= 1e-9 guard, the reported
+    // Cover both sides of the former cos(tilt) <= 1e-9 guard, the reported
     // reproduction, and the closest representable angle inside each pole.
-    for (const double magnitude : {kHalfPi - 2e-9, kHalfPi - 5e-10,
-                                   kHalfPi - 1e-10, std::nextafter(kHalfPi, 0.0)}) {
+    for (const double magnitude : {90.0 - 1e-6, 90.0 - 1e-7,
+                                   90.0 - 1e-8, std::nextafter(90.0, 0.0)}) {
         for (const double sign : {-1.0, 1.0}) {
             const double beta = sign * magnitude;
             I authored(1, 1);
             O orbit{};
-            orbit.betaAngleRad = beta;
+            orbit.axialTiltDeg = beta;
             authored.setOrbit(orbit);
             I loaded;
             loaded.deserialize(authored.serialize());
-            require(loaded.orbit().has_value() && loaded.orbit()->betaAngleRad == beta,
-                    "A valid near-pole Beta did not survive loading");
+            require(loaded.orbit().has_value() && loaded.orbit()->axialTiltDeg == beta,
+                    "A valid near-pole tilt did not survive loading");
             for (const auto& record : {*authored.orbit(), *loaded.orbit()}) {
                 const StellarExposureEvaluator evaluator{record};
                 require(!evaluator.dark(), "An accepted near-pole Orbit silently lost its sky");
@@ -928,7 +1007,8 @@ void nearPoleOrbitsKeepTheirSky() {
                                 && near(length(exposure.sunDirection), 1.0, 1e-14),
                             "Near-pole geometry lost its unit sun direction or clear sky");
                     require(near(evaluator.directFluxWPerM2({0.0, sign, 0.0}, 1.0, exposure),
-                                 record.stellarIrradianceWPerM2 * std::sin(magnitude), 1e-9),
+                                 record.stellarIrradianceWPerM2
+                                     * std::sin(magnitude * kDegToRad), 1e-9),
                             "The pole-facing cross-track face lost direct stellar heating");
                     require(evaluator.directFluxWPerM2({0.0, -sign, 0.0}, 1.0, exposure) == 0.0,
                             "The opposite cross-track face received direct light");
@@ -960,15 +1040,16 @@ void refusedInputs() {
         require(evaluator.directFluxWPerM2({0.0, 0.0, 1.0}, 1.0, exposure) == 0.0,
                "Invalid evaluator emitted flux");
     }
-    // A Beta beyond the orbit pole is refused rather than swept, and the
+    // A tilt beyond the orbit pole is refused rather than swept, and the
     // pole itself with it: there is no in-plane sweep left to make.
-    for (const double beta : {1.6, kHalfPi, -kHalfPi, -1.6, 3.0, nan, inf}) {
-        const StellarExposureEvaluator tilted{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, beta}};
-        require(tilted.dark(), "A Beta beyond the orbit pole was not refused");
-        require(tilted.evaluate(10.0).sunDirection == std::array<double, 3>{0.0, 0.0, 0.0}
-                   && !tilted.evaluate(10.0).sunlit,
-               "A refused Beta still produced a sun");
-        require(tilted.eclipseFraction() == 0.0, "A refused Beta still reported an eclipse fraction");
+    for (const double tilt : {91.0, 90.0, -90.0, -91.0, 180.0, nan, inf}) {
+        const StellarExposureEvaluator beyond{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, tilt}};
+        require(beyond.dark(), "A tilt beyond the pole was not refused");
+        require(beyond.evaluate(10.0).sunDirection == std::array<double, 3>{0.0, 0.0, 0.0}
+                   && !beyond.evaluate(10.0).sunlit,
+               "A refused tilt still produced a sun");
+        require(beyond.eclipseFraction() == 0.0,
+               "A refused tilt still reported an eclipse fraction");
     }
     // A non-finite phase offset is refused the same way; every finite one,
     // however absurd, is only ever a shift and folds cleanly.
@@ -978,7 +1059,7 @@ void refusedInputs() {
         require(shifted.dark(), "A non-finite phase offset was not refused");
     }
     const StellarExposureEvaluator huge{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0,
-                                         1.0e12}};
+                                         offsetPercent(1.0e12, kIssPeriod)}};
     const StellarExposureEvaluator plain{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo}};
     require(!huge.dark() && std::isfinite(huge.evaluate(1234.5).sunDirection[0]),
             "A huge finite phase offset did not fold");
@@ -993,13 +1074,13 @@ CellAtmosphereExpansion litGeometry(double irradiance = kFullSun, double albedo 
     return expandCellAtmosphere(scene);
 }
 
-// The same fixture under a tilted, shifted sky: Beta off the coplanar
+// The same fixture under a tilted, shifted sky: tilt off the coplanar
 // worst case and the clock opened part-way through the eclipse.
-CellAtmosphereExpansion tiltedGeometry(double betaDegrees, double phaseOffsetSeconds) {
+CellAtmosphereExpansion tiltedGeometry(double tiltDegrees, double phaseOffsetSeconds) {
     I scene(2, 2);
     scene.setHullType(I::HullType::BareSkin);
-    scene.setOrbit(O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo,
-                    betaDegrees * kDegToRad, phaseOffsetSeconds});
+    scene.setOrbit(O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, tiltDegrees,
+                    offsetPercent(phaseOffsetSeconds, kIssPeriod)});
     return expandCellAtmosphere(scene);
 }
 
@@ -1016,11 +1097,12 @@ void expansionCarriesTheOrbit() {
     scene.setOrbit(orbit);
     const auto thermal = expandThermal(scene);
     require(thermal.orbit == orbit, "Bridge did not expose the authored Orbit");
-    // Beta and the phase offset ride along with the rest of the record.
-    const O tilted{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.6, 1234.0};
+    // tilt and the phase offset ride along with the rest of the record.
+    const O tilted{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.6,
+                  offsetPercent(1234.0, kIssPeriod)};
     scene.setOrbit(tilted);
     require(expandThermal(scene).orbit == tilted,
-            "The bridge dropped the authored Beta or phase offset");
+            "The bridge dropped the authored tilt or phase offset");
     // The Hull's own full-sun field stays for the standalone compartment
     // runtime; the Orbit only takes precedence on the native path.
     require(thermal.hull && thermal.hull->fullSunIrradianceKWPerM2 == 1.361,
@@ -1063,15 +1145,15 @@ void atMostHalfTheHullIsLit() {
            "Eclipse left part of the hull lit");
 }
 
-// The authored Beta and phase offset reach the transport and change what
+// The authored tilt and phase offset reach the transport and change what
 // the hull is under, without disturbing the ledger, the audit or replay.
 void betaAndPhaseReachTheTransport() {
     const double offset = 0.4 * kIssPeriod;
     CellAtmosphereTransport runtime(tiltedGeometry(35.0, offset));
     const auto& sky = runtime.exposureEvaluator();
-    require(!sky.dark() && near(sky.betaAngleRadians(), 35.0 * kDegToRad, 1e-12)
+    require(!sky.dark() && near(sky.axialTiltDegrees(), 35.0, 1e-12)
                && near(sky.phaseOffsetSeconds(), offset, 1e-9),
-           "The transport did not carry the authored Beta and phase offset");
+           "The transport did not carry the authored tilt and phase offset");
     // The run opens part-way through an eclipse rather than at Local noon.
     require(!sky.evaluate(0.0).sunlit, "The authored offset did not open the run inside the eclipse");
     require(sky.evaluate(0.4 * kIssPeriod).sunlit, "The shifted day did not arrive when it should");
@@ -1091,9 +1173,9 @@ void betaAndPhaseReachTheTransport() {
     };
     CellAtmosphereTransport flat(litGeometry());
     require(crossTrackDirect(runtime, 0.4 * kIssPeriod) > 0.0,
-           "Cross-track hull took no direct sun at Beta = 35 deg");
+           "Cross-track hull took no direct sun at tilt = 35 deg");
     require(crossTrackDirect(flat, 0.4 * kIssPeriod) == 0.0,
-           "Cross-track hull took direct sun at Beta = 0");
+           "Cross-track hull took direct sun at zero tilt");
     // The underside stays dark all the way round the tilted orbit, while
     // the roof keeps taking sun: the gate is real, not a dark fixture.
     for (int step = 0; step <= 400; ++step) {
@@ -1101,11 +1183,11 @@ void betaAndPhaseReachTheTransport() {
         require(nadirDirect(runtime, t) == 0.0, "The nadir hull took direct stellar power");
     }
     require(crossTrackDirect(runtime, 0.4 * kIssPeriod) > 0.0, "Non-vacuity of the tilted cross-track hull");
-    // At most half the hull is lit under the tilt, exactly as under Beta 0.
+    // At most half the hull is lit under the tilt, exactly as under tilt 0.
     for (int step = 0; step <= 400; ++step) {
         const double t = step * kIssPeriod / 400.0;
         const auto fraction = litArea(runtime, runtime.exposureEvaluator().evaluate(t));
-        require(fraction <= 0.5 + 1e-9, "More than half the hull was lit at Beta = 35 deg");
+        require(fraction <= 0.5 + 1e-9, "More than half the hull was lit at tilt = 35 deg");
     }
     // Walk out of the eclipse the run opened inside and into the shifted
     // daylight, where the tilted hull is actually taking starlight.
@@ -1115,7 +1197,7 @@ void betaAndPhaseReachTheTransport() {
     require(runtime.structure().paths.absorbedSolarJ > 0.0L,
            "A tilted, shifted orbit delivered no stellar energy");
     // The tilted, shifted sky is still allocation-free on the successful
-    // path: carrying Beta and the offset adds no heap work per step.
+    // path: carrying tilt and the offset adds no heap work per step.
     CellAtmosphereTransport probe(tiltedGeometry(35.0, offset));
     require(probe.advance(0.1), "Tilted warm-up step refused");
     tracking = true;
@@ -1398,7 +1480,7 @@ void solarCycleOverridesTheOrbit() {
     // full level must still deliver full sun.
     I eclipsed(2, 2);
     eclipsed.setHullType(I::HullType::BareSkin);
-    eclipsed.setOrbit(O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0, kIssPeriod / 2.0});
+    eclipsed.setOrbit(O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.0, 50.0});
     const auto litByOrbitOnly = expandCellAtmosphere(eclipsed);
     CellAtmosphereTransport orbitOnly(litByOrbitOnly);
     advance(orbitOnly, 30.0);
@@ -1758,7 +1840,7 @@ void summaryReadoutsTrackTheOrbit() {
     require(near(low.eclipseDurationSeconds(), low.eclipseFraction() * kIssPeriod, 1e-12),
             "Eclipse duration is not the eclipse fraction over the Orbital period");
     // The spec's reference table: 35.9 min of eclipse for an ISS-like
-    // orbit at Beta = 0.
+    // orbit at zero tilt.
     require(near(low.eclipseDurationSeconds() / 60.0, 35.9, 0.2),
             "ISS-like eclipse duration left the reference table");
     require(near(low.groundDriftDegreesPerDay(),
@@ -1777,7 +1859,7 @@ void summaryReadoutsTrackTheOrbit() {
     require(near(held.groundDriftDegreesPerDay(), 0.0, 1e-9),
             "a Geostationary orbit still reported Ground drift");
     // And the other row of the same table: 69.3 min of eclipse at
-    // geostationary, Beta = 0.
+    // geostationary, zero tilt.
     require(near(held.eclipseDurationSeconds() / 60.0, 69.3, 0.5),
             "geostationary eclipse duration left the reference table");
 
@@ -1797,16 +1879,16 @@ void summaryReadoutsTrackTheOrbit() {
                                         kEarthAlbedo}};
     require(slow.groundDriftDegreesPerDay() < 0.0, "a super-synchronous orbit did not drift west");
 
-    // Beta shortens the eclipse the same way it shortens the fraction, and
+    // tilt shortens the eclipse the same way it shortens the fraction, and
     // the pair still sums to the period. The phase offset moves the
     // eclipse along the clock and never resizes it.
     const StellarExposureEvaluator shallow{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.6}};
     require(shallow.eclipseDurationSeconds() < low.eclipseDurationSeconds(),
-            "growing Beta did not shorten the eclipse duration");
+            "growing tilt did not shorten the eclipse duration");
     require(near(shallow.eclipseDurationSeconds() + shallow.sunlitDurationSeconds(), kIssPeriod, 1e-9),
             "a tilted orbit stopped summing to the Orbital period");
-    const StellarExposureEvaluator offset{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.6,
-                                          900.0}};
+    const StellarExposureEvaluator offset{
+        O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo, 0.6, offsetPercent(900.0, kIssPeriod)}};
     require(near(offset.eclipseDurationSeconds(), shallow.eclipseDurationSeconds(), 1e-12),
             "the phase offset resized the eclipse duration instead of moving it");
 }
@@ -1831,9 +1913,10 @@ int main() {
         grazingPenumbraIsContinuous();
         sunGeometry();
         eclipseFraction();
-        eclipseFractionFollowsBeta();
-        betaTiltsTheSunAcrossTrack();
-        crossTrackFacesLightUpWithBeta();
+        eclipseFractionFollowsTilt();
+        eclipseFollowsTheAuthoredWorldRadius();
+        tiltLiftsTheSunAcrossTrack();
+        crossTrackFacesLightUpWithTilt();
         nadirNeverSeesDirectSun();
         phaseOffsetShiftsTheProfile();
         directFlux();

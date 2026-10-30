@@ -53,22 +53,46 @@ public:
         // the planet's infrared is derived from it by energy balance, so a
         // reflective world both throws back more sunlight and glows less.
         double albedo{0.3};
-        // Beta angle: the angle between the star's direction and the
-        // orbital plane, in radians, on the open interval (-pi/2, pi/2).
-        // Zero is coplanar - the deepest eclipse the model can hand out, so
-        // it is the default and the author relaxes it deliberately. Growing
-        // Beta both shallows the eclipse and tilts direct sunlight onto the
-        // cross-track hull faces; past the radius-dependent critical angle
-        // there is no eclipse at all. The pole itself is refused: a star
-        // sitting on the orbit normal leaves no in-plane sweep to make.
-        double betaAngleRad{0.0};
-        // Shifts the whole exposure profile along the orbit in seconds, so
-        // a run can open part-way through an eclipse instead of always at
-        // Local noon. It moves when things happen, never what happens: the
+        // Axial tilt, in degrees. The Installation is taken to orbit the
+        // planet's equator with the planet's lean held fixed and pointed at
+        // the star - permanent solstice - so this number is the latitude the
+        // star sits directly over, and that is exactly the angle between the
+        // star and the Installation's orbital plane the exposure model needs.
+        // Zero puts the star over the equator: the deepest eclipse the model
+        // can hand out, so it is the default and the author relaxes it
+        // deliberately. Growing the tilt shallows the eclipse and lifts
+        // direct sunlight onto the cross-track hull faces; past the
+        // radius-dependent critical tilt there is no eclipse at all. The
+        // exact poles are refused: a star sitting on the orbit normal leaves
+        // no in-plane sweep to make. Seasons are not modelled - the lean
+        // never swings away from the star.
+        static constexpr double MaxAxialTiltDegrees = 90.0;
+        // Supported interval: (-90, 90) degrees, finite.
+        double axialTiltDeg{0.0};
+        // Where in the orbit cycle the run starts, as a percentage of the
+        // Orbital period: 0% is Local noon, 50% is local midnight. It lets
+        // a run open part-way through an eclipse instead of always at the
+        // same point. It moves when things happen, never what happens: the
         // eclipse fraction, the lit arc and every flux are untouched.
-        // Zero keeps t = 0 at Local noon. Any finite value is legal - the
-        // evaluator folds it into the cycle.
-        double phaseOffsetS{0.0};
+        // Authored as a percentage so it stays a position on the cycle when
+        // the Orbital period is edited, rather than a fixed number of
+        // seconds that means a different place each time. Any finite value
+        // is legal - the evaluator folds it, so 370% starts where 70% does
+        // and -10% where 90% does.
+        double phaseOffsetPercent{0.0};
+        // The radius of the world being orbited, in metres. This model had
+        // exactly one world before this field existed: core::PlanetRadiusM,
+        // Earth-like and baked in. It is not decoration. It is the radius
+        // of the shadow cylinder and the (Rp/r)^2 of the planet-shine view
+        // factor, so a giant world drawn with an Earth-sized occluder is
+        // not a slightly wrong sky but a different one - a low orbit about
+        // a wide world is eclipsed almost continuously where the same
+        // radius about Earth barely dips into shadow at all. Defaulting to
+        // Earth keeps every record written before this field honest with no
+        // migration: absent means the world they were actually flown about.
+        // Must be positive and below the orbit radius - a Hull cannot sit
+        // inside the ground it orbits.
+        double planetRadiusM{PlanetRadiusM};
         // Throws std::invalid_argument for numbers no sky can be built from.
         void validate() const;
         bool operator==(const Orbit&) const = default;
@@ -244,7 +268,8 @@ private:
     std::optional<PartitionType> partitionType_ = PartitionType::InsulatedPartition;
     // The member initialisers above are the ISS-like sky: full Sun at
     // Earth, a 92.8 minute inertial period at ISS altitude, an Earth-like
-    // Albedo and a coplanar star at Local noon. Authored on creation only.
+    // Albedo and no axial tilt - the star over the equator at Local noon.
+    // Authored on creation only.
     std::optional<Orbit> orbit_ = Orbit{};
     std::vector<Level> levels_;
     void reindex();

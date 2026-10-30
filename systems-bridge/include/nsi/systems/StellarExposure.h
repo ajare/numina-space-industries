@@ -34,10 +34,12 @@ struct StellarExposure {
 // See ADR-0008: the planet's rotation drives nothing, so it is not an input.
 class StellarExposureEvaluator {
 public:
-    // Beta is authored on the Orbit record itself: the angle between the
-    // star and the orbital plane, in radians. It is what tilts a constant
-    // cross-track component of sin(beta) into the sun direction, shallows
-    // the eclipse, and decides whether there is any eclipse at all.
+    // The axial tilt is authored on the Orbit record itself, in degrees:
+    // the planet leans this far toward the star while the Installation rides
+    // its equator, which is the same thing as the star sitting this far out
+    // of the orbital plane. It is what tilts a constant cross-track share
+    // of the star into the sky, shallows the eclipse, and decides whether
+    // there is any eclipse at all.
     // No authored Orbit: a dark sky that answers zero to every flux query,
     // including Planet shine, and leaves the Deep-space sink as it was given.
     StellarExposureEvaluator() noexcept = default;
@@ -49,18 +51,32 @@ public:
     double stellarIrradianceWPerM2() const noexcept { return irradianceWPerM2_; }
     // Geometric shadow fraction, also the orbit-average blocked fraction
     // after penumbra smoothing (not the time spent in total eclipse). It
-    // depends on the radius and Beta alone, never on the phase offset: the
-    // offset moves the eclipse along the clock, it does not resize it.
+    // depends on the radius and the tilt alone, never on the phase offset:
+    // the offset moves the eclipse along the clock, it does not resize it.
     double eclipseFraction() const noexcept { return eclipseFraction_; }
-    // The authored Beta angle and phase offset, as the record carried them.
-    double betaAngleRadians() const noexcept { return betaRadians_; }
-    double phaseOffsetSeconds() const noexcept { return phaseOffsetSeconds_; }
+    // The authored axial tilt (degrees) and phase offset (percent of the
+    // Orbital period), as the record carried them.
+    double axialTiltDegrees() const noexcept { return axialTiltDeg_; }
+    double phaseOffsetPercent() const noexcept { return phaseOffsetPercent_; }
+    // The same offset in seconds, for a readout that wants the clock value
+    // rather than the position on the cycle. Unavailable with no sky, since
+    // there is no period to take a percentage of.
+    double phaseOffsetSeconds() const noexcept {
+        return dark_ ? kUnavailable : phaseOffsetPercent_ / 100.0 * periodSeconds_;
+    }
     // The authored Orbital period and orbital radius, as the record carried
     // them. Unavailable with no sky, so a summary cannot print a period of
     // zero for an Installation that has no orbit at all.
     double orbitalPeriodSeconds() const noexcept { return dark_ ? kUnavailable : periodSeconds_; }
     double radiusFromPlanetCentreMeters() const noexcept {
         return dark_ ? kUnavailable : radiusMeters_;
+    }
+    // The authored world's radius. This is the radius of the shadow
+    // cylinder, so it is the number that decides how much of the orbit
+    // falls into eclipse - exposed for readouts, never for a second
+    // opinion about the geometry.
+    double planetRadiusMeters() const noexcept {
+        return dark_ ? kUnavailable : planetRadiusM_;
     }
 
     // Equivalent full-eclipse and full-sun durations: integrals of eclipse
@@ -107,7 +123,7 @@ public:
     // below the local horizon (n.z < 0) receives nothing while the star is
     // at or below that horizon. The planet is treated as filling the whole
     // below-horizon sky for a surface that faces it, so the nadir-facing
-    // underside never takes direct sunlight at any Beta and Planet shine is
+    // underside never takes direct sunlight at any tilt and Planet shine is
     // the only external heat down there (ADR-0008). A real point element
     // would still catch a grazing beam in the thin annulus just outside the
     // planet's limb; this model deliberately collapses it, because an
@@ -166,9 +182,13 @@ private:
     double irradianceWPerM2_{};
     double periodSeconds_{};
     double radiusMeters_{};
+    // The authored world's radius, the Rp in every (Rp/r)^2 below.
+    double planetRadiusM_{};
     double albedo_{};
-    double betaRadians_{};
-    double phaseOffsetSeconds_{};
+    double axialTiltDeg_{};
+    // The tilt in radians, which is what the sweep is actually built from.
+    double tiltRadians_{};
+    double phaseOffsetPercent_{};
     // The phase offset expressed in turns of the orbit and already folded
     // into [0, 1), so evaluate() only has to fold the elapsed turns and
     // add two numbers of order one.
@@ -177,8 +197,8 @@ private:
     // (Rp/r)^2, the view factor of a surface facing the planet outright.
     double planetViewScale_{};
     double eclipseFraction_{};
-    double sunCrossTrack_{};     // sin(beta), constant through the orbit
-    double sunPlaneScale_{1.0};  // cos(beta), the in-plane share of the sweep
+    double sunCrossTrack_{};     // sin(tilt), constant through the orbit
+    double sunPlaneScale_{1.0};  // cos(tilt), the in-plane share of the sweep
     bool dark_{true};
 };
 

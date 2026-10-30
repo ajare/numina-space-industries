@@ -31,9 +31,13 @@ struct OrbitSummary {
     double stellarIrradianceWPerM2{};
     double orbitalPeriodS{};
     double radiusFromPlanetCentreM{};
-    double betaAngleRad{};
-    double phaseOffsetS{};
+    double axialTiltDeg{};
+    double phaseOffsetPercent{};
     double albedo{};
+    // The world being orbited. Defaults to the one constant this model
+    // carried before the radius was authored, so a summary built from a
+    // record that never set it still reads as Earth rather than zero.
+    double planetRadiusM{nsi::core::PlanetRadiusM};
     // Derived from the authored inputs. NaN when nothing can be derived,
     // which is the default so a summary that never reached a sky cannot
     // report a plausible zero.
@@ -46,6 +50,19 @@ struct OrbitSummary {
     std::string_view modelRevision{};
     std::string_view presetRevision{};
 };
+
+// The phase offset is stored as a percentage of the Orbital period but is
+// authored and read as an angle round the cycle: 0 deg is Local noon and
+// 180 deg is local midnight. The fold puts any stored value on the one
+// turn the slider shows, because 370 deg and 10 deg genuinely do open
+// the run in the same place. A percentage that is not a number folds to no
+// angle at all rather than to a plausible one, so the readout says
+// unavailable instead of quietly claiming noon.
+double phaseAngleFromOffsetPercent(double percent);
+// The inverse, for writing the slider back. A non-finite angle stays
+// non-finite so core refuses the edit out loud instead of storing a zero
+// that moved the run somewhere the author never set it.
+double offsetPercentFromPhaseAngle(double degrees);
 
 // The runtime is optional: with one, the summary reports the model and
 // preset actually simulating and honours its solar-profile override. Without

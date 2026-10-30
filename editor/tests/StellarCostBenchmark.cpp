@@ -77,15 +77,14 @@ constexpr double kCyclePeriod=60.0;
 constexpr double kIssRadius=6791000.0;
 constexpr double kFullSun=1361.0;
 constexpr double kEarthAlbedo=0.3;
-// The tabulated critical Beta for an ISS-radius orbit is 69.7 deg; 80 deg is
+// The critical tilt for an ISS-radius orbit is 69.7 deg; 80 deg is
 // comfortably past it, so the sky never enters shadow and the hull stays in
 // sustained direct light for the whole cycle.
-constexpr double kNoEclipseBetaDegrees=80.0;
+constexpr double kNoEclipseTiltDegrees=80.0;
 // The standing rollout gate carried forward from #35: 10 ms of wall clock
 // per 0.1 simulated seconds. Recorded here so the verdict is computed from
 // the measurement rather than asserted by hand.
 constexpr double kGateTargetMsPer01s=10.0;
-constexpr double kDegToRad=3.14159265358979323846/180.0;
 // The Editor's exposure history is bounded to one minute at a tenth of a
 // second, so 600 samples is the most the trace ever has to resolve.
 constexpr int kTraceHistorySamples=600;
@@ -98,15 +97,15 @@ struct Scenario {
     std::string name;
     std::string sky;
     bool dark{};             // no Orbit authored at all
-    double betaDegrees{};
+    double tiltDegrees{};
     bool centreOnCrossing{}; // prepare so the timed window straddles eclipse entry
     bool wholeCycle{};       // time a complete Orbital period of updates
 };
 const std::vector<Scenario> kScenarios={
     {"rest","no Orbit authored - dark sky - zero stellar term - evaluator never built",true,0.0,false,false},
-    {"sustained-sunlit","Orbit at Beta 80 deg - past the shadow angle - sunlit all cycle",false,kNoEclipseBetaDegrees,false,false},
-    {"eclipse-transition","Orbit at Beta 0 deg - timed window centred on the eclipse entry crossing",false,0.0,true,false},
-    {"full-orbit","Orbit at Beta 0 deg - one complete cycle walked from Local noon",false,0.0,false,true},
+    {"sustained-sunlit","Orbit at 80 deg axial tilt - past the shadow angle - sunlit all cycle",false,kNoEclipseTiltDegrees,false,false},
+    {"eclipse-transition","Orbit at 0 deg axial tilt - timed window centred on the eclipse entry crossing",false,0.0,true,false},
+    {"full-orbit","Orbit at 0 deg axial tilt - one complete cycle walked from Local noon",false,0.0,false,true},
     // Not a fifth sky. The dark-sky control measured again after the whole
     // matrix has run, so host drift across the run - governor, thermals,
     // cache residency - is visible in the same column as the exposure
@@ -120,7 +119,7 @@ I sceneFor(const Scenario& scenario,unsigned size) {
     auto scene=structural_cost::fixture("rest",size);
     if(scenario.dark) scene.setOrbit(std::nullopt);
     else scene.setOrbit(O{kFullSun,kCyclePeriod,kIssRadius,kEarthAlbedo,
-        scenario.betaDegrees*kDegToRad,0.0});
+        scenario.tiltDegrees,0.0});
     return scene;
 }
 double eclipseEntrySeconds(const CellAtmosphereTransport& model) {
