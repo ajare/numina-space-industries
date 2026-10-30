@@ -30,16 +30,24 @@ public:
     enum class PartitionType { BarePartition, ThermalBreak, InsulatedPartition };
     struct PartitionSpec { double transmittanceWPerM2K; };
     static PartitionSpec partitionSpec(PartitionType type);
-    // The authored sky. Pure intensive authored data - irradiance, a period
-    // and a radius - with no temperatures, no runtime inventories and no
-    // solver state, exactly as the Hull's radiative properties already are.
-    // The planet's rotation is deliberately absent: it drives neither
-    // eclipse nor exposure (ADR-0008). Beta angle, phase offset and Planet
-    // shine arrive with their own slices; until then Beta is zero.
+    // The authored sky. Pure intensive authored data - irradiance, a period,
+    // a radius and a reflectivity - with no temperatures, no runtime
+    // inventories and no solver state, exactly as the Hull's radiative
+    // properties already are. The planet's rotation is deliberately absent:
+    // it drives neither eclipse nor exposure (ADR-0008). Its infrared
+    // temperature is likewise absent, because it is derived from irradiance
+    // and Albedo by energy balance rather than typed: a dimmer star then
+    // cools the planet on its own. Beta angle and phase offset arrive with
+    // their own slices; until then Beta is zero.
     struct Orbit {
         double stellarIrradianceWPerM2{1361.0}; // Full Sun at Earth
         double orbitalPeriodS{5570.0};          // Inertial period about the planet
         double radiusFromPlanetCentreM{6791000.0}; // ISS-like altitude
+        // The fraction of incident stellar light the planet reflects, in
+        // [0, 1]. Earth-like. It is the only authored half of Planet shine:
+        // the planet's infrared is derived from it by energy balance, so a
+        // reflective world both throws back more sunlight and glows less.
+        double albedo{0.3};
         // Throws std::invalid_argument for numbers no sky can be built from.
         void validate() const;
         bool operator==(const Orbit&) const = default;

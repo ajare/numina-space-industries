@@ -214,12 +214,19 @@ void orbitHistory() {
     const auto untouched=session.installation();
     for (const auto invalid : {I::Orbit{0.0,5570.0,6791000.0},
                               I::Orbit{1361.0,0.0,6791000.0},
-                              I::Orbit{1361.0,5570.0,nsi::core::PlanetRadiusM}}) {
+                              I::Orbit{1361.0,5570.0,nsi::core::PlanetRadiusM},
+                              I::Orbit{1361.0,5570.0,6791000.0,-0.1},
+                              I::Orbit{1361.0,5570.0,6791000.0,1.1}}) {
         bool refused=false;
         try { session.setOrbit(invalid); } catch (const std::exception&) { refused=true; }
         check(refused && session.installation()==untouched,
               "Invalid orbit reached the document");
     }
+    // Both ends of the Albedo interval are authorable, and the value sticks.
+    session.setOrbit(I::Orbit{1361.0,5570.0,6791000.0,0.0});
+    check(session.installation().orbit()->albedo==0.0,"Albedo 0 was not authored");
+    session.setOrbit(I::Orbit{1361.0,5570.0,6791000.0,1.0});
+    check(session.installation().orbit()->albedo==1.0,"Albedo 1 was not authored");
 }
 void history() {
     EditorSession session; session.newDocument(3,1);

@@ -32,7 +32,8 @@ public:
     // written as real geometry rather than a hard-coded coplanar sun, and
     // defaults to the worst-case eclipse the model wants until Beta is
     // authored in its own slice.
-    // No authored Orbit: a dark sky that answers zero to every flux query.
+    // No authored Orbit: a dark sky that answers zero to every flux query,
+    // including Planet shine, and leaves the Deep-space sink as it was given.
     StellarExposureEvaluator() noexcept = default;
     explicit StellarExposureEvaluator(const core::Installation::Orbit& orbit,
                                      double betaRadians = 0.0) noexcept;
@@ -58,9 +59,51 @@ public:
                             double absorptivity,
                             const StellarExposure& exposure) const noexcept;
 
+    // Planet shine: everything the hull receives from the planet's disc
+    // rather than from the star directly. Two components with two different
+    // fates in Eclipse, which is why they are never added together here.
+
+    // The planet's own infrared temperature, derived by global energy
+    // balance as (irradiance * (1 - albedo) / 4 sigma)^(1/4) and never
+    // authored. A dimmer star or a more reflective planet both leave less to
+    // radiate, so a dead star never leaves a glowing world behind.
+    double planetInfraredTemperatureK() const noexcept { return planetTemperatureK_; }
+    double albedo() const noexcept { return albedo_; }
+
+    // View factor from one planar Structural surface to the planet, the
+    // element-to-sphere result (Rp/r)^2 * max(0, -n . z). A nadir face at
+    // ISS altitude sees 0.880 of its sky; a zenith or vertical face sees
+    // none. This is deliberately not the sky-coverage fraction 1 - cos a,
+    // which is ~35% smaller at that altitude and would understate the load.
+    double planetViewFactor(const std::array<double, 3>& outwardNormal) const noexcept;
+
+    // Planetary infrared arriving at one surface, W/m^2: view * sigma *
+    // T_planet^4. Unaffected by Eclipse, because the ground beneath an
+    // eclipsed station is the planet's own shadowed side, still warm.
+    double planetInfraredFluxWPerM2(const std::array<double, 3>& outwardNormal) const noexcept;
+
+    // Sunlight bounced off the planet's disc, W/m^2: view * albedo *
+    // irradiance, and exactly zero while eclipsed. There is no sunlight in
+    // the shadow to reflect, so without this gate a station would absorb
+    // hundreds of watts while sitting in total darkness.
+    double reflectedSunlightFluxWPerM2(const std::array<double, 3>& outwardNormal,
+                                      const StellarExposure& exposure) const noexcept;
+
+    // The Deep-space sink a surface with this view factor actually radiates
+    // toward: [(1 - F) * T_space^4 + F * T_planet^4]^(1/4). A grey body
+    // absorbs planetary infrared with its emissivity, the same coefficient
+    // with which it emits, so folding the planet into the sink temperature
+    // is exact rather than an approximation and needs no new solver input.
+    // F = 0 returns the bare Deep-space sink unchanged.
+    double effectiveSinkTemperatureK(double spaceTemperatureK, double viewFactor) const noexcept;
+
 private:
     double irradianceWPerM2_{};
     double periodSeconds_{};
+    double albedo_{};
+    double planetTemperatureK_{};
+    // (Rp/r)^2, the view factor of a surface facing the planet outright.
+    double planetViewScale_{};
     double eclipseFraction_{};
     // Zenith cosine below which the star is hidden: -k, with
     // k = sqrt(1 - (Rp/r)^2) / cos(beta). Below -1 the shadow is never

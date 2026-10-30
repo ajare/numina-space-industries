@@ -517,6 +517,13 @@ int runEditor() {
             if (ImGui::InputDouble("Orbit radius from planet centre m", &radius, 0, 0, "%.0f"))
                 edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
                          next.radiusFromPlanetCentreM = radius; session.setOrbit(next); });
+            // The only authored half of Planet shine. The planet's infrared
+            // is derived from this and the irradiance, so there is nothing
+            // else to type and nothing that can go stale.
+            double albedo = orbit->albedo;
+            if (ImGui::InputDouble("Planet albedo", &albedo, 0, 0, "%.3f"))
+                edit([&]{ auto next = session.installation().orbit().value_or(Orbit{});
+                         next.albedo = albedo; session.setOrbit(next); });
         }
         ImGui::EndDisabled();
         ImGui::EndDisabled();

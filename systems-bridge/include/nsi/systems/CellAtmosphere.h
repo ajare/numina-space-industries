@@ -82,6 +82,28 @@ struct ExteriorSolarFace {
                   const StellarExposure& exposure) const noexcept {
         return evaluator.directFluxWPerM2(outwardNormal, absorptivity, exposure) * areaM2 * directScale;
     }
+    // Planet shine arriving on this face, W. Both components are applied
+    // whatever the Door pose: directScale models the collimated direct beam
+    // no longer being intercepted by a leaf swung out of the opening, while
+    // Planet shine is a diffuse field the face both radiates into and
+    // absorbs from. Gating one and not the other would break that balance.
+    // The infrared figure is what *arrives*, not what is absorbed: a grey
+    // body takes it with its emissivity, which the solver already applies
+    // through the effective sink below, so it never enters absorbedSolarW.
+    double planetInfraredW(const StellarExposureEvaluator& evaluator) const noexcept {
+        return evaluator.planetInfraredFluxWPerM2(outwardNormal) * areaM2;
+    }
+    double reflectedSunlightW(const StellarExposureEvaluator& evaluator,
+                             const StellarExposure& exposure) const noexcept {
+        return evaluator.reflectedSunlightFluxWPerM2(outwardNormal, exposure) * absorptivity * areaM2;
+    }
+    // The Deep-space sink this face radiates toward, with the planet's
+    // infrared folded in over the fraction of its view the planet fills.
+    double effectiveSinkTemperatureK(const StellarExposureEvaluator& evaluator,
+                                    double spaceTemperatureK) const noexcept {
+        return evaluator.effectiveSinkTemperatureK(spaceTemperatureK,
+                                                 evaluator.planetViewFactor(outwardNormal));
+    }
 };
 struct CellStructuralThermalState {
     bool enabled{};

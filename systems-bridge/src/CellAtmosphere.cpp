@@ -412,10 +412,23 @@ void CellAtmosphereTransport::structuralStep(double seconds,double midpoint,std:
     // absorptivity * area / 4 weight is gone: there is now a lit side and a
     // dark side, and each surface gets its own sunrise and sunset.
     const auto exposure=exposure_.evaluate(midpoint);
+    // The bare Deep-space sink the authored Hull asks for. Planet shine does
+    // not change that number: it changes what each face sees instead, so a
+    // nadir surface radiates toward a warm world rather than toward 3 K and
+    // Eclipse becomes a cool-down instead of a cliff.
+    const double deepSpaceK=hull ? hull->sinkTemperatureC+station::StationCelsiusOffset : 3.0;
     for (std::size_t i=0;i<structuralExterior_.size();++i) {
         auto& exterior=structuralExterior_[i];
-        exterior.spaceTemperatureK=hull ? hull->sinkTemperatureC+station::StationCelsiusOffset : 3;
-        exterior.absorbedSolarW=exteriorSolar_[i].directW(exposure_,exposure);
+        const auto& face=exteriorSolar_[i];
+        // Planetary infrared arrives as a grey-body flux and leaves as this
+        // face's own emission, both scaled by the same emissivity, so it
+        // folds exactly into the sink the solver already radiates against.
+        exterior.spaceTemperatureK=face.effectiveSinkTemperatureK(exposure_,deepSpaceK);
+        // Reflected sunlight is taken up by solar absorptivity, not by the
+        // emissivity that governs the sink, so it belongs beside the direct
+        // beam rather than inside the sink temperature.
+        exterior.absorbedSolarW=face.directW(exposure_,exposure)
+            +face.reflectedSunlightW(exposure_,exposure);
     }
     station::NativeThermalBudget budget;budget.maxWork=maxWork;
     if (!structuralSolver_->solve(structure_.bodies,structuralGas_,structuralExterior_,seconds,budget,&*structuralRadiation_))

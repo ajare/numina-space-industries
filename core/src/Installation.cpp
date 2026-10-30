@@ -387,6 +387,11 @@ void Installation::Orbit::validate() const {
             "Orbit Orbital period must be finite and positive");
     require(std::isfinite(radiusFromPlanetCentreM) && radiusFromPlanetCentreM > PlanetRadiusM,
             "Orbit radius must be finite and greater than the planet radius");
+    // A reflectivity is a fraction of the light that arrives, so the closed
+    // interval is the whole legal range: 0 is a black world, 1 a perfect
+    // mirror with no infrared left to emit.
+    require(std::isfinite(albedo) && albedo >= 0.0 && albedo <= 1.0,
+            "Orbit Albedo must be finite and within [0, 1]");
 }
 void Installation::setOrbit(std::optional<Orbit> orbit) {
     if (orbit) orbit->validate();
@@ -465,6 +470,7 @@ std::string Installation::serialize() const {
         o["stellarIrradianceWPerM2"] = orbit_->stellarIrradianceWPerM2;
         o["orbitalPeriodS"] = orbit_->orbitalPeriodS;
         o["radiusFromPlanetCentreM"] = orbit_->radiusFromPlanetCentreM;
+        o["albedo"] = orbit_->albedo;
         root["orbit"] = o;
     }
     root["levels"]=YAML::Node(YAML::NodeType::Sequence);
@@ -551,6 +557,7 @@ void Installation::deserialize(const std::string& text) {
             o.stellarIrradianceWPerM2 = number(on, "stellarIrradianceWPerM2");
             o.orbitalPeriodS = number(on, "orbitalPeriodS");
             o.radiusFromPlanetCentreM = number(on, "radiusFromPlanetCentreM");
+            o.albedo = number(on, "albedo");
             o.validate();
             orbit = o;
         }

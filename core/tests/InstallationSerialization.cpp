@@ -269,8 +269,15 @@ void orbitPersistence() {
     check(node["orbit"]["stellarIrradianceWPerM2"].as<double>()==1361.0,"Irradiance persisted");
     check(node["orbit"]["orbitalPeriodS"].as<double>()==5570.0,"Orbital period persisted");
     check(node["orbit"]["radiusFromPlanetCentreM"].as<double>()==6791000.0,"Orbital radius persisted");
+    check(node["orbit"]["albedo"].as<double>()==0.3,"Albedo persisted");
     // A geostationary author is just another set of numbers, not a mode.
     I geo(1,1); geo.setOrbit(O{1361.0,86164.0,42164000.0}); roundTrip(geo);
+    // Albedo is authored, so a non-default one survives the round trip.
+    I icy(1,1); icy.setOrbit(O{1361.0,5570.0,6791000.0,0.81}); roundTrip(icy);
+    check(YAML::Load(icy.serialize())["orbit"]["albedo"].as<double>()==0.81,"Non-default Albedo persisted");
+    // Both endpoints of the closed interval are legal and survive.
+    I black(1,1); black.setOrbit(O{1361.0,5570.0,6791000.0,0.0}); roundTrip(black);
+    I mirror(1,1); mirror.setOrbit(O{1361.0,5570.0,6791000.0,1.0}); roundTrip(mirror);
     // Absent key loads as no orbit rather than a substituted default.
     auto bare=YAML::Load(i.serialize()); bare.remove("orbit");
     YAML::Emitter bareOut; bareOut<<bare;
@@ -279,12 +286,16 @@ void orbitPersistence() {
     // setOrbit refuses what the loader must refuse.
     const double nan=std::numeric_limits<double>::quiet_NaN();
     const double inf=std::numeric_limits<double>::infinity();
-    const std::array<O,8> invalid{
+    const std::array<O,12> invalid{
         O{nan,5570.0,6791000.0},O{inf,5570.0,6791000.0},
         O{0.0,5570.0,6791000.0},O{-1361.0,5570.0,6791000.0},
         O{1361.0,0.0,6791000.0},O{1361.0,-5570.0,6791000.0},
         O{1361.0,5570.0,nsi::core::PlanetRadiusM},
-        O{1361.0,5570.0,1000.0}};
+        O{1361.0,5570.0,1000.0},
+        // Albedo is a fraction of the light that arrives: the closed
+        // interval [0, 1] is the whole legal range.
+        O{1361.0,5570.0,6791000.0,-0.1},O{1361.0,5570.0,6791000.0,1.1},
+        O{1361.0,5570.0,6791000.0,nan},O{1361.0,5570.0,6791000.0,inf}};
     for (const auto& orbit:invalid) refused([&]{ i.setOrbit(orbit); });
     check(i.orbit()==iss,"Rejected setOrbit left the authored orbit intact");
     auto badOrbit=[&](auto change) {
@@ -303,6 +314,12 @@ void orbitPersistence() {
     badOrbit([](auto n){n["orbit"].remove("stellarIrradianceWPerM2");});
     badOrbit([](auto n){n["orbit"].remove("orbitalPeriodS");});
     badOrbit([](auto n){n["orbit"].remove("radiusFromPlanetCentreM");});
+    badOrbit([](auto n){n["orbit"].remove("albedo");});
+    badOrbit([](auto n){n["orbit"]["albedo"]=-0.001;});
+    badOrbit([](auto n){n["orbit"]["albedo"]=1.001;});
+    badOrbit([](auto n){n["orbit"]["albedo"]=std::numeric_limits<double>::quiet_NaN();});
+    badOrbit([](auto n){n["orbit"]["albedo"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["albedo"]="icy";});
     badOrbit([](auto n){n["orbit"]="ISS";});
     badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]="92 minutes";});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::infinity();});
