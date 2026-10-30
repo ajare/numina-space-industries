@@ -33,11 +33,45 @@ std::optional<DeckCellCoord> cellAt(const ImVec2& origin, float cell,
     const std::uint32_t x =
         static_cast<std::uint32_t>((point.x - origin.x) / cell);
     const std::uint32_t y =
-        static_cast<std::uint32_t>((point.y - origin.y) / cell);
+        level.depth() - 1 - static_cast<std::uint32_t>((point.y - origin.y) / cell);
     if (!level.contains(x, y)) {
         return std::nullopt;
     }
     return DeckCellCoord{x, y};
+}
+
+// Project the body-frame star direction onto the visible XY view. Keep the
+// marker inside the clip rectangle so scrolling and resizing cannot hide it.
+void drawStarMarker(const std::array<double,3>& direction) {
+    if (!std::isfinite(direction[0]) || !std::isfinite(direction[1]) ||
+        !std::isfinite(direction[2])) return;
+    auto* draw=ImGui::GetWindowDrawList();
+    const auto lo=draw->GetClipRectMin(),hi=draw->GetClipRectMax();
+    constexpr float size=6.0f;
+    const float halfWidth=(hi.x-lo.x)*0.5f-size-2.0f;
+    const float halfHeight=(hi.y-lo.y)*0.5f-size-2.0f;
+    if (halfWidth<=0 || halfHeight<=0) return;
+    const ImVec2 center{(lo.x+hi.x)*0.5f,(lo.y+hi.y)*0.5f};
+    const double planarLength=std::hypot(direction[0],direction[1]);
+    ImVec2 position=center;
+    ImVec2 axis{0,direction[2]>=0 ? -1.0f : 1.0f};
+    if (planarLength>1e-12) {
+        axis={static_cast<float>(direction[0]/planarLength),
+              -static_cast<float>(direction[1]/planarLength)};
+        const float scale=1.0f/std::max(std::abs(axis.x)/halfWidth,std::abs(axis.y)/halfHeight);
+        position={center.x+axis.x*scale,center.y+axis.y*scale};
+    } else if (direction[2]==0) return;
+    const ImVec2 tip{position.x+axis.x*size,position.y+axis.y*size};
+    const ImVec2 left{position.x-axis.x*size-axis.y*size,
+                      position.y-axis.y*size+axis.x*size};
+    const ImVec2 right{position.x-axis.x*size+axis.y*size,
+                       position.y-axis.y*size-axis.x*size};
+    draw->AddTriangleFilled(tip,left,right,IM_COL32(255,230,60,255));
+    if (ImGui::IsMouseHoveringRect({position.x-size,position.y-size},
+                                  {position.x+size,position.y+size}))
+        ImGui::SetTooltip(planarLength>1e-12 ? "Direction toward the star (projected onto the Level plane)." :
+                          direction[2]>0 ? "Star directly above the Level plane (+Z)." :
+                                           "Star directly below the Level plane (-Z).");
 }
 
 }  // namespace
@@ -49,21 +83,39 @@ DeckPointerEvent drawDeckGrid(const char* id,
                              bool doorControlsEnabled, std::span<const std::size_t> openDoors,
                              std::span<const station::editor::SectorColour> cellColours,
                              std::span<const station::StationCellAtmosphereSnapshot> atmosphere,
-                             std::size_t levelIndex,bool forceArrows,double forceHalfLengthN) {
+                             std::size_t levelIndex,bool forceArrows,double forceHalfLengthN,
+                             std::span<const double> netRadiationFlux,
+                             std::optional<std::array<double, 3>> starDirection,
+                             const station::editor::HullRadiationColourScale& radiationScale) {
     DeckPointerEvent event;
 
     const float available_width = ImGui::GetContentRegionAvail().x;
     const float columns =
         static_cast<float>(std::max<std::uint32_t>(1, level.width()));
-    const float cell = std::clamp(std::floor(available_width / columns),
+    constexpr float padding_cells = 2.0f;
+    const float cell = std::clamp(std::floor(available_width / (columns + 2.0f * padding_cells)),
                                  kMinCellPx, kMaxCellPx);
     const ImVec2 grid_size(cell * static_cast<float>(level.width()),
                           cell * static_cast<float>(level.depth()));
 
+    const float padding = padding_cells * cell;
+    const ImVec2 padded_origin = ImGui::GetCursorScreenPos();
+    const ImVec2 padded_size(grid_size.x + 2.0f * padding,
+                             grid_size.y + 2.0f * padding);
+    ImGui::Dummy(padded_size);
+    const ImVec2 after_grid = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        padded_origin,
+        ImVec2(padded_origin.x + padded_size.x, padded_origin.y + padded_size.y),
+        IM_COL32(0, 0, 0, 255));
+    // Only the actual grid participates in picking and editing.
+    ImGui::SetCursorScreenPos(ImVec2(padded_origin.x + padding, padded_origin.y + padding));
     ImGui::InvisibleButton(id, grid_size, ImGuiButtonFlags_MouseButtonLeft |
         (mode==EditMode::Door ? ImGuiButtonFlags_MouseButtonRight : 0));
 
     const ImVec2 origin = ImGui::GetItemRectMin();
+    // Screen coordinates grow downward; Installation coordinates grow upward.
+    const auto screenY = [&](float y) { return origin.y + grid_size.y - cell * y; };
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const bool mapped=!thermalColours.empty() || !cellColours.empty();
     auto validCell=[&](const station::StationCellAtmosphereSnapshot& c) {
@@ -76,7 +128,7 @@ DeckPointerEvent drawDeckGrid(const char* id,
     for (std::uint32_t y = 0; y < level.depth(); ++y) {
         for (std::uint32_t x = 0; x < level.width(); ++x) {
             const ImVec2 a(origin.x + cell * static_cast<float>(x),
-                          origin.y + cell * static_cast<float>(y));
+                          screenY(static_cast<float>(y) + 1.0f));
             const ImVec2 b(a.x + cell, a.y + cell);
             const auto sector = level.cellData(x,y).sector;
             ImU32 colour = cellColour(level.cell(x,y));
@@ -101,8 +153,8 @@ DeckPointerEvent drawDeckGrid(const char* id,
         const double force=std::hypot(c.forceN[0],c.forceN[1]);
         const float length=cell*0.72f*static_cast<float>(station::editor::airflowLoadArrowFraction(force,forceHalfLengthN));
         if (length<0.5f) continue;
-        const float dx=static_cast<float>(c.forceN[0]/force),dy=static_cast<float>(c.forceN[1]/force);
-        const ImVec2 center{origin.x+cell*(float(c.gridIndex%level.width())+0.5f),origin.y+cell*(float(c.gridIndex/level.width())+0.5f)};
+        const float dx=static_cast<float>(c.forceN[0]/force),dy=-static_cast<float>(c.forceN[1]/force);
+        const ImVec2 center{origin.x+cell*(float(c.gridIndex%level.width())+0.5f),screenY(float(c.gridIndex/level.width())+0.5f)};
         const ImVec2 tail{center.x-dx*length/2,center.y-dy*length/2},tip{center.x+dx*length/2,center.y+dy*length/2};
         const float head=std::min(4.0f,length*0.35f);const auto colour=IM_COL32(255,245,160,240);
         draw->AddLine(tail,tip,colour,1.5f);
@@ -124,9 +176,9 @@ DeckPointerEvent drawDeckGrid(const char* id,
                  ImGui::GetColorU32(ImGuiCol_Border));
 
     const ImGuiIO& io = ImGui::GetIO();
-    const auto wall = station::editor::nearestWall(level,
-        (io.MousePos.x-origin.x)/cell, (io.MousePos.y-origin.y)/cell);
-    const double mouseX=(io.MousePos.x-origin.x)/cell, mouseY=(io.MousePos.y-origin.y)/cell;
+    const double mouseX=(io.MousePos.x-origin.x)/cell;
+    const double mouseY=(origin.y+grid_size.y-io.MousePos.y)/cell;
+    const auto wall = station::editor::nearestWall(level,mouseX,mouseY);
     const auto horizontalCount=std::size_t(level.width())*(std::size_t(level.depth())+1);
     const bool horizontalHit=wall && *wall<horizontalCount;
     const double edgeFraction=horizontalHit ? mouseX-std::floor(mouseX) : mouseY-std::floor(mouseY);
@@ -136,20 +188,37 @@ DeckPointerEvent drawDeckGrid(const char* id,
         && std::abs(edgeFraction-0.5)<=doorWidthFraction/2
         && std::min(std::abs(mouseX-std::round(mouseX)),std::abs(mouseY-std::round(mouseY)))*cell<=6.0;
     auto isOpen=[&](std::size_t w) { return std::find(openDoors.begin(),openDoors.end(),w)!=openDoors.end(); };
-    auto drawWall = [&](std::size_t index, ImU32 colour, float thickness, bool open=false, bool highlight=false) {
+    auto drawWall = [&](std::size_t index, ImU32 colour, float thickness, bool open=false, bool highlight=false, bool radiation=false) {
         const auto horizontal = std::size_t(level.width())*(std::size_t(level.depth())+1);
         ImVec2 a,b;
         if (index < horizontal) {
             a=ImVec2(origin.x+float(index%level.width())*cell,
-                     origin.y+float(index/level.width())*cell);
+                     screenY(float(index/level.width())));
             b=ImVec2(a.x+cell,a.y);
         } else {
             const auto i=index-horizontal;
             a=ImVec2(origin.x+float(i%(std::size_t(level.width())+1))*cell,
-                     origin.y+float(i/(std::size_t(level.width())+1))*cell);
-            b=ImVec2(a.x,a.y+cell);
+                     screenY(float(i/(std::size_t(level.width())+1))));
+            b=ImVec2(a.x,a.y-cell);
         }
-        if (level.walls()[index].type==nsi::core::Installation::WallType::Door) {
+        if (radiation) {
+            // Put the entire strip on the geometric exterior side of the
+            // wall, including walls bordering Void inside the Level grid.
+            if (index < horizontalCount) {
+                const auto x=static_cast<std::uint32_t>(index%level.width());
+                const auto y=static_cast<std::uint32_t>(index/level.width());
+                const bool insideBelow=y>0 && level.cell(x,y-1)==station::editor::SectorType::Interior;
+                const float outsideY=a.y+(insideBelow ? -thickness : thickness);
+                draw->AddRectFilled({a.x,std::min(a.y,outsideY)},{b.x,std::max(a.y,outsideY)},colour);
+            } else {
+                const auto i=index-horizontalCount;
+                const auto x=static_cast<std::uint32_t>(i%(level.width()+1));
+                const auto y=static_cast<std::uint32_t>(i/(level.width()+1));
+                const bool insideLeft=x>0 && level.cell(x-1,y)==station::editor::SectorType::Interior;
+                const float outsideX=a.x+(insideLeft ? thickness : -thickness);
+                draw->AddRectFilled({std::min(a.x,outsideX),b.y},{std::max(a.x,outsideX),a.y},colour);
+            }
+        } else if (level.walls()[index].type==nsi::core::Installation::WallType::Door) {
             const float width=static_cast<float>(nsi::core::DoorWidthM/
                 (index<horizontal ? nsi::core::CellWidthM : nsi::core::CellDepthM));
             const float inset=(1-width)/2;
@@ -167,8 +236,13 @@ DeckPointerEvent drawDeckGrid(const char* id,
         auto type=level.walls()[i].type;
         if (type!=WallType::None)
             drawWall(i,type==WallType::Door ? IM_COL32(70,210,225,255) :
-                type==WallType::Exterior ? IM_COL32(245,180,95,255) : IM_COL32(215,225,235,255),
+                IM_COL32(215,225,235,255),
                 type==WallType::Door ? 6.0f : 3.0f,type==WallType::Door && isOpen(i));
+        if (type==WallType::Exterior && i<netRadiationFlux.size()) {
+            if (const auto colour=station::editor::netRadiationColour(netRadiationFlux[i],radiationScale))
+                drawWall(i,ImGui::ColorConvertFloat4ToU32({colour->red,colour->green,colour->blue,1}),
+                         12.0f,false,false,true);
+        }
     }
     if ((mode==EditMode::Wall || mode==EditMode::Door) && ImGui::IsItemHovered() && wall
         && (!doorControlsEnabled || hoveredDoor)) {
@@ -181,7 +255,7 @@ DeckPointerEvent drawDeckGrid(const char* id,
 
     if (mode!=EditMode::Wall && mode!=EditMode::Door && ImGui::IsItemHovered() && under.has_value()) {
         const ImVec2 a(origin.x + cell * static_cast<float>(under->x),
-                      origin.y + cell * static_cast<float>(under->y));
+                      screenY(static_cast<float>(under->y) + 1.0f));
         if (!mapped)
             draw->AddRectFilled(a, ImVec2(a.x + cell, a.y + cell), IM_COL32(255,255,255,46));
         else draw->AddRect({a.x+1,a.y+1},{a.x+cell-1,a.y+cell-1},IM_COL32(255,255,255,255));
@@ -225,6 +299,7 @@ DeckPointerEvent drawDeckGrid(const char* id,
     event.wall=wall;
     const std::optional<DeckCellCoord> readout =
         ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) ? under : std::nullopt;
+    ImGui::SetCursorScreenPos(after_grid);
     if (readout.has_value()) {
         const station::editor::SectorType state =
             level.cell(readout->x, readout->y);
@@ -264,7 +339,21 @@ DeckPointerEvent drawDeckGrid(const char* id,
                    level.interiorCount(), level.cellCount());
     }
 
+    if (!netRadiationFlux.empty()) {
+        ImGui::Text("Hull net radiation (W/m2): %g blue | %g green | %g red",
+                    radiationScale.minimumWPerM2,radiationScale.referenceWPerM2,radiationScale.maximumWPerM2);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Absorbed sunlight and planetary radiation minus emitted radiation.\n"
+                             "Negative: cooling; zero: balance; positive: heating.\n"
+                             "Colours follow the Hull rendering minimum/reference/maximum.\n"
+                             "Uncoloured walls have no exterior thermal sample.");
+        if (ImGui::IsWindowHovered() && wall && *wall<netRadiationFlux.size() && std::isfinite(netRadiationFlux[*wall]) &&
+            std::min(std::abs(mouseX-std::round(mouseX)),std::abs(mouseY-std::round(mouseY)))*cell<=6.0 &&
+            cellAt(origin,cell,level,io.MousePos))
+            ImGui::SetTooltip("Net hull radiation: %+.3f W/m2 (+ inward)",netRadiationFlux[*wall]);
+    }
     if (mode==EditMode::Door && hoveredDoor && doorControlsEnabled)
         ImGui::SetTooltip("%s — Shift+left-click to %s",isOpen(*wall) ? "Open" : "Closed",isOpen(*wall) ? "close" : "open");
+    if (starDirection) drawStarMarker(*starDirection);
     return event;
 }

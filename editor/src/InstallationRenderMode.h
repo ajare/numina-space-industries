@@ -43,11 +43,19 @@ struct PressureColourScale {
     float referenceKPa = 101.325f;
     bool valid() const;
 };
+struct HullRadiationColourScale {
+    float minimumWPerM2=-100.0f;
+    float maximumWPerM2=100.0f;
+    float referenceWPerM2=0.0f;
+    bool valid() const;
+};
 struct InstallationRenderSettings {
     InstallationRenderMode mode = InstallationRenderMode::Default;
     ThermalColourScale thermal;
     PressureColourScale pressure;
     AtmosphereRenderSettings atmosphere;
+    bool hullBorder=true;
+    HullRadiationColourScale hullRadiation;
     bool forceArrows=false;
     float forceHalfLengthN=10;
 };
@@ -66,6 +74,13 @@ SectorColour unresolvedGasColour();
 // Values outside the scale saturate; invalid scales/temperatures have no colour.
 std::optional<SectorColour> thermalColour(double temperatureC, const ThermalColourScale&);
 std::optional<SectorColour> pressureColour(double pressureKPa, const PressureColourScale&);
+// Net exterior radiation: positive inward heats, negative cools. Blue/green/red
+// anchors at the chosen minimum/reference/maximum W/m2. Nonfinite values
+// and invalid scales mean unavailable. Green is balance only at reference=0.
+std::optional<SectorColour> netRadiationColour(double fluxWPerM2,const HullRadiationColourScale& = {});
+// Area-weighted exterior surface flux per geometric wall, NaN if unavailable.
+std::vector<double> wallNetRadiationFluxes(const nsi::core::Installation&,std::size_t level,
+    const nsi::systems::CellAtmosphereTransport*);
 std::optional<SectorColour> componentColour(double value, const ComponentColourScale&);
 // Mass remains observable even in unresolved gas; percentage is wet mole %,
 // includes water vapour, and is unavailable for unresolved/empty gas.

@@ -19,6 +19,65 @@ void operator delete[](void* p,std::size_t) noexcept {std::free(p);}
 namespace {
 void require(bool b,const char* m) {if(!b) throw std::runtime_error(m);}
 void near(long double a,long double b,long double tolerance=1e-6L) {require(std::abs(a-b)<tolerance,"Observation mismatch");}
+void exteriorRadiationCheck() {
+    I scene(1,1);scene.setHullType(I::HullType::MultiLayerBlanket);
+    auto orbit=scene.orbit().value();orbit.axialTiltDeg=23.4;scene.setOrbit(orbit);
+    CellAtmosphereTransport runtime(scene,CellThermalMode::LocalStructure);
+    std::vector<ExteriorRadiationObservation> samples(runtime.exteriorSolarFaces().size());
+    require(runtime.exteriorRadiation({}).total==6,"Exterior observation count incorrect");
+    const auto query=runtime.exteriorRadiation(samples);
+    require(query.written==samples.size(),"Exterior observations incomplete");
+    std::array<ExteriorRadiationObservation,1> page;
+    tracking=true;runtime.exteriorRadiation(page,1);tracking=false;
+    require(allocations==0 && page[0].id==samples[1].id,"Exterior pagination allocated or selected wrong face");
+    require(runtime.exteriorRadiation(page,SIZE_MAX).written==0,"Exterior offset overflow");
+    auto verify=[&] {
+        runtime.exteriorRadiation(samples);
+        const auto exposure=runtime.exposureEvaluator().evaluate(runtime.elapsedSeconds());
+        const auto material=nsi::core::nativeThermalSpec(I::HullType::MultiLayerBlanket).secondSide;
+        for (std::size_t i=0;i<samples.size();++i) {
+            const auto& sample=samples[i];const auto& face=runtime.exteriorSolarFaces()[i];
+            const double t=runtime.structure().bodies[face.body].temperatureK();
+            near(sample.temperatureK,t);
+            const double sink=face.effectiveSinkTemperatureK(runtime.exposureEvaluator(),3.15);
+            const double outward=material.emissivity*sample.areaM2*5.670374419e-8*
+                (std::pow(t,4)-std::pow(sink,4));
+            near(sample.netOutwardInfraredW,outward,0.001);
+            near(sample.absorbedSolarW,face.directW(runtime.exposureEvaluator(),exposure)+
+                 face.reflectedSunlightW(runtime.exposureEvaluator(),exposure));
+            near(sample.netIntoW,sample.absorbedSolarW-sample.netOutwardInfraredW);
+        }
+    };
+    verify();
+    require(runtime.advance(.1),"Exterior observation advance failed");verify();
+    scene.setOrbit(std::nullopt);
+    CellAtmosphereTransport dark(scene,CellThermalMode::LocalStructure);
+    dark.exteriorRadiation(samples);
+    for (const auto& sample:samples) require(sample.absorbedSolarW==0 && sample.netIntoW<0,
+        "Dark hull was not observed radiatively cooling");
+    auto profiledGeometry=expandCellAtmosphere(scene);
+    profiledGeometry.thermal.solarCycle=station::ProfileSettings{1.0};
+    CellAtmosphereTransport profiled(std::move(profiledGeometry));
+    profiled.exteriorRadiation(samples);
+    for (std::size_t i=0;i<samples.size();++i)
+        near(samples[i].absorbedSolarW,profiled.exteriorSolarFaces()[i].lumpedProfileW(1361,1));
+    I doorScene(1,3);
+    const auto door=doorScene.level(0).verticalWall(0,1);doorScene.setDoor(0,door,true);
+    CellAtmosphereTransport doorModel(doorScene);
+    require(doorModel.setDoorOpen(0,door,true),"Radiation Door fixture refused actuation");
+    std::vector<ExteriorRadiationObservation> doorSamples(doorModel.exteriorSolarFaces().size());
+    doorModel.exteriorRadiation(doorSamples);
+    bool sawOpenLeaf=false;
+    for (const auto& sample:doorSamples) if (sample.id.assembly.part==StructuralPart::DoorLeaf) {
+        sawOpenLeaf=true;
+        require(sample.areaM2==0 && sample.absorbedSolarW==0 && sample.netIntoW==0,
+                "Open Door leaf still published exterior radiation");
+    }
+    require(sawOpenLeaf,"No exterior Door leaf observation");
+    scene.setHullType(std::nullopt);
+    CellAtmosphereTransport absent(scene,CellThermalMode::LocalStructure);
+    require(absent.exteriorRadiation(samples).total==0,"Absent hull fabricated radiation");
+}
 void check() {
     I off(1,1);off.setHullType(std::nullopt);
     CellAtmosphereTransport optedOut(off,CellThermalMode::LocalStructure);
@@ -179,4 +238,4 @@ void benchmark() {
         <<s.modelRevision<<','<<s.presetRevision<<",4096,"<<s.bodies.size()<<','<<s.assemblies<<','<<s.solidContacts<<','<<build<<','<<update/10<<','<<local/10<<','<<sector/10<<','<<sink<<'\n';
 }
 }
-int main(int argc,char**) {try {if(argc>1) benchmark();else check();} catch(const std::exception& e) {tracking=false;std::cerr<<e.what()<<'\n';return 1;}}
+int main(int argc,char**) {try {if(argc>1) benchmark();else {exteriorRadiationCheck();check();}} catch(const std::exception& e) {tracking=false;std::cerr<<e.what()<<'\n';return 1;}}

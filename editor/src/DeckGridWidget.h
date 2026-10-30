@@ -1,4 +1,5 @@
 // Top-down, clickable view of a Level for the Editor panel.
+// Installation (0,0) is bottom-left: +X right, +Y up.
 //
 // Draws every Cell with a visually distinct Interior/Void appearance and
 // reports the pointer phases over the grid, so the host can turn them into
@@ -10,6 +11,7 @@
 #include "station/editor/Installation.h"
 #include "InstallationRenderMode.h"
 #include <span>
+#include <array>
 
 #include <cstdint>
 #include <optional>
@@ -49,4 +51,7 @@ DeckPointerEvent drawDeckGrid(const char* id, const station::editor::Level& leve
                               std::span<const std::size_t> openDoors = {},
                               std::span<const station::editor::SectorColour> cellColours = {},
                               std::span<const station::StationCellAtmosphereSnapshot> atmosphere = {},
-                              std::size_t levelIndex = 0, bool forceArrows = false,double forceHalfLengthN = 10);
+                              std::size_t levelIndex = 0, bool forceArrows = false,double forceHalfLengthN = 10,
+                              std::span<const double> netRadiationFlux = {}, // per-wall W/m2, positive inward
+                              std::optional<std::array<double, 3>> starDirection = std::nullopt,
+                              const station::editor::HullRadiationColourScale& radiationScale = {});

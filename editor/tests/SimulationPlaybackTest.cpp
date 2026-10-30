@@ -614,6 +614,12 @@ void failedPlaybackDebt() {
     require(failed && !p.playing() && p.runtime()->snapshot().worldTick==0,"Failed simulation-time debt was dropped or rescaled");
     }
 }
+// The session is live from the first frame: the grid the editor opens on
+// is a document, so playback needs no file operation to unlock it. What
+// a cancelled or failed Open or Save still owes is that it left the
+// Installation untouched - not that it left the session inert, because
+// inert was never the point of the guard and there is no longer a state
+// that means it.
 void documentAvailability() {
     using namespace station::editor;
     struct Dialogs : FileDialogs {
@@ -633,43 +639,78 @@ void documentAvailability() {
     } files;
     EditorSession session;
     SimulationPlayback playback;
-    auto synchronize = [&] {
-        playback.synchronize(session.hasDocument() ? &session.installation() : nullptr);
+    auto playOneStep = [&] {
+        playback.synchronize(session.installation());
+        if (!playback.playing()) playback.togglePlaying();
+        playback.update(0.1);
     };
-    require(!session.hasDocument(), "Startup placeholder counted as a loaded Installation");
-    synchronize();
-    playback.togglePlaying();
-    playback.update(0.1);
-    require(!playback.playing() && !playback.runtime(), "No-document playback was enabled");
-    require(session.open(dialogs, files).outcome == FileOutcome::Cancelled && !session.hasDocument(),
-            "Cancelled Open enabled playback");
+
+    // Live before anything has been opened or saved.
+    playOneStep();
+    require(playback.playing() && playback.runtime() != nullptr,
+            "The startup Installation could not be played");
+    require(!session.unsavedChanges(), "The startup Installation counted as changed");
+    const auto startup = session.installation();
+
+    // A cancelled Open changes nothing and costs nothing.
+    require(session.open(dialogs, files).outcome == FileOutcome::Cancelled,
+            "A cancelled Open did not report Cancelled");
+    require(session.installation() == startup, "A cancelled Open touched the Installation");
+    playOneStep();
+    require(playback.playing() && playback.runtime() != nullptr,
+            "A cancelled Open stopped the show");
+
+    // A failed Open says so, loudly, and still does not replace what you
+    // were holding. That guarantee used to ride on a flag saying the
+    // session had no document; it is asserted against the Installation
+    // itself now, which is the thing the reader actually cares about.
     dialogs.next = {FileOutcome::Success, "installation.yaml", {}};
     files.fail = true;
-    require(session.open(dialogs, files).outcome == FileOutcome::Failed && !session.hasDocument(),
-            "Failed Open enabled playback");
-    require(session.save(dialogs, files).outcome == FileOutcome::Failed && !session.hasDocument(),
-            "Failed Save activated placeholder");
+    require(session.open(dialogs, files).outcome == FileOutcome::Failed,
+            "A failed Open did not report Failed");
+    require(session.installation() == startup, "A failed Open replaced the Installation");
+    playOneStep();
+    require(playback.playing() && playback.runtime() != nullptr,
+            "A failed Open stopped the show");
+    require(session.save(dialogs, files).outcome == FileOutcome::Failed,
+            "A failed Save did not report Failed");
+    require(session.installation() == startup, "A failed Save replaced the Installation");
+    require(session.path().empty(), "A failed Save picked up a path it never wrote");
+
+    // A successful Open replaces the Installation and keeps running.
     files.fail = false;
-    require(session.open(dialogs, files).outcome == FileOutcome::Success && session.hasDocument(),
-            "Successful Open did not enable playback");
-    synchronize();
-    playback.togglePlaying();
-    playback.update(0.1);
-    require(playback.playing() && playback.runtime()->snapshot().worldTick == 1, "Loaded Installation did not run");
+    require(session.open(dialogs, files).outcome == FileOutcome::Success,
+            "A successful Open did not report Success");
+    require(session.installation() != startup,
+            "A successful Open did not replace the Installation");
+    require(session.path() == "installation.yaml", "A successful Open left no path");
+    playOneStep();
+    require(playback.playing() && playback.runtime()->snapshot().worldTick >= 1,
+            "A loaded Installation did not run");
+
+    // Retiring the Installation - which now only happens when the session
+    // itself goes away - still tears the preview down rather than keeping
+    // a station running that nobody is holding.
     playback.synchronize(nullptr);
     playback.togglePlaying();
     playback.update(0.1);
-    require(!playback.playing() && !playback.runtime(), "Removing Installation retained a running preview");
+    require(!playback.playing() && !playback.runtime(),
+            "Removing the Installation retained a running preview");
+
+    // A New Installation with nothing on disk behind it is live and
+    // playable, and a successful Save is what puts a path under it.
     EditorSession created;
     created.newDocument(1, 1);
-    require(created.hasDocument() && created.path().empty(), "New unsaved Installation was not active");
-    playback.synchronize(created.hasDocument() ? &created.installation() : nullptr);
+    require(created.path().empty(), "A New Installation picked up a path");
+    playback.synchronize(created.installation());
     playback.togglePlaying();
     playback.update(0.1);
-    require(playback.runtime()->snapshot().worldTick == 1, "New unsaved Installation could not run");
+    require(playback.playing() && playback.runtime()->snapshot().worldTick >= 1,
+            "A New unsaved Installation could not run");
     EditorSession saved;
-    require(saved.save(dialogs, files).outcome == FileOutcome::Success && saved.hasDocument(),
-            "Successful Save did not establish an Installation");
+    require(saved.save(dialogs, files).outcome == FileOutcome::Success,
+            "A successful Save did not report Success");
+    require(!saved.path().empty(), "A successful Save left no path");
 }
 }
 

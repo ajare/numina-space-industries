@@ -43,8 +43,18 @@ add_library(editor-imgui STATIC
     vendor/imgui/imgui_draw.cpp
     vendor/imgui/imgui_tables.cpp
     vendor/imgui/imgui_widgets.cpp
+    vendor/imgui/ImGuiDatePicker.cpp
     vendor/imgui/backends/imgui_impl_sdl2.cpp
     vendor/imgui/backends/imgui_impl_opengl3.cpp
+)
+# The date picker's selectable year range, kept equal to the range core
+# validates against (nsi::core::kMinAuthoredYear / kMaxAuthoredYear). A
+# static_assert in OrbitClockPanel.cpp turns any drift between the two into
+# a compile error rather than a picker that offers dates the document will
+# refuse.
+target_compile_definitions(editor-imgui PUBLIC
+    IMGUI_DATEPICKER_YEAR_MIN=1970
+    IMGUI_DATEPICKER_YEAR_MAX=2200
 )
 add_library(editor::imgui ALIAS editor-imgui)
 target_include_directories(editor-imgui PUBLIC
@@ -107,6 +117,8 @@ add_executable(editor
     src/DeckGridWidget.cpp
     src/InstallationRenderControls.cpp
     src/GasInjectorControls.cpp
+    src/StartDatePicker.cpp
+    src/OrbitDiagram.cpp
     src/OrbitSummary.cpp
     src/StellarExposureTrace.cpp
     src/SectorThermalPanel.cpp
@@ -154,6 +166,21 @@ if(BUILD_TESTING)
     target_link_libraries(editor-structural-view-test PRIVATE editor-simulation editor::implot)
     add_test(NAME editor-structural-view COMMAND editor-structural-view-test)
     set_tests_properties(editor-structural-view PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
+    add_executable(editor-start-date-picker-test tests/StartDatePickerTest.cpp src/StartDatePicker.cpp)
+    target_link_libraries(editor-start-date-picker-test PRIVATE
+        editor-simulation editor::document editor::implot)
+    add_test(NAME editor-start-date-picker COMMAND editor-start-date-picker-test)
+    set_tests_properties(editor-start-date-picker PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
+    add_executable(editor-orbit-diagram-test tests/OrbitDiagramTest.cpp src/OrbitDiagram.cpp
+        src/OrbitSummary.cpp src/StellarExposureTrace.cpp src/StructuralPanel.cpp)
+    target_link_libraries(editor-orbit-diagram-test PRIVATE
+        editor-simulation editor::document editor::implot)
+    add_test(NAME editor-orbit-diagram COMMAND editor-orbit-diagram-test)
+    set_tests_properties(editor-orbit-diagram PROPERTIES
         LABELS "editor;functional;validation-fast" TIMEOUT 30)
 
     add_executable(editor-orbit-summary-test

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <nsi/core/CivilDate.h>
 #include <nsi/core/Units.h>
 #include <optional>
 #include <span>
@@ -225,6 +226,15 @@ public:
     void setHullType(std::optional<HullType> type);
     std::optional<PartitionType> partitionType() const noexcept { return partitionType_; }
     void setPartitionType(std::optional<PartitionType> type);
+    // When the mission begins, as an instant: seconds since
+    // 1970-01-01T00:00:00Z. Authored as a calendar date and never as an
+    // hour of the day, so this is always an exact multiple of
+    // kSecondsPerDay - the Editor's picker cannot produce anything else,
+    // and validate() refuses a hand-written save that is not midnight
+    // rather than quietly rounding it to one. The clock a run shows is
+    // this plus simulated seconds; see CivilDate.h.
+    std::int64_t startDateUtcS() const noexcept { return startDateUtcS_; }
+    void setStartDateUtcS(std::int64_t seconds) noexcept { startDateUtcS_ = seconds; }
     // A new Installation authors the ISS-like Orbit its fields already
     // carry, following the MultiLayerBlanket new-Installation default, so
     // the author sees day/night thermal cycling without typing anything.
@@ -271,6 +281,10 @@ private:
     // Albedo and no axial tilt - the star over the equator at Local noon.
     // Authored on creation only.
     std::optional<Orbit> orbit_ = Orbit{};
+    // 1st January 2050, midnight UTC. A document that names no start
+    // date reads as this, so a newly created Installation has a clock
+    // without the author having to set one.
+    std::int64_t startDateUtcS_ = kDefaultStartDateUtcS;
     std::vector<Level> levels_;
     void reindex();
 };

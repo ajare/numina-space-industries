@@ -4,6 +4,11 @@
 #include <utility>
 namespace station::editor {
 
+// The editor opens on a real, playable Installation rather than on an
+// inert shell. createDefault() is a complete record - a 16x16 level, a
+// hull, a partition and a sky - so there was never a state in here
+// worth calling "no document" to guard. Being unsaved is a fact about
+// the path, not about whether the thing is live.
 EditorSession::EditorSession()
     : mStation(Installation::createDefault()), mBaseline(mStation) {}
 
@@ -55,7 +60,6 @@ void EditorSession::replaceDocument(Installation station) {
     mRedoHistory.clear();
     mStation = std::move(station);
     mBaseline = mStation;
-    mHasDocument = true;
     mEditingEnabled = true; // New/Open replace the scenario rather than edit a run.
     mPath.clear();
 }
@@ -98,7 +102,6 @@ FileResult EditorSession::saveTo(const FileSelection& selection, DocumentFiles& 
         files.write(selection.path, mStation);
         mPath = selection.path;
         mBaseline = mStation;
-        mHasDocument = true;
         return {FileOutcome::Success, {}};
     } catch (const std::exception& error) {
         return {FileOutcome::Failed, std::string("Save failed: ") + error.what()};
@@ -199,6 +202,9 @@ void EditorSession::setHullType(std::optional<Installation::HullType> type) {
 }
 void EditorSession::setPartitionType(std::optional<Installation::PartitionType> type) {
     edit([&](auto& i){ i.setPartitionType(type); });
+}
+void EditorSession::setStartDateUtcS(std::int64_t seconds) {
+    edit([&](auto& i){ i.setStartDateUtcS(seconds); });
 }
 void EditorSession::setOrbit(std::optional<Installation::Orbit> orbit) {
     edit([&](auto& i){ i.setOrbit(orbit); });

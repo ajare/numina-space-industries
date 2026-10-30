@@ -23,7 +23,11 @@ constexpr double kDegToRad = kPi / 180.0;
 // document round trip bit for bit.
 constexpr double kGeostationaryTolerance = 1e-9;
 constexpr double kDegreesPerTurn = 360.0;
-constexpr double kPenumbraTurns = 0.533 / kDegreesPerTurn;
+// The ramp width comes from the header, so the solar diameter the shadow
+// edges are smoothed by is one number in the model and not two that have
+// to be kept in step.
+constexpr double kPenumbraTurns =
+    StellarExposureEvaluator::kSolarAngularDiameterDegrees / kDegreesPerTurn;
 constexpr double kSecondsPerDay = 86400.0;
 // A turn is a whole cycle; folding into [0, 1) keeps every phase argument
 // small without ever wrapping a negative into a positive by accident.

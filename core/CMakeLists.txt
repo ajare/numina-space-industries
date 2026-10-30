@@ -25,7 +25,8 @@ if(NOT TARGET Promethium::Serialization)
     add_subdirectory(../serialization "${CMAKE_CURRENT_BINARY_DIR}/serialization")
 endif()
 
-add_library(nsi-core STATIC src/Installation.cpp src/ThermalPresets.cpp src/WorldPresets.cpp)
+add_library(nsi-core STATIC src/Installation.cpp src/ThermalPresets.cpp src/WorldPresets.cpp
+    src/CivilDate.cpp)
 add_library(nsi::core ALIAS nsi-core)
 target_compile_features(nsi-core PUBLIC cxx_std_20)
 target_link_libraries(nsi-core PUBLIC Promethium::Serialization)
@@ -52,6 +53,12 @@ if(BUILD_TESTING)
     add_test(NAME nsi-core-serialization COMMAND nsi-core-serialization)
     set_tests_properties(nsi-core-serialization PROPERTIES
         LABELS "core;persistence;functional;validation-fast" TIMEOUT 30)
+
+    add_executable(nsi-core-civil-date tests/CivilDate.cpp)
+    target_link_libraries(nsi-core-civil-date PRIVATE nsi::core)
+    add_test(NAME nsi-core-civil-date COMMAND nsi-core-civil-date)
+    set_tests_properties(nsi-core-civil-date PROPERTIES
+        LABELS "core;functional;validation-fast" TIMEOUT 30)
 
     add_executable(nsi-core-world-presets tests/WorldPresets.cpp)
     target_link_libraries(nsi-core-world-presets PRIVATE nsi::core)

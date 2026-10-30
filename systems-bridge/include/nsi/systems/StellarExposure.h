@@ -2,6 +2,7 @@
 
 #include <nsi/core/Installation.h>
 #include <nsi/core/Units.h>
+#include <algorithm>
 #include <array>
 #include <limits>
 
@@ -54,6 +55,30 @@ public:
     // depends on the radius and the tilt alone, never on the phase offset:
     // the offset moves the eclipse along the clock, it does not resize it.
     double eclipseFraction() const noexcept { return eclipseFraction_; }
+    // The Sun's angular diameter as seen from orbit, in degrees, which is
+    // the width every shadow edge is ramped by. Half of it falls inside
+    // the geometric shadow and half outside, and that is what gives the
+    // Eclipse a penumbra at all: the umbra is half this much narrower
+    // than the geometric shadow on each side, and the penumbra reaches
+    // half this much beyond it.
+    static constexpr double kSolarAngularDiameterDegrees = 0.533;
+    static constexpr double penumbraWidthDegrees() noexcept {
+        return kSolarAngularDiameterDegrees;
+    }
+    // Half the orbit, measured from the point directly away from the
+    // star, that sits in total umbra. Floors at zero rather than going
+    // negative on a grazing pass, where the two ramps overlap and
+    // totality never quite arrives.
+    double umbraHalfWidthDegrees() const noexcept {
+        return dark_ ? kUnavailable
+                    : std::max(0.0, eclipseFraction_ * 180.0 - kSolarAngularDiameterDegrees / 2.0);
+    }
+    // The outer edge of the penumbra, past which the orbit is in full
+    // sun. The band between this and the umbra is the ramp.
+    double penumbraOuterHalfWidthDegrees() const noexcept {
+        return dark_ ? kUnavailable
+                    : eclipseFraction_ * 180.0 + kSolarAngularDiameterDegrees / 2.0;
+    }
     // The authored axial tilt (degrees) and phase offset (percent of the
     // Orbital period), as the record carried them.
     double axialTiltDegrees() const noexcept { return axialTiltDeg_; }

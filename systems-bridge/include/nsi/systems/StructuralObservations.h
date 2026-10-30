@@ -14,6 +14,12 @@ struct StructuralSurfaceObservation {
     std::optional<double> gasTemperatureK; // missing/unresolved gas remains unavailable
     double gasCapacityJPerK{}, gasContactWPerK{}; // gas-only EOS capacity; current film coefficient
 };
+// Instantaneous exterior radiation at the committed body temperature and
+// current simulated sky. Positive netIntoW heats the solid; no conduction.
+struct ExteriorRadiationObservation {
+    StructuralSurfaceId id;
+    double areaM2{}, temperatureK{}, absorbedSolarW{}, netOutwardInfraredW{}, netIntoW{};
+};
 struct StructuralSurfaceSummary {
     std::size_t surfaces{};
     double areaM2{}, capacityJPerK{}, minTemperatureK{}, maxTemperatureK{};

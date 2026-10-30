@@ -1895,6 +1895,50 @@ void summaryReadoutsTrackTheOrbit() {
 
 // With no sky there is nothing to derive, and the answer is unavailable
 // rather than a zero that would read as a sunlit, driftless orbit.
+// The umbra and penumbra accessors have to describe the same shadow the
+// ramp in evaluate() actually produces: totality ends where the umbra
+// stops, and full sun returns where the penumbra does. Nothing here is
+// taken on trust from the static widths - each boundary is checked
+// against the dynamic eclipse value a step either side of it.
+void umbraAndPenumbraSplitTheShadow() {
+    O orbit;
+    orbit.orbitalPeriodS = 5570.0;
+    orbit.radiusFromPlanetCentreM = 6791000.0;
+    orbit.planetRadiusM = 6371000.0;
+    const StellarExposureEvaluator evaluator{orbit};
+    const double period = orbit.orbitalPeriodS;
+    const double secondsPerDegree = period / 360.0;
+    const double umbra = evaluator.umbraHalfWidthDegrees();
+    const double outer = evaluator.penumbraOuterHalfWidthDegrees();
+    const double ramp = evaluator.penumbraWidthDegrees();
+    // A probe half a tenth of a degree either side of a boundary, which
+    // is a third of the ramp: close enough to be at the edge, far enough
+    // not to be lost in rounding.
+    const double probe = 0.05;
+
+    require(umbra > 0.0 && outer > umbra, "the default world has no shadow to split");
+    require(near(outer - umbra, ramp, 1e-9), "the band is not one ramp wide");
+
+    const auto insideUmbra =
+        evaluator.evaluate(period * 0.5 + (umbra - probe) * secondsPerDegree);
+    require(insideUmbra.eclipse == 1.0, "no totality just inside the umbra edge");
+    const auto inRamp = evaluator.evaluate(period * 0.5 + (umbra + probe) * secondsPerDegree);
+    require(inRamp.eclipse > 0.0 && inRamp.eclipse < 1.0,
+            "the ramp is not partial just past the umbra edge");
+    const auto nearOuter =
+        evaluator.evaluate(period * 0.5 + (outer - probe) * secondsPerDegree);
+    require(nearOuter.eclipse > 0.0, "full sun returned before the penumbra ended");
+    require(nearOuter.eclipse < 1.0, "the far side of the ramp is not partial");
+    const auto outside = evaluator.evaluate(period * 0.5 + (outer + probe) * secondsPerDegree);
+    require(outside.eclipse == 0.0, "shadow lingered past the penumbra");
+    require(outside.sunlit, "no sun returned past the penumbra");
+
+    // And the same on the way out, either side of midnight.
+    const auto mirrored =
+        evaluator.evaluate(period * 0.5 - (umbra - probe) * secondsPerDegree);
+    require(mirrored.eclipse == 1.0, "the umbra is not symmetric about midnight");
+}
+
 void aDarkEvaluatorDerivesNothing() {
     const StellarExposureEvaluator dark;
     require(dark.dark(), "a default-constructed evaluator should be dark");
@@ -1950,6 +1994,7 @@ int main() {
         authoredDocumentIsImmutable();
         summaryReadoutsTrackTheOrbit();
         aDarkEvaluatorDerivesNothing();
+        umbraAndPenumbraSplitTheShadow();
         std::cout << "Stellar exposure and lit-hull heating passed\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

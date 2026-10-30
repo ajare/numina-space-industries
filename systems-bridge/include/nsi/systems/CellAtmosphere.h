@@ -181,6 +181,7 @@ public:
     }
     // Caller-bounded, nonrecursive, allocation-free local queries. Cavity index
     // identifies a geometric Interior Sector, including missing-gas presets.
+    StructuralQueryResult exteriorRadiation(std::span<ExteriorRadiationObservation>, std::size_t offset=0) const;
     std::optional<StructuralSurfaceObservation> structuralSurface(StructuralSurfaceId) const;
     StructuralQueryResult structuralSurfaces(StructuralOwner, std::span<StructuralSurfaceObservation>, std::size_t offset=0) const;
     StructuralQueryResult structuralSectorSurfaces(std::size_t cavity, std::span<StructuralSurfaceObservation>, std::size_t offset=0) const;

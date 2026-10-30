@@ -26,6 +26,7 @@ void colour(const std::optional<SectorColour>& actual,SectorColour expected) {
 void scaleMapping() {
     InstallationRenderSettings settings;
     require(settings.mode==InstallationRenderMode::Default,"Default mode changed");
+    require(settings.hullBorder,"Hull border should be visible by default");
     auto& scale=settings.thermal;
     require(scale.minimumC==-273 && scale.maximumC==100 && scale.referenceC==20,"Wrong Celsius defaults");
     colour(thermalColour(-273,scale),{0,0,1});
@@ -232,6 +233,7 @@ void injectorInput() {
     auto frame=[&]() {
         ImGui::NewFrame();ImGui::SetNextWindowPos({40,40});ImGui::SetNextWindowSize({700,600});
         ImGui::Begin("Injector input");origin=ImGui::GetCursorScreenPos();
+        origin.x+=68;origin.y+=68; // Two-cell black padding.
         const auto event=drawDeckGrid("InjectorGrid",scene.level(0),mode);
         ImGui::LogToBuffer();if (mode==EditMode::Injector) drawGasInjectorControls(settings);
         text=ImGui::GetCurrentContext()->LogBuffer.c_str();ImGui::LogFinish();
@@ -241,10 +243,13 @@ void injectorInput() {
     require(text.find("Gas injector")!=std::string::npos && text.find("Rate (kg/s)")!=std::string::npos && text.find("Oxygen")!=std::string::npos,"Injector header/widgets missing");
     io.AddMousePosEvent(origin.x+17,origin.y+17);frame();
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);auto event=frame();
-    require(event.injectHeld && event.cell && event.cell->x==0 && event.phase==DeckPointerPhase::Press,"Injector did not acquire grid left-button hold");
+    require(event.injectHeld && event.cell && event.cell->x==0 && event.cell->y==1 && event.phase==DeckPointerPhase::Press,"Injector did not acquire grid left-button hold");
     event=frame();require(event.injectHeld && event.phase==DeckPointerPhase::Drag,"Stationary held mouse did not keep injecting");
     io.AddMousePosEvent(origin.x+51,origin.y+17);event=frame();
-    require(event.injectHeld && event.cell && event.cell->x==1,"Injector did not follow dragged Cell");
+    require(event.injectHeld && event.cell && event.cell->x==1 && event.cell->y==1,"Injector did not follow dragged Cell");
+    io.AddMousePosEvent(origin.x+17,origin.y+51);event=frame();
+    require(event.injectHeld && event.cell && event.cell->x==0 && event.cell->y==0,
+            "Bottom-left screen Cell did not map to (0,0)");
     io.AddMousePosEvent(origin.x-20,origin.y-20);event=frame();require(!event.injectHeld,"Off-grid hold kept injecting");
     io.AddMousePosEvent(origin.x+17,origin.y+17);event=frame();require(event.injectHeld,"Returning held gesture did not resume injector");
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,false);event=frame();require(!event.injectHeld,"Released mouse kept injecting");
@@ -279,11 +284,15 @@ void doorInput() {
     auto frame=[&]() {
         ImGui::NewFrame(); ImGui::SetNextWindowPos({40,40}); ImGui::SetNextWindowSize({700,600});
         ImGui::Begin("Door input"); origin=ImGui::GetCursorScreenPos();
+        origin.x+=68;origin.y+=68;
         const auto event=drawDeckGrid("Doors",installation.level(0),mode,std::nullopt,{},running,open);
         ImGui::End(); ImGui::Render(); return event;
     };
+    const auto point = [&](float x,float y) {
+        io.AddMousePosEvent(origin.x+x*34,origin.y+(5-y)*34);
+    };
     frame(); frame();
-    io.AddMousePosEvent(origin.x+2.5f*34,origin.y+2*34); frame();
+    point(2.5f,2); frame();
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);
     auto event=frame();
     require(event.phase==DeckPointerPhase::Press && event.wall==door && !event.erase,
@@ -319,20 +328,20 @@ void doorInput() {
     require(!event.toggleDoor,"Holding Shift-click repeatedly toggled Door");
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
     // The surrounding Wall remains solid; Shift-clicking its jamb is not a Door hit.
-    io.AddMousePosEvent(origin.x+2.1f*34,origin.y+2*34); frame();
+    point(2.1f,2); frame();
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,true);event=frame();
     require(event.phase==DeckPointerPhase::None && !event.toggleDoor,"Door jamb counted as clear-opening hit");
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
     // Nearest is not the same as hovered: a click away from the line refuses.
-    io.AddMousePosEvent(origin.x+2.5f*34,origin.y+2.4f*34); frame();
+    point(2.5f,2.4f); frame();
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,true); event=frame();
     require(event.phase==DeckPointerPhase::None && !event.toggleDoor,"Off-Door Shift-click toggled nearest edge");
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
-    io.AddMousePosEvent(origin.x+0.5f*34,origin.y+0.5f*34); frame();
+    point(0.5f,0.5f); frame();
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,true); event=frame();
     require(!event.toggleDoor && event.phase==DeckPointerPhase::None,"Shift-click on empty space operated Door");
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,false); frame();
-    io.AddMousePosEvent(origin.x+2.5f*34,origin.y+2*34); frame();
+    point(2.5f,2); frame();
     mode=EditMode::Wall;
     io.AddMouseButtonEvent(ImGuiMouseButton_Left,true); event=frame();
     require(!event.toggleDoor,"Door toggle escaped Door mode");
@@ -414,12 +423,13 @@ void cellRendering() {
             c.forceN={frame==3 ? 1e-9 : 10,0};c.forcesEnabled=frame!=4;c.windEnabled=frame!=5;
         }
         ImGui::NewFrame();ImGui::SetNextWindowPos({0,0});ImGui::SetNextWindowSize({700,600});ImGui::Begin("Cell observations");
-        const auto origin=ImGui::GetCursorScreenPos();auto* draw=ImGui::GetWindowDrawList();const auto first=draw->VtxBuffer.Size;
+        auto origin=ImGui::GetCursorScreenPos();origin.x+=68;origin.y+=68;
+        auto* draw=ImGui::GetWindowDrawList();const auto first=draw->VtxBuffer.Size;
         ImGui::BeginDisabled();ImGui::LogToBuffer();
         drawDeckGrid("Native",scene.level(0),EditMode::Cell,std::nullopt,{},false,{},colours,snapshot.cellAtmospheres,0,frame>=2);
         text=ImGui::GetCurrentContext()->LogBuffer.c_str();ImGui::LogFinish();ImGui::EndDisabled();
-        for (int v=0;v<4;++v) require(draw->VtxBuffer[first+v].col==IM_COL32(0,0,255,255),"Widget did not use Cell colour");
-        for (int v=4;v<8;++v) require(draw->VtxBuffer[first+v].col==IM_COL32(255,0,0,255),"Widget used uniform Sector colour");
+        for (int v=0;v<4;++v) require(draw->VtxBuffer[first+4+v].col==IM_COL32(0,0,255,255),"Widget did not use Cell colour");
+        for (int v=4;v<8;++v) require(draw->VtxBuffer[first+4+v].col==IM_COL32(255,0,0,255),"Widget used uniform Sector colour");
         if (frame==1) without=draw->VtxBuffer.Size-first;if (frame==2) {with=draw->VtxBuffer.Size-first;loadedText=text;}
         int arrows=0;for (int v=first;v<draw->VtxBuffer.Size;++v) arrows+=draw->VtxBuffer[v].col==IM_COL32(255,245,160,240);
         if (frame==2 || frame==5) require(arrows>0,"Force arrows incorrectly depend on wind diagnostics");
@@ -431,6 +441,171 @@ void cellRendering() {
     require(with>without,"Airflow load arrows did not render");
     require(loadedText.find("Pressure")!=std::string::npos && loadedText.find("Wind (")!=std::string::npos && loadedText.find("Wet mole")!=std::string::npos && loadedText.find("Reference load")!=std::string::npos,
         "Read-only playing grid did not expose Cell observations");
+    ImGui::DestroyContext();
+}
+void starMarkerRendering() {
+    ImGui::CreateContext();
+    auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.DisplaySize={1024,768};io.DeltaTime=1/60.f;
+    unsigned char* pixels;int width,height;io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
+    I installation(1,1);
+    const std::array<std::optional<std::array<double,3>>,8> directions{{
+        std::nullopt,std::array<double,3>{0,0,0},
+        std::array<double,3>{1,0,0},std::array<double,3>{-1,0,0},
+        std::array<double,3>{0,1,0},std::array<double,3>{0,-1,0},
+        std::array<double,3>{0,0,1},std::array<double,3>{0,0,-1}}};
+    for (int frame=0;frame<2;++frame) for (std::size_t side=0;side<directions.size();++side) {
+        ImGui::NewFrame();ImGui::SetNextWindowPos({30,30});
+        ImGui::SetNextWindowSize(frame ? ImVec2{500,400} : ImVec2{700,600});
+        ImGui::Begin("Star marker");
+        auto* draw=ImGui::GetWindowDrawList();const auto first=draw->VtxBuffer.Size;
+        const auto lo=draw->GetClipRectMin(),hi=draw->GetClipRectMax();
+        drawDeckGrid("Star",installation.level(0),EditMode::Cell,std::nullopt,{},false,{}, {}, {},0,false,10,{},directions[side]);
+        std::vector<ImVec2> triangle;
+        for (int v=first;v<draw->VtxBuffer.Size;++v) {
+            const auto& vertex=draw->VtxBuffer[v];
+            if (vertex.col!=IM_COL32(255,230,60,255)) continue;
+            triangle.push_back(vertex.pos);
+            require(vertex.pos.x>=lo.x && vertex.pos.x<=hi.x && vertex.pos.y>=lo.y && vertex.pos.y<=hi.y,
+                    "Star triangle escaped the visible view");
+        }
+        require(triangle.size()==(side<2 ? 0u : 3u),"Star marker missing or rendered without a star");
+        if (side>=2) {
+            ImVec2 position{};
+            for (const auto p:triangle) {position.x+=p.x/3;position.y+=p.y/3;}
+            const ImVec2 center{(lo.x+hi.x)/2,(lo.y+hi.y)/2};
+            if (side==2) require(position.x>hi.x-20 && std::abs(position.y-center.y)<1,"+X star not at right border");
+            if (side==3) require(position.x<lo.x+20 && std::abs(position.y-center.y)<1,"-X star not at left border");
+            if (side==4) require(position.y<lo.y+20 && std::abs(position.x-center.x)<1,"+Y star not at top border");
+            if (side==5) require(position.y>hi.y-20 && std::abs(position.x-center.x)<1,"-Y star not at bottom border");
+            if (side>=6) require(std::abs(position.x-center.x)<3 && std::abs(position.y-center.y)<3,
+                                "Out-of-plane star invented a border direction");
+        }
+        ImGui::End();ImGui::Render();
+    }
+    ImGui::DestroyContext();
+}
+void netRadiationValues() {
+    colour(netRadiationColour(-1000),{0,0,1});
+    colour(netRadiationColour(0),{0,1,0});
+    colour(netRadiationColour(1000),{1,0,0});
+    colour(netRadiationColour(-50),{0,0.5f,0.5f});
+    colour(netRadiationColour(50),{0.5f,0.5f,0});
+    HullRadiationColourScale scale;
+    require(scale.minimumWPerM2==-100 && scale.referenceWPerM2==0 && scale.maximumWPerM2==100,
+            "Wrong hull radiation defaults");
+    scale.minimumWPerM2=-20;scale.referenceWPerM2=10;scale.maximumWPerM2=40;
+    colour(netRadiationColour(-20,scale),{0,0,1});
+    colour(netRadiationColour(10,scale),{0,1,0});
+    colour(netRadiationColour(40,scale),{1,0,0});
+    colour(netRadiationColour(-5,scale),{0,0.5f,0.5f});
+    colour(netRadiationColour(25,scale),{0.5f,0.5f,0});
+    scale.referenceWPerM2=scale.maximumWPerM2;
+    require(!scale.valid() && !netRadiationColour(0,scale),"Invalid hull scale accepted");
+    scale.referenceWPerM2=std::numeric_limits<float>::quiet_NaN();
+    require(!scale.valid() && !netRadiationColour(0,scale),"Nonfinite hull scale accepted");
+    colour(netRadiationColour(-2000),{0,0,1});
+    colour(netRadiationColour(2000),{1,0,0});
+    require(!netRadiationColour(std::numeric_limits<double>::quiet_NaN()) &&
+            !netRadiationColour(std::numeric_limits<double>::infinity()),"Invalid radiation became a colour");
+    I scene(1,1);auto orbit=scene.orbit().value();orbit.axialTiltDeg=23.4;scene.setOrbit(orbit);
+    SimulationPlayback playback;playback.reset(scene);
+    const auto level=scene.level(0);
+    auto flux=wallNetRadiationFluxes(scene,0,&playback.runtime()->model());
+    require(flux[level.horizontalWall(0,1)]>0 && flux[level.horizontalWall(0,0)]<0,
+            "Sunward wall did not heat while the opposite wall radiatively cooled");
+    const auto before=flux;
+    playback.togglePlaying();playback.update(.1);
+    require(playback.runtime()->snapshot().elapsedSeconds>0,"Radiation rendering replay failed");
+    flux=wallNetRadiationFluxes(scene,0,&playback.runtime()->model());
+    require(flux!=before,"Net radiation ignored live surface temperatures");
+    scene.setOrbit(std::nullopt);playback.reset(scene);
+    for (double value:wallNetRadiationFluxes(scene,0,&playback.runtime()->model()))
+        require(value<0,"Skyless hull did not show cooling");
+    scene.addLevel(1,1,10,20);scene.setCell(1,0,0,I::SectorType::Interior);playback.reset(scene);
+    const auto shifted=wallNetRadiationFluxes(scene,1,&playback.runtime()->model());
+    for (double value:shifted) require(value<0,"Offset/Level mapping lost an exterior face");
+    scene.setHullType(std::nullopt);playback.reset(scene);
+    for (double value:wallNetRadiationFluxes(scene,0,&playback.runtime()->model()))
+        require(std::isnan(value),"Missing hull fabricated net radiation");
+    for (double value:wallNetRadiationFluxes(scene,0,nullptr))
+        require(std::isnan(value),"Missing runtime fabricated net radiation");
+}
+void netRadiationWallRendering() {
+    ImGui::CreateContext();
+    auto& io=ImGui::GetIO();io.IniFilename=nullptr;io.DisplaySize={1024,768};io.DeltaTime=1/60.f;
+    unsigned char* pixels;int width,height;io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
+    I installation(1,2);
+    const std::array<SectorColour,2> rowColours{{{0,0,1},{1,0,0}}};
+    for (const auto scale : {HullRadiationColourScale{},HullRadiationColourScale{-50,150,25}})
+    for (double intensity : {-100.0, -50.0, 0.0, 50.0, 100.0}) for (int side=-1;side<4;++side) {
+        ImGui::NewFrame();ImGui::SetNextWindowSize({700,600});ImGui::Begin("Radiation walls");
+        const auto start=ImGui::GetCursorScreenPos();
+        auto* draw=ImGui::GetWindowDrawList();const auto first=draw->VtxBuffer.Size;
+        std::vector<double> flux(installation.level(0).walls().size(),std::numeric_limits<double>::quiet_NaN());
+        const auto level=installation.level(0);
+        const std::array<std::size_t,4> walls{level.verticalWall(0,0),level.verticalWall(1,0),
+            level.horizontalWall(0,0),level.horizontalWall(0,2)};
+        if (side>=0) flux[walls[side]]=intensity;
+        ImGui::LogToBuffer();
+        drawDeckGrid("Radiation",installation.level(0),EditMode::Cell,std::nullopt,{},false,{},rowColours,{},0,false,10,flux,std::nullopt,scale);
+        const std::string legend=ImGui::GetCurrentContext()->LogBuffer.c_str();ImGui::LogFinish();
+        require(legend.find(scale.referenceWPerM2==0 ? "0 green" : "25 green")!=std::string::npos,
+                "Hull legend ignored the selected reference");
+        const auto& bottomCell=draw->VtxBuffer[first+4];
+        const auto& topCell=draw->VtxBuffer[first+8];
+        require(bottomCell.col==IM_COL32(0,0,255,255) && topCell.col==IM_COL32(255,0,0,255),
+                "Y flip changed model Cell colours");
+        require(std::abs(bottomCell.pos.y-(start.y+102))<0.001f &&
+                std::abs(topCell.pos.y-(start.y+68))<0.001f,
+                "Model row zero was not rendered below row one");
+        const auto colour=*netRadiationColour(intensity,scale);
+        const auto expectedColour=ImGui::ColorConvertFloat4ToU32({colour.red,colour.green,colour.blue,1});
+        int coloured=0;
+        float minimum=std::numeric_limits<float>::max(), maximum=std::numeric_limits<float>::lowest();
+        for (int v=first+12;v<draw->VtxBuffer.Size;++v) {
+            const auto& vertex=draw->VtxBuffer[v];
+            if (vertex.col!=expectedColour) continue;
+            ++coloured;
+            const float coordinate=side<2 ? vertex.pos.x-start.x : vertex.pos.y-start.y;
+            const bool highScreenCoordinate=side<2 ? side==1 : side==2;
+            const float expected=68.0f+(highScreenCoordinate ? (side<2 ? 34.0f : 68.0f) : 0.0f);
+            const float outward=(coordinate-expected)*(highScreenCoordinate ? 1.0f : -1.0f);
+            require(outward>=-0.001f && outward<=12.001f,
+                    "Hull radiation border overlaps the installation interior");
+            minimum=std::min(minimum,coordinate);maximum=std::max(maximum,coordinate);
+        }
+        require(coloured==(side>=0 ? 4 : 0),"Unavailable radiation was rendered as a measurement");
+        if (side>=0) require(std::abs((maximum-minimum)-12.0)<0.001,
+                             "Net radiation border lost its fixed visible width");
+        ImGui::End();ImGui::Render();
+    }
+    ImGui::DestroyContext();
+}
+void hullOutsideInteriorVoid() {
+    ImGui::CreateContext();auto& io=ImGui::GetIO();io.IniFilename=nullptr;
+    io.DisplaySize={1024,768};io.DeltaTime=1/60.f;
+    unsigned char* pixels;int width,height;io.Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
+    I inset(3,3);
+    for (std::uint32_t y=0;y<3;++y) for (std::uint32_t x=0;x<3;++x)
+        if (x!=1 || y!=1) inset.setCell(0,x,y,I::SectorType::Void);
+    const std::vector<double> flux(inset.level(0).walls().size(),0.0);
+    for (int frame=0;frame<2;++frame) {
+        ImGui::NewFrame();ImGui::SetNextWindowSize({700,600});ImGui::Begin("Inset hull");
+        const auto start=ImGui::GetCursorScreenPos();auto* draw=ImGui::GetWindowDrawList();
+        const auto first=draw->VtxBuffer.Size;
+        drawDeckGrid("Inset",inset.level(0),EditMode::Cell,std::nullopt,{},false,{}, {}, {},0,false,10,flux);
+        int coloured=0;
+        for (int v=first;v<draw->VtxBuffer.Size;++v) {
+            const auto& vertex=draw->VtxBuffer[v];
+            if (vertex.col!=IM_COL32(0,255,0,255)) continue;
+            ++coloured;
+            const float x=vertex.pos.x-start.x,y=vertex.pos.y-start.y;
+            require(x<=102.001f || x>=135.999f || y<=102.001f || y>=135.999f,
+                    "Hull bordering internal Void overlaps Interior");
+        }
+        require(coloured==16,"Inset hull did not draw four exterior strips");
+        ImGui::End();ImGui::Render();
+    }
     ImGui::DestroyContext();
 }
 void gridRendering() {
@@ -450,7 +625,23 @@ void gridRendering() {
         for (int frame=0;frame<2;++frame) {
             ImGui::NewFrame(); ImGui::SetNextWindowSize({700,600});
             ImGui::Begin("Installation rendering");
-            drawInstallationRenderModeCombo(settings);
+            settings.hullBorder=frame==0;
+            ImGui::LogToBuffer();drawInstallationRenderModeCombo(settings);
+            const std::string toolbar=ImGui::GetCurrentContext()->LogBuffer.c_str();ImGui::LogFinish();
+            require(toolbar.find("Hull border")!=std::string::npos,"Hull border toolbar checkbox missing");
+            require(settings.hullBorder==(frame==0),"Toolbar overwrote hull border visibility");
+            const auto hullCursor=ImGui::GetCursorPosY();
+            ImGui::LogToBuffer();drawHullRenderControls(settings);
+            const std::string hullControls=ImGui::GetCurrentContext()->LogBuffer.c_str();ImGui::LogFinish();
+            require((ImGui::GetCursorPosY()>hullCursor)==settings.hullBorder,"Hull controls visibility ignored toolbar toggle");
+            if (settings.hullBorder) {
+                require(hullControls.find("Hull rendering")!=std::string::npos &&
+                        hullControls.find("Minimum net radiation (W/m2)")!=std::string::npos &&
+                        hullControls.find("Maximum net radiation (W/m2)")!=std::string::npos &&
+                        hullControls.find("Reference net radiation (W/m2)")!=std::string::npos,
+                        "Hull rendering header/sliders missing");
+                require(settings.hullRadiation.valid(),"Hull sliders corrupted colour scale");
+            }
             const auto cursor=ImGui::GetCursorPosY();
             drawThermalRenderControls(settings);
             require((ImGui::GetCursorPosY()>cursor)==thermal,"Thermal controls visible in wrong render mode");
@@ -476,7 +667,7 @@ void gridRendering() {
                 heatmap ? std::span<const SectorColour>(colours) : std::span<const SectorColour>{});
             const auto expected=heatmap ? IM_COL32(0,255,0,255) : IM_COL32(126,168,200,255);
             require(draw->VtxBuffer.Size>=first+4,"Grid did not draw floor");
-            for (int n=0;n<4;++n) require(draw->VtxBuffer[first+n].col==expected,"Grid did not use Sector temperature colour");
+            for (int n=0;n<4;++n) require(draw->VtxBuffer[first+4+n].col==expected,"Grid did not use Sector temperature colour");
             ImGui::End(); ImGui::Render();
         }
     }
@@ -484,6 +675,6 @@ void gridRendering() {
 }
 }
 int main() {
-    try { evacuatedThermalRendering(); scaleMapping(); pressureRendering(); componentRendering(); runtimeColours(); injectorInput(); doorInput(); cellRendering(); gridRendering(); }
+    try { starMarkerRendering(); netRadiationValues(); netRadiationWallRendering(); hullOutsideInteriorVoid(); evacuatedThermalRendering(); scaleMapping(); pressureRendering(); componentRendering(); runtimeColours(); injectorInput(); doorInput(); cellRendering(); gridRendering(); }
     catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

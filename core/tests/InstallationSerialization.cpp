@@ -468,8 +468,86 @@ void orbitPersistence() {
         check(refused,"A stale phaseOffsetS key must be refused, not read as a percentage");
     }
 }
+
+void startDatePersistence() {
+    namespace core = nsi::core;
+    // A new Installation starts on 1st January 2050 at midnight UTC, and
+    // says so in the readable calendar form rather than as a bare epoch
+    // count that nobody can scan across a diff.
+    check(I(1,1).startDateUtcS() == 2524608000,
+          "A new Installation must start on 2050-01-01T00:00:00Z");
+    check(I(1,1).startDateUtcS() == core::kDefaultStartDateUtcS,
+          "The default must come from the same constant the calendar uses");
+    check(YAML::Load(I(1,1).serialize())["startDate"].as<std::string>() == "2050-01-01",
+          "The start date must be written as an ISO calendar date");
+    // The stored instant is always an exact day: the author picks a day
+    // and never an hour.
+    check(I(1,1).startDateUtcS() % core::kSecondsPerDay == 0,
+          "The default start must be exactly midnight");
+
+    // A picked date survives the round trip as the day it was picked.
+    I moved(1,1);
+    moved.setStartDateUtcS(core::utcSecondsFromCivil(2051, 3, 14));
+    roundTrip(moved);
+    check(YAML::Load(moved.serialize())["startDate"].as<std::string>() == "2051-03-14",
+          "A picked start date must persist as the same day");
+
+    // Both ends of the supported range, and a leap day besides - the one
+    // date that shows a broken month table and the only one nobody would
+    // think to try by hand.
+    I low(1,1); low.setStartDateUtcS(core::utcSecondsFromCivil(core::kMinAuthoredYear, 1, 1));
+    roundTrip(low);
+    I high(1,1); high.setStartDateUtcS(core::utcSecondsFromCivil(core::kMaxAuthoredYear, 12, 31));
+    roundTrip(high);
+    I leap(1,1); leap.setStartDateUtcS(core::utcSecondsFromCivil(2096, 2, 29));
+    roundTrip(leap);
+    check(YAML::Load(leap.serialize())["startDate"].as<std::string>() == "2096-02-29",
+          "A leap-day start must persist as the same leap day");
+
+    // Absent means the documented default, which is the date every
+    // document written before this field existed was implicitly started
+    // on. The key is always written back out.
+    {
+        auto n=YAML::Load(I(1,1).serialize());
+        n.remove("startDate");
+        YAML::Emitter out; out<<n;
+        I target; target.deserialize(out.c_str());
+        check(target.startDateUtcS() == core::kDefaultStartDateUtcS,
+              "An absent startDate must read as the documented default");
+        check(YAML::Load(target.serialize())["startDate"].IsDefined(),
+              "An absent startDate must be written back out");
+    }
+
+    // A date that is not a date is refused rather than guessed at. Each
+    // of these has a reading a lenient parser would take, and each of
+    // those readings is a clock that is wrong for the whole run.
+    for (const char* bad : {"2050-1-1", "2050-02-30", "2050-13-01", "2050-01-32",
+                           "2049-02-29", "next tuesday", "20500-01-01", "0", ""}) {
+        auto n=YAML::Load(I(1,1).serialize());
+        n["startDate"]=bad;
+        YAML::Emitter out; out<<n;
+        refused([&]{ I target; target.deserialize(out.c_str()); });
+    }
+
+    // A non-midnight instant cannot come from the picker, so one arriving
+    // any other way is refused rather than quietly rounded to the nearest
+    // midnight - a clock moved by up to a day is a clock nobody authored.
+    {
+        I off(1,1);
+        off.setStartDateUtcS(core::kDefaultStartDateUtcS + 3600);
+        refused([&]{ off.validate(); });
+        refused([&]{ off.serialize(); });
+    }
+    // And a year outside the supported range is refused on both sides,
+    // matching what the date picker will not offer.
+    for (int year : {1969, 2201}) {
+        I beyond(1,1);
+        beyond.setStartDateUtcS(core::utcSecondsFromCivil(year, 1, 1));
+        refused([&]{ beyond.validate(); });
+    }
+}
 }
 int main() {
-    try { topology(); volumes(); persistence(); hullPersistence(); partitionPersistence(); orbitPersistence(); compartmentLimit(); }
+    try { topology(); volumes(); persistence(); hullPersistence(); partitionPersistence(); orbitPersistence(); startDatePersistence(); compartmentLimit(); }
     catch (const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

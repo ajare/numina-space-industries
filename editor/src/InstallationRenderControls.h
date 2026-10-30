@@ -7,4 +7,6 @@ void drawInstallationRenderModeCombo(InstallationRenderSettings&);
 void drawThermalRenderControls(InstallationRenderSettings&);
 void drawPressureRenderControls(InstallationRenderSettings&);
 void drawAtmosphereRenderControls(InstallationRenderSettings&);
+// Independent of render mode; hidden when the hull border is turned off.
+void drawHullRenderControls(InstallationRenderSettings&);
 } // namespace station::editor

@@ -132,6 +132,10 @@ _Avoid_: Vacuum temperature, exterior temperature
 The orbit phase at which the star is directly overhead of the Installation, and the t = 0 reference; the sunlit arc is centred on it.
 _Avoid_: Sunrise, orbit start
 
+**Mission start date**:
+The calendar day a run's clock begins on, authored as a day and always at midnight UTC — there is no time of day to set, and one arriving from any other path is refused rather than rounded. The clock a run shows is this instant plus simulated seconds, derived every frame and never stored, so the date on the document and the time on the screen are one number read at two moments rather than two clocks that could fall out of step. It is a calendar label and nothing to do with **Local noon**, which is an orbit phase: the two are independent axes, and a mission can start at any hour of its own date while its orbit still opens at noon. Defaults to 1st January 2050.
+_Avoid_: Epoch (that is the zero the instant is measured from, not the field), start time (there is no time of day to author), launch date (nothing launches on it)
+
 **Ground drift**:
 The apparent motion of the Installation's sub-point across the planet's surface, in degrees per day. A derived readout for the author; zero means Geostationary.
 _Avoid_: Relative speed (as an input), orbital drift

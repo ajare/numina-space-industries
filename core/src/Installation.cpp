@@ -321,6 +321,16 @@ void Installation::validate() const {
     // An authored Orbit is validated wherever it is read, so a document that
     // serializes has a sky the bridge can actually build.
     if (orbit_) orbit_->validate();
+    // The mission start is authored as a day and never as an hour, so a
+    // stored instant that is not exactly midnight was written by something
+    // other than the picker. Refused rather than rounded to the nearest
+    // midnight: a clock quietly moved by up to a day is a clock nobody
+    // authored, and the whole run's dates would inherit the move.
+    require(startDateUtcS_ % kSecondsPerDay == 0,
+            "startDate must be midnight UTC: a whole number of days since 1970-01-01");
+    const int startYear = civilFromUtcSeconds(startDateUtcS_).year;
+    require(startYear >= kMinAuthoredYear && startYear <= kMaxAuthoredYear,
+            "startDate year is outside the supported range 1970..2200");
     std::set<std::tuple<std::size_t,std::int64_t,std::int64_t>> claims;
     std::size_t compartments=0;
     for (std::size_t l=0;l<levels_.size();++l) {
@@ -484,6 +494,10 @@ std::string Installation::serialize() const {
     case PartitionType::InsulatedPartition: partition = "InsulatedPartition"; break;
     }
     root["partition"] = partition;
+    // Written as a calendar date rather than the epoch integer the record
+    // holds, because a bare 2524608000 in a hand-read save tells nobody
+    // anything and the field means a day, not a count of seconds.
+    root["startDate"] = isoDateFromUtcSeconds(startDateUtcS_);
     if (orbit_) {
         YAML::Node o;
         o["stellarIrradianceWPerM2"] = orbit_->stellarIrradianceWPerM2;
@@ -558,6 +572,20 @@ void Installation::deserialize(const std::string& text) {
             else require(value == "none", "Invalid Hull type");
         }
         std::optional<PartitionType> partition;
+        // Absent means the documented default - 1st January 2050 at
+        // midnight - which is the date every document written before this
+        // field existed was implicitly started on. Present but
+        // unparseable is refused outright: guessing would set the clock
+        // for the whole run somewhere the author never wrote, and a start
+        // date read wrong is wrong for every second that follows it.
+        std::int64_t startDate = kDefaultStartDateUtcS;
+        if (root["startDate"]) {
+            const auto value = root["startDate"].as<std::string>();
+            const auto parsed = utcSecondsFromIsoDate(value);
+            require(parsed.has_value(),
+                    "startDate must be an ISO date of the form YYYY-MM-DD");
+            startDate = *parsed;
+        }
         if (version == 4 && root["partition"]) {
             const auto value = root["partition"].as<std::string>();
             if (value == "BarePartition") partition = PartitionType::BarePartition;
@@ -689,6 +717,7 @@ void Installation::deserialize(const std::string& text) {
         next.hullType_ = hull; // Never apply creation-time defaults when loading.
         next.partitionType_ = partition;
         next.orbit_ = orbit; // Never apply creation-time defaults when loading.
+        next.startDateUtcS_ = startDate;
         *this=std::move(next);
     } catch (const std::exception& e) { throw serialization::SerializationException(e.what()); }
 }

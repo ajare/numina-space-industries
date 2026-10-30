@@ -77,6 +77,33 @@ StructuralSurfaceObservation CellAtmosphereTransport::surfaceObservation(std::si
     }
     return result;
 }
+StructuralQueryResult CellAtmosphereTransport::exteriorRadiation(
+    std::span<ExteriorRadiationObservation> output,std::size_t offset) const {
+    StructuralQueryResult result{0,exteriorSolar_.size()};
+    if (offset>=result.total || output.empty()) return result;
+    const double deepSpaceK=geometry_.thermal.hull ?
+        geometry_.thermal.hull->sinkTemperatureC+station::StationCelsiusOffset : 3.0;
+    const auto exposure=exposure_.evaluate(elapsed_);
+    const double profile=solarCycleOverrides_ ?
+        station::evaluateStationProfile(*geometry_.thermal.solarCycle,elapsed_) : 0.0;
+    const double irradiance=geometry_.thermal.hull ?
+        geometry_.thermal.hull->fullSunIrradianceKWPerM2*1000 : station::HullSettings{}.fullSunIrradianceKWPerM2*1000;
+    constexpr double sigma=5.670374419e-8;
+    for (std::size_t i=offset;i<result.total && result.written<output.size();++i) {
+        const auto& face=exteriorSolar_[i];
+        const auto [index,side]=surfaceSlots_[face.body];
+        const auto& assembly=geometry_.structure->assemblies[index];
+        const double area=face.areaM2*face.directScale; // Open leaves no longer face space.
+        const double temperature=structure_.bodies[face.body].temperatureK();
+        const double sink=solarCycleOverrides_ ? deepSpaceK : face.effectiveSinkTemperatureK(exposure_,deepSpaceK);
+        const double absorbed=solarCycleOverrides_ ? face.lumpedProfileW(irradiance,profile) :
+            face.directW(exposure_,exposure)+face.reflectedSunlightW(exposure_,exposure);
+        const double outward=assembly.surfaceMaterial(side).emissivity*area*sigma*
+            (std::pow(temperature,4)-std::pow(sink,4));
+        output[result.written++]={assembly.surfaceId(side),area,temperature,absorbed,outward,absorbed-outward};
+    }
+    return result;
+}
 std::optional<StructuralSurfaceObservation> CellAtmosphereTransport::structuralSurface(StructuralSurfaceId id) const {
     const auto it=surfaceBodies_.find(id);
     return it==surfaceBodies_.end() ? std::nullopt : std::optional(surfaceObservation(it->second));

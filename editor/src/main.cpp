@@ -22,8 +22,10 @@
 #include "EditorEvents.h"
 #include "DeckGridWidget.h"
 #include "NativeFileDialogs.h"
+#include "OrbitDiagram.h"
 #include "OrbitSummary.h"
 #include "SimulationPlayback.h"
+#include "StartDatePicker.h"
 #include "SectorSystemsView.h"
 #include "SectorThermalPanel.h"
 #include "StructuralPanel.h"
@@ -32,6 +34,7 @@
 #include "station/editor/Installation.h"
 
 #include <nsi/core/WorldPresets.h>
+#include <nsi/systems/StellarExposure.h>
 
 #include <SDL.h>
 
@@ -370,7 +373,7 @@ int runEditor() {
         }
         ImGui::EndDisabled();
 
-        try { simulation.synchronize(session.hasDocument() ? &session.installation() : nullptr); }
+        try { simulation.synchronize(&session.installation()); }
         catch (const std::exception& error) { file_status = error.what(); }
         ImGui::SameLine();
         ImGui::BeginDisabled(simulation.runtime() == nullptr);
@@ -378,7 +381,6 @@ int runEditor() {
             simulation.togglePlaying();
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::BeginDisabled(!session.hasDocument());
         if (ImGui::Button(ICON_FA_UNDO " Reset"))
             edit([&]{ simulation.reset(session.installation()); });
         ImGui::SameLine();
@@ -386,15 +388,12 @@ int runEditor() {
         int speed_index = simulation.speedIndex();
         if (ImGui::Combo("Speed", &speed_index, "0.1x\0" "0.5x\0" "1x\0" "2x\0" "10x\0"))
             simulation.setSpeedIndex(speed_index);
-        ImGui::EndDisabled();
         auto observation_options=simulation.observationOptions();
         ImGui::SameLine();bool observations_changed=ImGui::Checkbox("Wind diagnostics",&observation_options.windDiagnostics);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Calculate/report optional wind speed. Conservative gas momentum and transport remain enabled.");
         ImGui::SameLine();observations_changed=ImGui::Checkbox("Object forces",&observation_options.objectForces) || observations_changed;
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Calculate one-way drag and pressure-gradient loads. Uses solver velocity independently of wind diagnostics; no rigid-body motion.");
         if (observations_changed) simulation.setObservationOptions(observation_options);
-        ImGui::SameLine();
-        ImGui::Text("%.1f s", simulation.runtime() ? simulation.runtime()->snapshot().elapsedSeconds : 0.0);
         session.setEditingEnabled(simulation.editingAllowed());
 
         // Plain-letter shortcuts must not consume text-field input or chords.
@@ -446,6 +445,18 @@ int runEditor() {
                    session.installation().level(active_level).interiorCount(),
                    session.installation().level(active_level).cellCount());
         ImGui::SameLine();
+        ImGui::Text("| Sim time: %.1f s", simulation.runtime() ? simulation.runtime()->snapshot().elapsedSeconds : 0.0);
+        // Derive the mission clock from the authored start and simulated elapsed time.
+        const std::string missionClock = nsi::core::formatUtcDateTimeAtStartPlus(
+            session.installation().startDateUtcS(),
+            simulation.runtime() ? simulation.runtime()->snapshot().elapsedSeconds : 0.0);
+        ImGui::SameLine();
+        ImGui::Text("| %s", missionClock.c_str());
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Mission elapsed time. Advances with simulated\n"
+                             "seconds, not wall-clock seconds, so it keeps\n"
+                             "the speed you set and stops when the run does.");
+        ImGui::SameLine();
         ImGui::Text("| Sim update: %.1f \xC2\xB5s (10-run avg)",
                     simulation.runtime() ? simulation.runtime()->averageStepMicroseconds() : 0.0);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Last 10 successful updates (about 1 s at normal cadence); startup averages available samples. Sum of Lua lifecycle preparation and native gas/thermal solver time. Excludes diagnostics, snapshot publication, history and GUI work.");
@@ -477,6 +488,7 @@ int runEditor() {
         station::editor::drawThermalRenderControls(render_settings);
         station::editor::drawPressureRenderControls(render_settings);
         station::editor::drawAtmosphereRenderControls(render_settings);
+        station::editor::drawHullRenderControls(render_settings);
         if (mode==EditMode::Injector) station::editor::drawGasInjectorControls(injector_settings);
         if (!session.editingEnabled())
             ImGui::TextWrapped("Reset the simulation to the start before editing the Installation.");
@@ -497,6 +509,18 @@ int runEditor() {
         if (ImGui::Combo("Partition type", &partitionIndex, partitionNames, 4))
             edit([&]{ session.setPartitionType(partitionIndex == 0 ? std::nullopt
                 : std::optional(static_cast<PartitionType>(partitionIndex - 1))); });
+        // When the mission begins. Day only, always midnight UTC: the
+        // picker has no time-of-day control and the write path drops one
+        // if it arrives anyway. The clock in the status bar is this
+        // instant plus simulated seconds, so the date on the document and
+        // the time on the run are one number read at two moments rather
+        // than two clocks that could drift apart.
+        if (auto started = station::editor::pickStartDate("Start date",
+                                                        session.installation().startDateUtcS()))
+            edit([&]{ session.setStartDateUtcS(*started); });
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Midnight UTC on the day you pick. There is no\n"
+                             "time of day to set: the mission starts at 00:00Z.");
         ImGui::EndDisabled();
         // The authored sky splits into the world and the ride around it.
         // The star's light and the planet's answer to it - how much it
@@ -651,12 +675,20 @@ int runEditor() {
                 // part-way into the eclipse. It moves when, never what -
                 // the eclipse keeps its size whatever the slider reads -
                 // and it folds, so a turn past the end lands where the
-                // turn began. ImGui's angle slider is a linear slider in
-                // degrees since 1.87; the round knob it used to draw is
-                // gone, and the fold does the round part instead.
+                // turn began.
+                //
+                // A plain float slider, deliberately, and not ImGui's
+                // SliderAngle. SliderAngle takes its value in RADIANS
+                // while taking its min and max in DEGREES, so a value
+                // handed to it in degrees comes back divided by 2pi/360:
+                // dragged to 180 it stored 0.87% of the cycle, 3.1 deg
+                // past noon, and because the widget converts on the way
+                // out as well it sat there reading an honest-looking
+                // 180.0 deg over a phase nowhere near it. SliderAngle is
+                // this slider plus a radian round trip that buys nothing.
                 float phaseDeg = static_cast<float>(
                     station::editor::phaseAngleFromOffsetPercent(orbit->phaseOffsetPercent));
-                if (ImGui::SliderAngle("Phase offset (deg)", &phaseDeg, 0.0f, 360.0f, "%.1f deg"))
+                if (ImGui::SliderFloat("Phase offset (deg)", &phaseDeg, 0.0f, 360.0f, "%.1f deg"))
                     writeOrbit(&Orbit::phaseOffsetPercent,
                                station::editor::offsetPercentFromPhaseAngle(phaseDeg));
                 if (ImGui::IsItemHovered())
@@ -667,6 +699,14 @@ int runEditor() {
             ImGui::EndDisabled();
             ImGui::PopItemWidth();
         }
+        // The ride drawn from above, between the numbers that author it
+        // and the numbers that read it back. It runs off the same
+        // evaluator the hull is under and the same simulated clock, so
+        // the dot crossing into shadow is the same event the exposure
+        // trace plots and the summary counts, not a re-enactment of it.
+        station::editor::drawOrbitDiagram(
+            session.installation(), simulation.runtime() ? &simulation.runtime()->model() : nullptr,
+            simulation.runtime() ? simulation.runtime()->snapshot().elapsedSeconds : 0.0);
         // The environment read back beside the numbers that made it, drawn
         // outside the edit lock so it stays legible through a run. Derived
         // values come off the evaluator the hull is actually under.
@@ -748,9 +788,19 @@ int runEditor() {
                 render_settings,snapshot ? &*snapshot : nullptr,
                 snapshot && simulation.runtime() ? &simulation.runtime()->model() : nullptr);
         const auto open_doors=simulation.openDoors(active_level);
+        const auto net_radiation=render_settings.hullBorder
+            ? station::editor::wallNetRadiationFluxes(session.installation(),active_level,
+                snapshot && simulation.runtime() ? &simulation.runtime()->model() : nullptr)
+            : std::vector<double>{};
+        std::optional<std::array<double, 3>> star_direction;
+        if (const auto orbit = session.installation().orbit()) {
+            const nsi::systems::StellarExposureEvaluator sky(*orbit);
+            const auto exposure = sky.evaluate(simulation.runtime() ? simulation.runtime()->snapshot().elapsedSeconds : 0.0);
+            if (!sky.dark()) star_direction=exposure.sunDirection;
+        }
         const auto pointer=drawDeckGrid("LevelGrid",grid,mode,selected_sector,{},door_controls,open_doors,thermal_colours,
             snapshot ? std::span<const station::StationCellAtmosphereSnapshot>(snapshot->cellAtmospheres) : std::span<const station::StationCellAtmosphereSnapshot>{},
-            active_level,render_settings.forceArrows,render_settings.forceHalfLengthN);
+            active_level,render_settings.forceArrows,render_settings.forceHalfLengthN,net_radiation,star_direction,render_settings.hullRadiation);
         ImGui::EndDisabled();
         const bool stroke_event=session.strokeActive() &&
             (pointer.phase==DeckPointerPhase::Release ||
@@ -787,7 +837,7 @@ int runEditor() {
             injection=station::editor::GasInjector{active_level,std::size_t(pointer.cell->y)*grid.width()+pointer.cell->x,
                 static_cast<std::size_t>(injector_settings.gas),injector_settings.kgPerS};
         try {
-            simulation.synchronize(session.hasDocument() ? &session.installation() : nullptr);
+            simulation.synchronize(&session.installation());
             simulation.update(io.DeltaTime,injection);
         } catch (const std::exception& error) { file_status=error.what(); }
         session.setEditingEnabled(simulation.editingAllowed());

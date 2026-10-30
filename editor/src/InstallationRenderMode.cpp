@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <limits>
 
 namespace station::editor {
 std::optional<std::size_t> atmosphereRenderComponent(InstallationRenderMode mode) {
@@ -76,6 +77,39 @@ std::optional<SectorColour> pressureColour(double pressureKPa, const PressureCol
     return scalarColour(pressureKPa,scale.minimumKPa,scale.referenceKPa,scale.maximumKPa);
 }
 
+bool HullRadiationColourScale::valid() const {
+    return std::isfinite(minimumWPerM2) && std::isfinite(referenceWPerM2) && std::isfinite(maximumWPerM2)
+        && minimumWPerM2<referenceWPerM2 && referenceWPerM2<maximumWPerM2;
+}
+std::optional<SectorColour> netRadiationColour(double fluxWPerM2,const HullRadiationColourScale& scale) {
+    if (!std::isfinite(fluxWPerM2) || !scale.valid()) return std::nullopt;
+    return scalarColour(fluxWPerM2,scale.minimumWPerM2,scale.referenceWPerM2,scale.maximumWPerM2);
+}
+std::vector<double> wallNetRadiationFluxes(const nsi::core::Installation& installation,
+    std::size_t levelIndex,const nsi::systems::CellAtmosphereTransport* model) {
+    const auto level=installation.level(levelIndex);
+    std::vector<double> result(level.walls().size(),std::numeric_limits<double>::quiet_NaN());
+    if (!model || !model->structure().enabled) return result;
+    std::vector<nsi::systems::ExteriorRadiationObservation> surfaces(model->exteriorSolarFaces().size());
+    const auto count=model->exteriorRadiation(surfaces).written;
+    std::vector<double> area(result.size()),power(result.size());
+    for (std::size_t i=0;i<count;++i) {
+        const auto& face=surfaces[i];const auto& id=face.id.assembly;
+        if (id.axis==2 || id.origin.z!=static_cast<std::int64_t>(levelIndex) || face.areaM2<=0) continue;
+        const auto x=id.origin.x-level.offsetX(),y=id.origin.y-level.offsetY();
+        std::size_t wall;
+        if (id.axis==0) {
+            if (x<0 || x>level.width() || y<0 || y>=level.depth()) continue;
+            wall=level.verticalWall(static_cast<std::uint32_t>(x),static_cast<std::uint32_t>(y));
+        } else {
+            if (x<0 || x>=level.width() || y<0 || y>level.depth()) continue;
+            wall=level.horizontalWall(static_cast<std::uint32_t>(x),static_cast<std::uint32_t>(y));
+        }
+        area[wall]+=face.areaM2;power[wall]+=face.netIntoW;
+    }
+    for (std::size_t i=0;i<result.size();++i) if (area[i]>0) result[i]=power[i]/area[i];
+    return result;
+}
 std::optional<SectorColour> componentColour(double value,const ComponentColourScale& scale) {
     if (!std::isfinite(value) || value<0 || !scale.valid()) return std::nullopt;
     return scalarColour(value,scale.minimum,scale.reference,scale.maximum);

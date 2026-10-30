@@ -9,12 +9,33 @@ void drawInstallationRenderModeCombo(InstallationRenderSettings& settings) {
     ImGui::SetNextItemWidth(170);
     if (ImGui::Combo("Render mode",&mode,"Default\0Thermal (gas)\0Pressure\0Structure (surfaces)\0Oxygen\0Nitrogen\0Carbon dioxide\0Water vapour\0"))
         settings.mode = static_cast<InstallationRenderMode>(mode);
+    ImGui::SameLine();ImGui::Checkbox("Hull border",&settings.hullBorder);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Show net hull radiation using the blue/green/red Hull rendering scale.");
     ImGui::SameLine();ImGui::Checkbox("Airflow load arrows",&settings.forceArrows);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Estimated force in N on a stationary reference object: area 1 m2, volume 1 m3, Cd 1. Drag + coarse pressure-gradient load; no rigid-body motion.");
     if (settings.forceArrows) {
         ImGui::SameLine();ImGui::SetNextItemWidth(110);
         ImGui::SliderFloat("Half-length load (N)",&settings.forceHalfLengthN,0.001f,100000.0f,"%.3g",ImGuiSliderFlags_Logarithmic|ImGuiSliderFlags_AlwaysClamp);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Arrow length = load / (load + scale). It shrinks smoothly to zero; half length at this force. Subpixel arrows are omitted.");
+    }
+}
+
+void drawHullRenderControls(InstallationRenderSettings& settings) {
+    if (!settings.hullBorder) return;
+    if (ImGui::CollapsingHeader("Hull rendering",ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PushID("HullRendering");
+        auto& scale=settings.hullRadiation;
+        constexpr auto flags=ImGuiSliderFlags_AlwaysClamp;
+        ImGui::SliderFloat("Minimum net radiation (W/m2)",&scale.minimumWPerM2,
+            -10000.0f,scale.referenceWPerM2-0.1f,"%.1f",flags);
+        ImGui::SliderFloat("Maximum net radiation (W/m2)",&scale.maximumWPerM2,
+            scale.referenceWPerM2+0.1f,10000.0f,"%.1f",flags);
+        ImGui::SliderFloat("Reference net radiation (W/m2)",&scale.referenceWPerM2,
+            scale.minimumWPerM2+0.1f,scale.maximumWPerM2-0.1f,"%.1f",flags);
+        ImGui::TextWrapped("Blue = minimum, green = reference, red = maximum. "
+            "Negative flux cools the hull; positive flux heats it. Zero is radiative balance. "
+            "Values outside the range use the end colours. Ctrl-click a slider to enter a precise value.");
+        ImGui::PopID();
     }
 }
 

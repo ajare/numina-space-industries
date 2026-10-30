@@ -15,9 +15,15 @@ public:
                        std::uint32_t width = 16, std::uint32_t depth = 16);
     void newDocument(std::uint32_t width = 16, std::uint32_t depth = 16);
     void replaceDocument(Installation installation);
-    // Startup geometry is a placeholder until New/Open (or a successful Save).
-    // This is independent of path(): newly created unsaved documents are active.
-    bool hasDocument() const noexcept { return mHasDocument; }
+    // The session holds a live Installation from the moment it is built.
+    // The grid the editor opens on is a document like any other, not a
+    // placeholder that has to be earned before it will run. Whether one
+    // has been read from or written to disk is what path() answers -
+    // empty until a successful Open or Save - and nothing about being
+    // live turns on it. There used to be a hasDocument() here saying
+    // otherwise, and the only thing it ever gated was playback, which is
+    // why the editor opened with a playable station on screen under a
+    // greyed-out Play button and no way of being told why.
     const Installation& installation() const noexcept { return mStation; }
     const Installation& station() const noexcept { return mStation; }
     const std::filesystem::path& path() const noexcept { return mPath; }
@@ -46,6 +52,9 @@ public:
     void setName(std::string name);
     void setHullType(std::optional<Installation::HullType> type);
     void setPartitionType(std::optional<Installation::PartitionType> type);
+    // When the mission begins, as seconds since 1970-01-01T00:00:00Z.
+    // Always midnight on the picked day; see nsi::core::CivilDate.h.
+    void setStartDateUtcS(std::int64_t seconds);
     // The authored sky. Clearing it means no orbit: a dark sky and no
     // stellar gain, never a substituted default.
     void setOrbit(std::optional<Installation::Orbit> orbit);
@@ -61,7 +70,6 @@ private:
     void cancelStroke();
     FileResult saveTo(const FileSelection& selection, DocumentFiles& files);
     Installation mStation, mBaseline;
-    bool mHasDocument = false;
     bool mEditingEnabled = true;
     std::filesystem::path mPath;
     std::size_t mStrokeLevel = 0;
