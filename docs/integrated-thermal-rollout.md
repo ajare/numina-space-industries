@@ -310,6 +310,18 @@ per 0.1 simulated seconds, and the accelerated cold-repressurisation refusal
 remains. This is personal-test enablement, not a passed rollout/force-calibration
 gate. The measurements above remain historical evidence for the older gas flux.
 
+## Subsequent stellar exposure cost gate
+
+The orbital stellar exposure chain (#36: authored Orbit, per-surface direct
+flux, Planet shine, the effective eclipse sink) was measured against this
+same fixture and this same gate in
+[#42](stellar-exposure-cost-gate.md). Its dark-sky control reproduces the
+LocalStructure cost recorded above, and its lit, eclipsed and whole-orbit
+rows add 4-12 ms per 0.1 simulated seconds on top of it - with identical
+committed thermal work counts, which is the interesting part. That report is
+the current evidence for the exposure model's serial cost; the numbers above
+remain the historical evidence for the pre-exposure backend comparison.
+
 ## Requested rollout decision
 
 **Measurement recommendation: no-go for production default enablement; retain

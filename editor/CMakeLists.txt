@@ -212,6 +212,18 @@ if(BUILD_TESTING)
         add_test(NAME editor-integrated-thermal-smoke COMMAND editor-integrated-thermal-benchmark 1 8)
         set_tests_properties(editor-integrated-thermal-smoke PROPERTIES
             LABELS "editor;functional;validation-fast" TIMEOUT 120)
+
+        # Serial stellar-exposure cost gate evidence tooling, same Linux-only
+        # allocation accounting as the integrated gate above. The full matrix
+        # is run by hand for the report; this smoke row keeps the tool honest.
+        add_executable(editor-stellar-cost-benchmark
+            tests/StellarCostBenchmark.cpp src/StructuralPanel.cpp src/StellarExposureTrace.cpp
+            src/SectorThermalPanel.cpp src/SectorAtmospherePanel.cpp src/SimulationTimingPanel.cpp)
+        target_include_directories(editor-stellar-cost-benchmark PRIVATE "${PROJECT_SOURCE_DIR}/systems-bridge/tests")
+        target_link_libraries(editor-stellar-cost-benchmark PRIVATE editor-simulation editor::implot)
+        add_test(NAME editor-stellar-cost-smoke COMMAND editor-stellar-cost-benchmark 1 8)
+        set_tests_properties(editor-stellar-cost-smoke PROPERTIES
+            LABELS "editor;functional;validation-fast" TIMEOUT 120)
     endif()
     add_executable(editor-cell-playback-benchmark tests/CellPlaybackBenchmark.cpp)
     target_link_libraries(editor-cell-playback-benchmark PRIVATE editor-simulation)

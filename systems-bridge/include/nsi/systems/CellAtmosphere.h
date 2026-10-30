@@ -168,6 +168,17 @@ public:
     // dark in this state, which is the structural proof that the orbital
     // model is suppressed rather than merely outweighed.
     bool solarCycleOverrides() const noexcept {return solarCycleOverrides_;}
+    // The exposure-derived exterior boundary state staged for the solver:
+    // one entry per exterior contact, in exterior contact order, holding the
+    // effective Deep-space sink that face sees and the stellar power it
+    // absorbs. This is the only state the orbital model writes per step, so
+    // it is the state a refused step owes back. Read-only view so a caller
+    // can assert the rollback contract directly instead of inferring it
+    // from a downstream temperature, exactly as exteriorSolarFaces() exposes
+    // the Reset-time normals for the same reason.
+    std::span<const station::NativeThermalExterior> structuralExteriorState() const noexcept {
+        return structuralExterior_;
+    }
     // Caller-bounded, nonrecursive, allocation-free local queries. Cavity index
     // identifies a geometric Interior Sector, including missing-gas presets.
     std::optional<StructuralSurfaceObservation> structuralSurface(StructuralSurfaceId) const;
@@ -216,6 +227,10 @@ private:
     std::optional<station::NativeThermalSolver> structuralSolver_;
     std::optional<station::DiffuseRadiation> structuralRadiation_;
     std::vector<station::ThermalBody> checkpointBodies_;
+    // The last committed exposure-derived exterior boundary state, so a
+    // refused step hands back the sky it last actually stood under rather
+    // than the sky of the attempt it just threw away.
+    std::vector<station::NativeThermalExterior> exteriorCheckpoint_;
     std::vector<station::NativeThermalGas> structuralGas_;
     std::vector<station::NativeThermalExterior> structuralExterior_;
     std::vector<ExteriorSolarFace> exteriorSolar_;

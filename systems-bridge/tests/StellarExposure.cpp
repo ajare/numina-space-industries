@@ -78,6 +78,96 @@ double sampledEclipseFraction(const StellarExposureEvaluator& evaluator, double 
     return static_cast<double>(eclipsed) / samples;
 }
 
+// A compressed thermal cycle. Orbital period and orbital radius are
+// independent authored inputs (ADR-0008: no Kepler, no gravity model), so
+// shortening the period leaves the eclipse fraction - and with it the whole
+// shape of the exposure profile, both crossings and everything between -
+// exactly as an ISS-like orbit has it, while making a complete cycle
+// walkable inside a test budget instead of an hour of simulated clock.
+constexpr double kCyclePeriod = 60.0;
+
+CellAtmosphereExpansion cycleGeometry(double periodSeconds = kCyclePeriod, double betaDegrees = 0.0,
+                                     double phaseOffsetSeconds = 0.0) {
+    I scene(2, 2);
+    scene.setHullType(I::HullType::BareSkin);
+    scene.setOrbit(O{kFullSun, periodSeconds, kIssRadius, kEarthAlbedo,
+                    betaDegrees * kDegToRad, phaseOffsetSeconds});
+    return expandCellAtmosphere(scene);
+}
+
+// Everything one committed step owns, read back off the transport so two
+// runs - or a run and its own pre-refusal state - can be compared field by
+// field. The exposure-derived staging is carried here alongside the conserved
+// quantities because it is committed state too: it is what the sky the model
+// is standing under currently says the hull boundary is.
+struct CommittedState {
+    std::vector<station::CellFluidState> gas{};
+    std::vector<station::ThermalBody> bodies{};
+    std::vector<CellAtmosphereLedger> ledgers{};
+    std::vector<station::NativeThermalExterior> staged{};
+    station::NativeThermalPaths paths{};
+    StructuralHeatRates rates{};
+    double elapsed{}, observed{};
+    long double solidEnergy{}, residual{};
+};
+CommittedState committedState(const CellAtmosphereTransport& runtime) {
+    CommittedState state;
+    state.gas.assign(runtime.fluid().states().begin(), runtime.fluid().states().end());
+    state.bodies = runtime.structure().bodies;
+    for (const auto& sector : runtime.sectors()) state.ledgers.push_back(sector.ledger);
+    state.staged.assign(runtime.structuralExteriorState().begin(),
+                       runtime.structuralExteriorState().end());
+    state.paths = runtime.structure().paths;
+    state.rates = runtime.structure().rates;
+    state.elapsed = runtime.elapsedSeconds();
+    state.observed = runtime.structure().observedSeconds;
+    state.solidEnergy = solidEnergy(runtime);
+    state.residual = runtime.structure().residualJ;
+    return state;
+}
+bool stagedEqual(const std::vector<station::NativeThermalExterior>& a,
+                const std::vector<station::NativeThermalExterior>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        if (a[i].spaceTemperatureK != b[i].spaceTemperatureK
+            || a[i].absorbedSolarW != b[i].absorbedSolarW) return false;
+    return true;
+}
+bool committedEqual(const CommittedState& a, const CommittedState& b) {
+    if (a.gas.size() != b.gas.size() || a.bodies.size() != b.bodies.size()
+        || a.ledgers.size() != b.ledgers.size() || a.staged.size() != b.staged.size()) return false;
+    for (std::size_t i = 0; i < a.gas.size(); ++i) if (a.gas[i].q != b.gas[i].q) return false;
+    for (std::size_t i = 0; i < a.bodies.size(); ++i)
+        if (a.bodies[i].energyJ() != b.bodies[i].energyJ()) return false;
+    for (std::size_t i = 0; i < a.ledgers.size(); ++i) if (a.ledgers[i] != b.ledgers[i]) return false;
+    return stagedEqual(a.staged, b.staged) && a.paths == b.paths && a.rates == b.rates
+        && a.elapsed == b.elapsed && a.observed == b.observed
+        && a.solidEnergy == b.solidEnergy && a.residual == b.residual;
+}
+// The eclipse crossings a walk went through, read off the committed stellar
+// ledger rather than off the evaluator: while sunlit the hull absorbs stellar
+// power, and while eclipsed direct and reflected light are both exactly zero,
+// so a step that booked no absorbed solar was a step in shadow.
+struct CycleWalk {
+    int sunlitSteps{}, eclipsedSteps{}, crossings{};
+};
+CycleWalk walkCycle(CellAtmosphereTransport& runtime, int steps, double seconds) {
+    CycleWalk walk{};
+    bool inEclipse = false, seen = false;
+    for (int step = 0; step < steps; ++step) {
+        const auto before = runtime.structure().paths.absorbedSolarJ;
+        require(runtime.advance(seconds), "A step of the cycle walk was refused");
+        const auto absorbed = runtime.structure().paths.absorbedSolarJ - before;
+        require(absorbed >= 0.0L, "The stellar ledger went backwards");
+        const bool eclipsed = absorbed == 0.0L;
+        if (eclipsed) ++walk.eclipsedSteps; else ++walk.sunlitSteps;
+        if (seen && eclipsed != inEclipse) ++walk.crossings;
+        inEclipse = eclipsed;
+        seen = true;
+    }
+    return walk;
+}
+
 // The evaluator is tested through the values it produces, never its internals.
 void sunGeometry() {
     const StellarExposureEvaluator iss{O{kFullSun, kIssPeriod, kIssRadius}};
@@ -1180,6 +1270,127 @@ void successfulStepsAllocateNothingAndRefusalsRestoreEverything() {
     audit(runtime);
 }
 
+// A whole simulated orbit, walked at the Editor's 1x update, allocates
+// nothing on any successful step after construction - including across both
+// eclipse crossings, which is where a lazily built sun direction or a
+// per-face cache would first show up as heap traffic.
+void aFullOrbitAllocatesNothingOnSuccessfulSteps() {
+    CellAtmosphereTransport runtime(cycleGeometry());
+    require(runtime.advance(0.1), "Cycle warm-up step refused");
+    const int steps = static_cast<int>(kCyclePeriod / 0.1);
+    allocations = 0;
+    tracking = true;
+    const auto walk = walkCycle(runtime, steps, 0.1);
+    tracking = false;
+    require(walk.crossings == 2,
+            "The full-orbit walk did not cross eclipse entry and eclipse exit exactly once each");
+    require(walk.sunlitSteps > 0 && walk.eclipsedSteps > 0,
+            "The full-orbit walk never entered or never left shadow");
+    require(allocations == 0,
+            "A full simulated orbit allocated heap memory on successful steps after construction");
+    audit(runtime);
+}
+
+// Two transports over identical time and identical inputs are identical at
+// every step of a whole cycle, and specifically at the two steps that cross
+// an eclipse boundary - the instants where a replay is most likely to drift,
+// because the sky itself changes discontinuously there.
+void identicalAcrossEclipseEntryAndExit() {
+    CellAtmosphereTransport a(cycleGeometry());
+    CellAtmosphereTransport b(cycleGeometry());
+    require(a.advance(0.1) && b.advance(0.1), "Warm-up step refused on one transport");
+    require(committedEqual(committedState(a), committedState(b)),
+            "Two identical transports disagreed before the walk began");
+    const int steps = static_cast<int>(kCyclePeriod / 0.1);
+    bool inEclipse = false, seen = false;
+    CommittedState previousA = committedState(a);
+    for (int step = 0; step < steps; ++step) {
+        const auto beforeA = a.structure().paths.absorbedSolarJ;
+        const auto beforeB = b.structure().paths.absorbedSolarJ;
+        require(a.advance(0.1), "Transport A refused mid-cycle");
+        require(b.advance(0.1), "Transport B refused where A did not");
+        const bool eclipsedA = a.structure().paths.absorbedSolarJ == beforeA;
+        const bool eclipsedB = b.structure().paths.absorbedSolarJ == beforeB;
+        require(eclipsedA == eclipsedB, "The two transports disagreed about shadow");
+        const auto stateA = committedState(a);
+        const auto stateB = committedState(b);
+        if (seen && eclipsedA != inEclipse) {
+            // A crossing step: the exposure-derived staging must have moved,
+            // and both transports must have moved it the same way.
+            require(!stagedEqual(stateA.staged, previousA.staged),
+                    "An eclipse crossing left the staged exterior boundary state untouched");
+            require(stateA.staged.size() == previousA.staged.size(),
+                    "An eclipse crossing changed the exterior contact count");
+        }
+        require(committedEqual(stateA, stateB),
+                "Two transports over identical time and inputs diverged across the cycle");
+        previousA = stateA;
+        inEclipse = eclipsedA;
+        seen = true;
+    }
+    require(inEclipse == false, "The cycle walk ended inside shadow instead of back in the sun");
+    require(a.elapsedSeconds() == b.elapsedSeconds(), "The two transports ended at different times");
+    audit(a);
+    audit(b);
+}
+
+// A refused step gives everything back: gas, solids, the ledgers, the clock,
+// and the exposure-derived exterior boundary state the orbital model staged
+// during the attempt. The refused duration is never committed and the last
+// committed observations - the heat rates and the observation stamp - stay
+// where the last accepted step left them.
+void refusalRestoresExposureDerivedState() {
+    CellAtmosphereTransport runtime(cycleGeometry());
+    // Land exactly on eclipse entry, so the committed staging is the last
+    // sunlit sky and the refused attempt's first source slice opens on the
+    // far side of the boundary, in shadow.
+    const auto& evaluator = runtime.exposureEvaluator();
+    require(!evaluator.dark(), "The cycle fixture came up dark");
+    const double entry = (kCyclePeriod - evaluator.eclipseDurationSeconds()) / 2.0;
+    require(entry > 1.0, "The compressed cycle has no eclipse to cross");
+    advance(runtime, entry);
+    require(runtime.exposureEvaluator().evaluate(entry - 0.05).sunlit,
+            "The committed instant is not the last sunlit sky before eclipse entry");
+    require(!runtime.exposureEvaluator().evaluate(entry + 0.05).sunlit,
+            "The refused attempt does not open inside eclipse");
+    const auto before = committedState(runtime);
+    // The staging must actually be carrying stellar power here, or the
+    // comparison below would be vacuous.
+    auto absorbing = [&runtime] {
+        std::size_t n = 0;
+        for (const auto& exterior : runtime.structuralExteriorState())
+            if (exterior.absorbedSolarW > 0.0) ++n;
+        return n;
+    };
+    require(absorbing() > 0, "The committed staging absorbed no stellar power to restore");
+    require(!runtime.advance(1.0, {}, 4096, 0), "Refused step ignored the thermal work budget");
+    const auto after = committedState(runtime);
+    require(after.elapsed == before.elapsed,
+           "A refused step committed the refused duration to the clock");
+    for (std::size_t i = 0; i < before.gas.size(); ++i)
+        require(after.gas[i].q == before.gas[i].q, "A refused step leaked gas state");
+    require(after.bodies.size() == before.bodies.size(), "A refused step changed the solid count");
+    for (std::size_t i = 0; i < before.bodies.size(); ++i)
+        require(after.bodies[i].energyJ() == before.bodies[i].energyJ(),
+               "A refused step leaked solid energy");
+    require(after.ledgers == before.ledgers, "A refused step leaked the atmosphere ledgers");
+    require(after.paths == before.paths, "A refused step leaked the structural ledger");
+    require(after.solidEnergy == before.solidEnergy, "A refused step changed committed solid energy");
+    require(after.residual == before.residual, "A refused step changed the energy closure");
+    require(after.rates == before.rates, "A refused step overwrote the last committed heat rates");
+    require(after.observed == before.observed,
+           "A refused step moved the last committed observation stamp");
+    require(stagedEqual(after.staged, before.staged),
+           "A refused step left the refused attempt's sky staged on the hull boundary");
+    require(absorbing() > 0, "The restored staging no longer absorbs the stellar power it committed");
+    audit(runtime);
+    // And the restored staging is behaviourally the committed sky: the next
+    // accepted step lands on the same place whether or not the refusal
+    // happened in between.
+    require(runtime.advance(0.1), "Retry after refusal failed");
+    audit(runtime);
+}
+
 void identicalTimeGivesIdenticalResults() {
     auto run = [](std::vector<double> steps) {
         CellAtmosphereTransport runtime(litGeometry());
@@ -1338,6 +1549,9 @@ int main() {
         noOrbitKeepsTheSkyDark();
         solarCycleOverridesTheOrbit();
         successfulStepsAllocateNothingAndRefusalsRestoreEverything();
+        aFullOrbitAllocatesNothingOnSuccessfulSteps();
+        identicalAcrossEclipseEntryAndExit();
+        refusalRestoresExposureDerivedState();
         identicalTimeGivesIdenticalResults();
         anOpenDoorAdmitsNoDirectLight();
         authoredDocumentIsImmutable();

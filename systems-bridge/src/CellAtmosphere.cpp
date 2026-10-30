@@ -185,6 +185,10 @@ CellAtmosphereTransport::CellAtmosphereTransport(CellAtmosphereExpansion geometr
             }
         }
         structuralExterior_.resize(radiation.size());
+        // The rollback copy is sized with the live staging, never grown later,
+        // so a refused step can hand the committed sky back without ever
+        // allocating on the successful path.
+        exteriorCheckpoint_=structuralExterior_;
         if(exteriorSolar_.size()!=structuralExterior_.size())
             throw std::logic_error("Exterior solar faces do not match exterior radiation contacts");
         // The three-state exposure rule. No authored Orbit leaves the
@@ -333,6 +337,7 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
     const auto previousExterior=structure_.exteriorHeatJ;
     const auto previousPaths=structure_.paths;
     std::copy(structure_.bodies.begin(),structure_.bodies.end(),checkpointBodies_.begin());
+    std::copy(structuralExterior_.begin(),structuralExterior_.end(),exteriorCheckpoint_.begin());
     std::copy(faceTransfers_.begin(),faceTransfers_.end(),checkpointTransfers_.begin());
     work_={};thermalIterations_=0;thermalFluxResidual_=0;structure_.work={};
     std::fill(faceTransfers_.begin(),faceTransfers_.end(),station::CellFluidState{});
@@ -392,6 +397,11 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
         diagnostic_=e.what();fluid_.restore(checkpoint_);std::copy(checkpointLedger_.begin(),checkpointLedger_.end(),ledger_.begin());
         momentum_=checkpointMomentum;
         std::copy(checkpointBodies_.begin(),checkpointBodies_.end(),structure_.bodies.begin());
+        // The exposure-derived staging goes back with the solids it was
+        // staged against. The solver reads this array but never owns it, so
+        // restoring it here is what keeps the refused attempt's sky from
+        // surviving as the state the committed model is described by.
+        std::copy(exteriorCheckpoint_.begin(),exteriorCheckpoint_.end(),structuralExterior_.begin());
         structure_.exteriorHeatJ=previousExterior;structure_.work=previousReport;structure_.paths=previousPaths;
         work_=previousWork;thermalIterations_=previousIterations;thermalFluxResidual_=previousResidual;
         std::copy(checkpointTransfers_.begin(),checkpointTransfers_.end(),faceTransfers_.begin());
