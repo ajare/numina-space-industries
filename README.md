@@ -224,5 +224,9 @@ performance target is still unmet; accelerated updates may explicitly refuse
 without dropping time or changing fidelity. Standalone compartment APIs and
 Installation YAML remain unchanged.
 
+Orbital eclipse edges use a centred penumbra ramp; see
+[Eclipse penumbra](docs/stellar-penumbra.md) for timing, reflected-light,
+equivalent-duration and trace semantics.
+
 The Station Systems library needs no runtime asset installation and embeds its
 own default Lua. World-specific code, documents and assets remain in Promethium.

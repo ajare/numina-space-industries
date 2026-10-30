@@ -117,6 +117,7 @@ std::vector<std::string> orbitSummaryLines(const OrbitSummary& summary) {
                             summary.eclipseDurationS / 60.0));
     lines.push_back(reading("Sunlit duration", summary.sunlitDurationS, "%.1f s (%.1f min)",
                             summary.sunlitDurationS / 60.0));
+    lines.emplace_back("Durations are equivalent full eclipse/sun; penumbra is fractionally weighted.");
     // The sign carries the direction, the word spells it out: an author
     // who reads a drift of zero as "not moving" rather than "moving with
     // the ground" is one sign convention away from a wrong conclusion.

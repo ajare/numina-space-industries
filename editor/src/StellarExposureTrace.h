@@ -21,7 +21,8 @@ std::string exposureTraceLabel(std::string_view modelRevision, std::string_view 
 // them.
 struct ExposureTraceGeometry {
     // Eclipse bands as [from, to] seconds. A band runs from the first
-    // eclipsed observation to the next one that says otherwise, which is
+    // total-eclipse (exposure == 0) observation to the next one that says
+    // otherwise. Partial penumbra samples are not shaded. This is
     // the same sample-and-hold the staircase uses.
     std::vector<std::pair<double, double>> eclipseBands;
     // The staircase as (seconds, exposure) vertices, one run per
@@ -36,7 +37,8 @@ ExposureTraceGeometry exposureTraceGeometry(std::span<const ExposureSample> trac
 
 // Draw the committed exposure trace and its Eclipse bands into the plot
 // that is currently open. The trace is a staircase on the plot's secondary
-// Y axis, 1 in sun and 0 in Eclipse, so it reads against the hull
+// Y axis, 1 in full sun, 0 in total Eclipse and fractional in penumbra.
+// It reads against the hull
 // temperature curves without being squashed by their scale. Samples that
 // are NaN - no Orbit authored, or a hand-authored solar profile owning the
 // stellar term - break the line rather than being drawn as zero, and no

@@ -70,10 +70,10 @@ double length(const std::array<double, 3>& v) { return std::sqrt(v[0]*v[0] + v[1
 // rather than the summary number, so the two can be set against each other.
 double sampledEclipseFraction(const StellarExposureEvaluator& evaluator, double period) {
     constexpr int samples = 20000;
-    int eclipsed = 0;
+    double eclipsed = 0.0;
     for (int i = 0; i < samples; ++i) {
         const double t = (i + 0.5) * period / samples;
-        if (!evaluator.evaluate(t).sunlit) ++eclipsed;
+        eclipsed += evaluator.evaluate(t).eclipse;
     }
     return static_cast<double>(eclipsed) / samples;
 }
@@ -205,6 +205,58 @@ void sunGeometry() {
            "Default evaluator must be dark");
     require(length(dark.evaluate(123.0).sunDirection) == 0.0 && !dark.evaluate(123.0).sunlit,
            "Dark evaluator produced a sun");
+}
+
+void penumbraRamps() {
+    // Fixed reference durations, not values obtained from the evaluator.
+    for (const auto& reference : {std::array<double, 3>{5570.0, kIssRadius, 8.246694444444445},
+                                  std::array<double, 3>{86164.0, kGeoRadius, 127.5705888888889},
+                                  std::array<double, 3>{11140.0, kIssRadius, 16.49338888888889}}) {
+        const double period = reference[0], width = reference[2];
+        const StellarExposureEvaluator evaluator{O{kFullSun, period, reference[1], kEarthAlbedo}};
+        const double entry = period * (0.5 - evaluator.eclipseFraction() / 2.0);
+        double previous = -1.0;
+        for (int i = 0; i <= 100; ++i) {
+            const double share = i / 100.0;
+            const double t = entry + (share - 0.5) * width;
+            const auto entering = evaluator.evaluate(t);
+            const auto leaving = evaluator.evaluate(period - t);
+            require(near(entering.eclipse, share, 1e-10), "Penumbra is not the specified linear timed ramp");
+            require(entering.eclipse >= previous, "Eclipse entry is not monotonic");
+            require(near(leaving.eclipse, entering.eclipse, 1e-10), "Eclipse exit is not symmetric");
+            require(entering.sunlit == (entering.eclipse < 1.0), "Partial eclipse sunlit flag is inconsistent");
+            const double reflected = evaluator.reflectedSunlightFluxWPerM2({0, 0, -1}, entering);
+            const double full = evaluator.reflectedSunlightFluxWPerM2({0, 0, -1}, evaluator.evaluate(0));
+            require(near(reflected, full * (1.0 - entering.eclipse), 1e-9), "Reflected sunlight did not ramp");
+            const double direct = evaluator.directFluxWPerM2({-1, 0, 0}, 1.0, entering);
+            require(near(direct, -entering.sunDirection[0] * kFullSun * (1.0 - entering.eclipse), 1e-8),
+                    "Direct sunlight did not ramp");
+            previous = entering.eclipse;
+        }
+        require(evaluator.evaluate(entry - width).eclipse == 0.0
+                    && evaluator.evaluate(entry + width).eclipse == 1.0,
+                "Penumbra endpoints do not join full sun and total eclipse");
+    }
+}
+
+void grazingPenumbraIsContinuous() {
+    const double critical = std::asin(core::PlanetRadiusM / kIssRadius);
+    double previousPeak = 1.0;
+    for (double gap : {1e-7, 1e-9, 1e-11, 1e-13}) {
+        const StellarExposureEvaluator evaluator{O{kFullSun, kIssPeriod, kIssRadius,
+                                                  kEarthAlbedo, critical - gap}};
+        const double peak = evaluator.evaluate(kIssPeriod / 2.0).eclipse;
+        require(peak > 0.0 && peak < previousPeak, "Grazing eclipse peak did not close continuously");
+        require(near(peak, evaluator.eclipseFraction() / (0.533 / 360.0), 1e-10),
+                "Overlapping penumbra ramps did not preserve the shadow integral");
+        require(evaluator.evaluate(kIssPeriod / 2.0).sunlit, "Grazing penumbra forced totality");
+        require(near(sampledEclipseFraction(evaluator, kIssPeriod), evaluator.eclipseFraction(), 1e-6),
+                "Grazing eclipse equivalent duration changed under smoothing");
+        previousPeak = peak;
+    }
+    const StellarExposureEvaluator clear{O{kFullSun, kIssPeriod, kIssRadius,
+                                          kEarthAlbedo, critical + 1e-10}};
+    require(clear.evaluate(kIssPeriod / 2.0).eclipse == 0.0, "Penumbra survived above critical Beta");
 }
 
 void eclipseFraction() {
@@ -487,7 +539,7 @@ void phaseOffsetShiftsTheProfile() {
         const auto original = reference.evaluate(t + offset);
         require(vectorNear(moved.sunDirection, original.sunDirection, 1e-9),
                "The phase offset did not shift the sun sweep");
-        require(moved.eclipse == original.eclipse, "The phase offset moved the eclipse unevenly");
+        require(near(moved.eclipse, original.eclipse, 1e-12), "The phase offset moved the eclipse unevenly");
     }
     // Shape and duration preserved: the fraction is the same number, and
     // the sampled arc under the shifted clock agrees with it.
@@ -1294,7 +1346,7 @@ void aFullOrbitAllocatesNothingOnSuccessfulSteps() {
 // Two transports over identical time and identical inputs are identical at
 // every step of a whole cycle, and specifically at the two steps that cross
 // an eclipse boundary - the instants where a replay is most likely to drift,
-// because the sky itself changes discontinuously there.
+// because the exposure-derived boundary changes there.
 void identicalAcrossEclipseEntryAndExit() {
     CellAtmosphereTransport a(cycleGeometry());
     CellAtmosphereTransport b(cycleGeometry());
@@ -1389,6 +1441,34 @@ void refusalRestoresExposureDerivedState() {
     // happened in between.
     require(runtime.advance(0.1), "Retry after refusal failed");
     audit(runtime);
+}
+
+void penumbraStepsPreserveRuntimeContracts() {
+    const StellarExposureEvaluator evaluator{O{kFullSun, kIssPeriod, kIssRadius, kEarthAlbedo}};
+    const double entry = (kIssPeriod - evaluator.eclipseDurationSeconds()) / 2.0;
+    for (double crossing : {entry, kIssPeriod - entry}) {
+        CellAtmosphereTransport a(cycleGeometry(kIssPeriod, 0.0, crossing - 0.2));
+        CellAtmosphereTransport b(cycleGeometry(kIssPeriod, 0.0, crossing - 0.2));
+        advance(a, 0.1);
+        advance(b, 0.1);
+        const double blocked = a.exposureEvaluator().evaluate(a.elapsedSeconds()).eclipse;
+        require(blocked > 0.0 && blocked < 1.0, "Runtime contract fixture missed penumbra");
+        const auto before = committedState(a);
+        require(!a.advance(0.1, {}, 4096, 0), "Penumbra ignored thermal refusal budget");
+        require(committedEqual(before, committedState(a)), "Penumbra refusal did not roll back atomically");
+        for (int i = 0; i < 10; ++i) {
+            allocations = 0;
+            tracking = true;
+            const bool accepted = a.advance(0.1) && b.advance(0.1);
+            tracking = false;
+            require(accepted, "Penumbra runtime step refused");
+            require(allocations == 0, "Successful penumbra step allocated");
+            require(committedEqual(committedState(a), committedState(b)),
+                    "Penumbra replay diverged after refusal");
+            audit(a);
+            audit(b);
+        }
+    }
 }
 
 void identicalTimeGivesIdenticalResults() {
@@ -1525,6 +1605,8 @@ void aDarkEvaluatorDerivesNothing() {
 
 int main() {
     try {
+        penumbraRamps();
+        grazingPenumbraIsContinuous();
         sunGeometry();
         eclipseFraction();
         eclipseFractionFollowsBeta();
@@ -1552,6 +1634,7 @@ int main() {
         aFullOrbitAllocatesNothingOnSuccessfulSteps();
         identicalAcrossEclipseEntryAndExit();
         refusalRestoresExposureDerivedState();
+        penumbraStepsPreserveRuntimeContracts();
         identicalTimeGivesIdenticalResults();
         anOpenDoorAdmitsNoDirectLight();
         authoredDocumentIsImmutable();

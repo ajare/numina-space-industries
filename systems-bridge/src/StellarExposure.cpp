@@ -23,6 +23,7 @@ constexpr double kMinCosBeta = 1e-9;
 // document round trip bit for bit.
 constexpr double kGeostationaryTolerance = 1e-9;
 constexpr double kDegreesPerTurn = 360.0;
+constexpr double kPenumbraTurns = 0.533 / kDegreesPerTurn;
 constexpr double kSecondsPerDay = 86400.0;
 // A turn is a whole cycle; folding into [0, 1) keeps every phase argument
 // small without ever wrapping a negative into a positive by accident.
@@ -84,7 +85,6 @@ StellarExposureEvaluator::StellarExposureEvaluator(
     const double ratio = core::PlanetRadiusM / orbit.radiusFromPlanetCentreM;
     planetViewScale_ = ratio * ratio;
     const double horizon = std::sqrt(std::max(0.0, 1.0 - ratio * ratio));
-    umbraZenithCosine_ = -horizon;
     // What Beta moves is how far down the star ever travels - its lowest
     // zenith cosine is -cos(beta) - and therefore how much of the sweep
     // spends time past the boundary. Reading the same geometry off the
@@ -121,8 +121,17 @@ StellarExposure StellarExposureEvaluator::evaluate(double elapsedSeconds) const 
     exposure.sunDirection = {-sunPlaneScale_ * std::sin(phase),
                             sunCrossTrack_,
                             sunPlaneScale_ * std::cos(phase)};
-    exposure.eclipse = exposure.sunDirection[2] < umbraZenithCosine_ ? 1.0 : 0.0;
-    exposure.sunlit = exposure.eclipse == 0.0;
+    // Smooth the geometric shadow interval by a box of one solar diameter
+    // in orbital phase. Each isolated edge is a linear ramp centred on the
+    // geometric crossing, lasting 0.533 * period / 360 seconds. Subtracting
+    // the two edges also handles grazing eclipses: overlapping ramps make a
+    // partial plateau whose height tends continuously to zero as Beta clears
+    // the shadow. The integrated eclipse remains the geometric duration.
+    const double fromMidnight = std::abs(turns - 0.5);
+    const double halfShadow = eclipseFraction_ / 2.0;
+    exposure.eclipse = std::clamp((halfShadow - fromMidnight) / kPenumbraTurns + 0.5, 0.0, 1.0)
+                     - std::clamp((-halfShadow - fromMidnight) / kPenumbraTurns + 0.5, 0.0, 1.0);
+    exposure.sunlit = exposure.eclipse < 1.0;
     return exposure;
 }
 
@@ -185,12 +194,12 @@ double StellarExposureEvaluator::planetInfraredFluxWPerM2(
 
 double StellarExposureEvaluator::reflectedSunlightFluxWPerM2(
     const std::array<double, 3>& outwardNormal, const StellarExposure& exposure) const noexcept {
-    // Gated on Eclipse rather than on the sun direction: the whole disc goes
-    // dark at once, and a partially lit disc is not modelled.
+    // Use the same visible stellar fraction as direct light, so reflected
+    // heating also ramps continuously and vanishes only in total eclipse.
     if (!exposure.sunlit) return 0.0;
     const double view = planetViewFactor(outwardNormal);
     if (view <= 0.0) return 0.0;
-    return view * albedo_ * irradianceWPerM2_;
+    return view * albedo_ * irradianceWPerM2_ * (1.0 - exposure.eclipse);
 }
 
 double StellarExposureEvaluator::effectiveSinkTemperatureK(

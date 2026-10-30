@@ -270,6 +270,33 @@ void traceMatchesThePublishedEvaluator() {
     }
 }
 
+void tracePreservesPartialPenumbra() {
+    O orbit{1361.0, 5570.0, 6791000.0};
+    const nsi::systems::StellarExposureEvaluator evaluator(orbit);
+    orbit.phaseOffsetS = orbit.orbitalPeriodS * (0.5 - evaluator.eclipseFraction() / 2.0);
+    SimulationPlayback playback(std::nullopt);
+    playback.reset(sceneWith(orbit));
+    const auto trace = playback.exposureHistory();
+    require(!trace.empty() && near(trace.back().exposure, 0.5, 1e-10),
+            "playback rounded partial eclipse instead of publishing the evaluator fraction");
+    const std::vector<ExposureSample> samples{{0, 1}, {1, 0.75}, {2, 0.25},
+                                             {3, 0}, {4, 0.25}, {5, 1}};
+    const auto geometry = exposureTraceGeometry(samples);
+    require(geometry.eclipseBands.size() == 1
+                && geometry.eclipseBands[0] == std::pair<double, double>{3, 4},
+            "penumbra was shaded as total eclipse");
+    require(geometry.runs.size() == 1, "penumbra introduced a trace gap");
+    bool partial = false;
+    for (const auto& vertex : geometry.runs[0])
+        partial = partial || vertex.second == 0.75;
+    require(partial, "trace geometry discarded fractional exposure");
+    const auto lines = orbitSummaryLines(orbitSummary(sceneWith(orbit), nullptr));
+    bool explained = false;
+    for (const auto& line : lines)
+        explained = explained || line.find("penumbra is fractionally weighted") != std::string::npos;
+    require(explained, "summary does not explain equivalent durations");
+}
+
 // No sky is not zero exposure. The author sees a gap and is told why.
 void unavailableObservationsAreGaps() {
     const auto scene = sceneWith(std::nullopt);
@@ -404,6 +431,7 @@ int main() {
         badgeOnlyAtTheSiderealMatch();
         derivedValuesFollowEveryEdit();
         traceMatchesThePublishedEvaluator();
+        tracePreservesPartialPenumbra();
         unavailableObservationsAreGaps();
         aProfileOverrideLeavesNoSkyToReport();
         graphCarriesTheLabelledTrace();

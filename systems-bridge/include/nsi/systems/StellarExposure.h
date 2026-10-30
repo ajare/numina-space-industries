@@ -15,8 +15,13 @@ struct StellarExposure {
     // Unit vector from the Installation toward the star. All zero when there
     // is no star to see, so a dot product against it is never positive.
     std::array<double, 3> sunDirection{0.0, 0.0, 1.0};
-    // 0 in full sun, 1 in total eclipse.
+    // Blocked stellar fraction: 0 in full sun, 1 in total eclipse, linear
+    // penumbra ramps between. Each edge spans 0.533 * period / 360 seconds,
+    // centred on the geometric crossing. Overlapping edges in a grazing
+    // eclipse reduce the peak continuously rather than forcing totality.
     double eclipse{0.0};
+    // Any direct stellar disc remains visible (eclipse < 1), including
+    // penumbra. Reflected light uses 1 - eclipse, not this boolean weight.
     bool sunlit{true};
 };
 
@@ -42,7 +47,8 @@ public:
     // then answers zero.
     bool dark() const noexcept { return dark_; }
     double stellarIrradianceWPerM2() const noexcept { return irradianceWPerM2_; }
-    // Fraction of one Orbital period spent inside the planet's shadow. It
+    // Geometric shadow fraction, also the orbit-average blocked fraction
+    // after penumbra smoothing (not the time spent in total eclipse). It
     // depends on the radius and Beta alone, never on the phase offset: the
     // offset moves the eclipse along the clock, it does not resize it.
     double eclipseFraction() const noexcept { return eclipseFraction_; }
@@ -57,10 +63,10 @@ public:
         return dark_ ? kUnavailable : radiusMeters_;
     }
 
-    // How much of one orbit the sky spends in each half, in seconds. Both
-    // come from the eclipse fraction times the Orbital period, so they always
-    // sum to the period and neither needs the phase offset: the offset moves
-    // the eclipse along the clock, it never resizes it.
+    // Equivalent full-eclipse and full-sun durations: integrals of eclipse
+    // and (1 - eclipse) over one orbit, not boolean sunlit/totality durations.
+    // Centred penumbra ramps preserve the geometric shadow integral, even
+    // when they overlap. These sum to the period and ignore phase offset.
     double eclipseDurationSeconds() const noexcept {
         return dark_ ? kUnavailable : eclipseFraction_ * periodSeconds_;
     }
@@ -135,7 +141,8 @@ public:
     double planetInfraredFluxWPerM2(const std::array<double, 3>& outwardNormal) const noexcept;
 
     // Sunlight bounced off the planet's disc, W/m^2: view * albedo *
-    // irradiance, and exactly zero while eclipsed. There is no sunlight in
+    // irradiance * (1 - eclipse), ramping through penumbra and exactly zero
+    // in total eclipse. There is no sunlight in
     // the shadow to reflect, so without this gate a station would absorb
     // hundreds of watts while sitting in total darkness.
     double reflectedSunlightFluxWPerM2(const std::array<double, 3>& outwardNormal,
@@ -170,11 +177,6 @@ private:
     // (Rp/r)^2, the view factor of a surface facing the planet outright.
     double planetViewScale_{};
     double eclipseFraction_{};
-    // The zenith cosine below which the star is hidden: -sqrt(1 - (Rp/r)^2).
-    // A fixed property of the shadow cylinder and the orbit radius, not of
-    // Beta: Beta decides how far down the star ever gets, and therefore
-    // whether it ever reaches this line at all.
-    double umbraZenithCosine_{-2.0};
     double sunCrossTrack_{};     // sin(beta), constant through the orbit
     double sunPlaneScale_{1.0};  // cos(beta), the in-plane share of the sweep
     bool dark_{true};
