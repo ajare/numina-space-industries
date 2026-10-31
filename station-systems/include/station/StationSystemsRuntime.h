@@ -58,6 +58,8 @@ namespace station
 		// eclipse. Held until replaced; defaults to zero. Derived arrays only:
 		// legacy arrays continue to use the authored solar cycle. Invalid
 		// (negative or non-finite) values are refused without changing input.
+		// Changes are journalled at the current committed step for replay;
+		// identical values are no-ops and do not grow the journal.
 		bool setDirectSolarIrradianceWPerM2(double irradiance);
 		~StationSystemsRuntime();
 		StationSystemsRuntime(StationSystemsRuntime const&) = delete;

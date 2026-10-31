@@ -46,6 +46,30 @@ settings.thermalLinks = std::move(thermal.links);
 settings.solarCycle = std::move(thermal.solarCycle);
 ```
 
+## Solar array sky input
+
+For a systems runtime driven in variable mode, `<nsi/systems/SolarGeneration.h>`
+provides the per-tick bridge operation:
+
+```cpp
+nsi::systems::StellarExposureEvaluator sky;
+if (installation.orbit()) sky = nsi::systems::StellarExposureEvaluator(*installation.orbit());
+// Each host systems tick; construct sky again only on document Reset.
+nsi::systems::updateSystemsWithAuthoredSky(runtime, sky, seconds);
+```
+
+It samples the sky at the midpoint of the tick using committed systems time,
+then pushes `G × (1 − eclipse)` in W/m² before advancing the runtime. One scalar
+feeds every derived array, independent of Hull presence or legacy solar-cycle
+profiles. Perfect star-tracking needs no surface cosine. No Orbit supplies zero;
+planetary infrared and reflected sunlight never enter conversion. Fixed-mode
+runtimes and invalid durations are refused. Irradiance changes are journalled
+by the systems runtime, preserving YAML/binary replay and held-input continuation.
+This operation does not start a systems gas/heat runtime alongside native
+Editor playback; Editor solar-array ownership and authoring are separate work.
+
+## Compartment and thermal mapping
+
 `expandSector` returns an optional compartment (invalid indices throw).
 Void geometry or a Void atmosphere preset returns no compartment. Expansion
 via `expandInstallation` returns only atmospheres. IDs are

@@ -2138,6 +2138,15 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 	bool StationSystemsRuntime::setDirectSolarIrradianceWPerM2(double irradiance)
 	{
 		if (!std::isfinite(irradiance) || irradiance < 0.0) return false;
+		if (irradiance == mImpl->directSolarIrradianceWPerM2) return true;
+		// External sky input is replay state, not authored configuration. Journal
+		// before mutation, in the same order as live edits and fault commands.
+		Impl::FaultCommand command;
+		command.kind = Impl::FaultCommand::Kind::SolarIrradiance;
+		command.afterStep = mImpl->clock.steps();
+		command.directSolarIrradianceWPerM2 = irradiance;
+		mImpl->faultCommands.push_back(std::move(command));
+		mImpl->directSolarIrradianceWPerM2 = irradiance;
 		for (auto& array : mImpl->solarArrays) array.directIrradianceWPerM2 = irradiance;
 		return true;
 	}

@@ -19,6 +19,7 @@ using namespace station_detail;
 		struct DurationRun { double seconds; uint64_t steps; };
 		std::vector<DurationRun> durationRuns;
 		double nextObservationSeconds{0};
+		double directSolarIrradianceWPerM2{0.0};
 		struct FaultCommand
 		{
 			// One entry on the command journal. A settings update carries
@@ -26,12 +27,13 @@ using namespace station_detail;
 			// identity, cause and effective parameters; a Condition restore
 			// carries the installation and the target Condition it is
 			// healing toward (#840).
-			enum class Kind { Injection, SettingsUpdate, RestoreCondition, ResetTrip, RepairFault, BreakerReset } kind{Kind::Injection};
+			enum class Kind { Injection, SettingsUpdate, RestoreCondition, ResetTrip, RepairFault, BreakerReset, SolarIrradiance } kind{Kind::Injection};
 			uint64_t afterStep{0};
 			std::string installationId, modeId;
 			FaultCause cause;
 			CoolantLeakSettings parameters;
 			double heatSpikeKJ{0.0};
+			double directSolarIrradianceWPerM2{0.0};
 			double restoreTarget{0.0};
 			// #844: the effective parameters frozen by a thermal-plant
 			// injection. Only the block matching the injected mode is set.

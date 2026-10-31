@@ -15,7 +15,7 @@ if(NOT TARGET nsi::core)
     add_subdirectory(../core "${CMAKE_CURRENT_BINARY_DIR}/core")
 endif()
 
-add_library(nsi-systems-bridge STATIC src/Atmosphere.cpp src/CellAtmosphere.cpp src/StructuralTopology.cpp src/StructuralObservations.cpp src/StellarExposure.cpp)
+add_library(nsi-systems-bridge STATIC src/Atmosphere.cpp src/CellAtmosphere.cpp src/StructuralTopology.cpp src/StructuralObservations.cpp src/StellarExposure.cpp src/SolarGeneration.cpp)
 add_library(nsi::systemsBridge ALIAS nsi-systems-bridge)
 target_compile_features(nsi-systems-bridge PUBLIC cxx_std_20)
 target_link_libraries(nsi-systems-bridge PUBLIC nsi::core StationSystems::StationSystems)
@@ -24,6 +24,10 @@ target_include_directories(nsi-systems-bridge PUBLIC
 set_target_properties(nsi-systems-bridge PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(BUILD_TESTING)
+    add_executable(nsi-solar-generation-test tests/SolarGeneration.cpp)
+    target_link_libraries(nsi-solar-generation-test PRIVATE nsi::systemsBridge)
+    add_test(NAME nsi-solar-generation COMMAND nsi-solar-generation-test)
+    set_tests_properties(nsi-solar-generation PROPERTIES LABELS "systems;functional;validation-fast" TIMEOUT 60)
     add_executable(nsi-structural-s0-test tests/StructuralS0.cpp)
     target_link_libraries(nsi-structural-s0-test PRIVATE nsi::systemsBridge)
     add_test(NAME nsi-structural-s0 COMMAND nsi-structural-s0-test

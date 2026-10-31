@@ -806,6 +806,8 @@ namespace station
 			s.writeUint64("afterStep", command.afterStep);
 			if (command.kind == Impl::FaultCommand::Kind::SettingsUpdate)
 				writeStationSystemsSettingsMap(s, *command.settingsUpdate);
+			else if (command.kind == Impl::FaultCommand::Kind::SolarIrradiance)
+				s.writeDouble("directSolarIrradianceWPerM2", command.directSolarIrradianceWPerM2);
 			else if (command.kind == Impl::FaultCommand::Kind::BreakerReset)
 			{
 				s.writeUint32("commandKind", 4);
@@ -954,6 +956,11 @@ namespace station
 				readStationSystemsSettingsMap(s, settingsSchemaVersion, update);
 				if (!runtime->updateSettings(update, &diagnostic))
 					throw serialization::SerializationException("Invalid fault replay settings: " + diagnostic);
+			}
+			else if (s.hasField("directSolarIrradianceWPerM2"))
+			{
+				if (!runtime->setDirectSolarIrradianceWPerM2(s.readDouble("directSolarIrradianceWPerM2")))
+					throw serialization::SerializationException("Invalid replay stellar irradiance");
 			}
 			else if (s.hasField("commandKind"))
 			{
