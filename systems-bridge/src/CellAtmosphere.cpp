@@ -314,7 +314,7 @@ bool CellAtmosphereTransport::setDoorOpen(std::size_t level,std::size_t wall,boo
     return true;
 }
 bool CellAtmosphereTransport::advance(double seconds,std::span<const double> heatJ,std::size_t maxSubsteps,std::size_t maxThermalIterations,
-    std::optional<CellGasInjection> injection) {
+    std::optional<CellGasInjection> injection,const std::function<bool()>& accept) {
     diagnostic_.clear();
     if (!std::isfinite(seconds) || seconds<0 || !std::isfinite(elapsed_+seconds)
         || (!heatJ.empty() && heatJ.size()!=fluid_.states().size())) {diagnostic_="Invalid Cell atmosphere update";return false;}
@@ -379,6 +379,7 @@ bool CellAtmosphereTransport::advance(double seconds,std::span<const double> hea
                 ledger.condensateEnergyJ+=phase.carriedEnergyJ;ledger.inventoryEnergyJ-=phase.carriedEnergyJ;
             }
         }
+        if (accept && !accept()) throw std::runtime_error("Host refused Cell atmosphere candidate");
         publish();
         if(mode_==CellThermalMode::LocalStructure) {
             const auto& p=structure_.work.paths;

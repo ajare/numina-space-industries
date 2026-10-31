@@ -7,6 +7,7 @@
 #include <nsi/systems/StructuralObservations.h>
 #include <nsi/systems/StellarExposure.h>
 #include <array>
+#include <functional>
 #include <map>
 #include <span>
 #include <string>
@@ -142,8 +143,11 @@ public:
         :CellAtmosphereTransport(expandCellAtmosphere(installation,mode==CellThermalMode::LocalStructure),mode) {}
     // Source/phase splitting is bounded to 0.1 s, including accelerated updates.
     // At most 4096 source slices and maxSubsteps acoustic steps per whole call.
+    // Optional host gate runs after numerical success but before publication
+    // or clock commit. False/exception rolls back the native candidate. The
+    // gate must not mutate this model; a true result must commit its own work.
     bool advance(double seconds,std::span<const double> heatJ={},std::size_t maxSubsteps=4096,std::size_t maxThermalIterations=4096,
-        std::optional<CellGasInjection> injection=std::nullopt);
+        std::optional<CellGasInjection> injection=std::nullopt,const std::function<bool()>& accept={});
     // Atomic source-only control: no transport, phase/thermal solve or clock step.
     bool inject(const CellGasInjection&,double seconds);
     const station::CellFluidWork& work() const {return work_;}

@@ -6,6 +6,22 @@
 #include <optional>
 #include <stdexcept>
 
+namespace station::editor {
+struct CellPlaybackRuntimeTestAccess {
+    static void refuseSolar(CellPlaybackRuntime& runtime,bool refuse) {
+        const auto settings=runtime.solar_->effectiveSettings();
+        StationSystemsSource source;
+        if (refuse) source=R"lua(return function(name)
+            return {advance=function() error('intentional solar-side audit refusal') end}
+        end)lua";
+        runtime.solar_=std::make_unique<StationSystemsRuntime>(settings,StationSystemsUpdateMode::Variable,source);
+    }
+    static double solarSeconds(const CellPlaybackRuntime& runtime) {
+        return runtime.solar_->snapshot().elapsedSeconds;
+    }
+};
+}
+
 namespace {
 void require(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
@@ -60,6 +76,44 @@ void lifecycleTickIntegration() {
         if (attempt==0) playback.togglePlaying();
     }
     playback.reset(scene);require(playback.runtime()->snapshot().completedTicks==std::array<uint64_t,4>{},"Reset retained Lua state");
+}
+void solarRefusalRetry() {
+    using namespace station::editor;using I=nsi::core::Installation;
+    I scene(1,1);scene.setSolarArray(I::SolarArray{60});
+    scene.toggleWall(0,scene.level(0).horizontalWall(0,0));
+    CellPlaybackRuntime runtime(scene),reference(scene);
+    const auto before=runtime.snapshot();const auto structure=runtime.structuralSnapshot();
+    const auto state=runtime.model().fluid().states()[0].q;
+    // Exercise a real solar runtime failure/retirement, not a native refusal.
+    CellPlaybackRuntimeTestAccess::refuseSolar(runtime,true);
+    for (int attempt=0;attempt<2;++attempt) {
+        require(!runtime.update(.1),"Solar refusal fixture did not fail");
+        require(runtime.diagnostics()[0].system=="solar-array","Solar diagnostic lost");
+        near(runtime.model().elapsedSeconds(),0);
+        require(runtime.model().fluid().states()[0].q==state,"Solar refusal advanced native gas");
+        for (std::size_t i=0;i<structure.bodies.size();++i)
+            require(runtime.structuralSnapshot().bodies[i].energyJ()==structure.bodies[i].energyJ(),"Solar refusal advanced native solids");
+        require(runtime.structuralSnapshot().paths==structure.paths,"Solar refusal changed structural paths");
+        require(runtime.snapshot().cellAtmospheres==before.cellAtmospheres
+            && runtime.snapshot().power==before.power
+            && runtime.snapshot().completedTicks==before.completedTicks,"Solar refusal published candidate state");
+    }
+    CellPlaybackRuntimeTestAccess::refuseSolar(runtime,false);
+    require(runtime.update(.1) && reference.update(.1),"Solar refusal retry failed");
+    near(runtime.model().elapsedSeconds(),.1);
+    require(runtime.snapshot()==reference.snapshot(),"Solar retry differs from exactly one committed step");
+    require(runtime.model().fluid().states()[0].q==reference.model().fluid().states()[0].q,"Solar retry advanced gas twice");
+    for (std::size_t i=0;i<structure.bodies.size();++i)
+        require(runtime.structuralSnapshot().bodies[i].energyJ()==reference.structuralSnapshot().bodies[i].energyJ(),"Solar retry advanced solids twice");
+    // The opposite refusal must not advance the solar clock or publish power.
+    const auto committed=runtime.snapshot();
+    require(!runtime.update(.2,0),"Native refusal fixture did not fail");
+    near(CellPlaybackRuntimeTestAccess::solarSeconds(runtime),.1);
+    require(runtime.snapshot().power==committed.power,"Native refusal published power");
+    require(runtime.update(.2) && reference.update(.2),"Same-duration native retry failed");
+    require(!runtime.update(.2,0) && runtime.update(.01) && reference.update(.01),"Changed-duration native retry failed");
+    require(runtime.snapshot()==reference.snapshot(),"Native retry desynchronized solar/native clocks");
+    near(CellPlaybackRuntimeTestAccess::solarSeconds(runtime),.31);
 }
 void rollingStepTiming() {
     using namespace station::editor;
@@ -717,6 +771,7 @@ void documentAvailability() {
 int main() {
     try {
         using namespace station::editor;
+        solarRefusalRetry();
         lifecycleTickIntegration();
         rollingStepTiming();
         editingLockout();

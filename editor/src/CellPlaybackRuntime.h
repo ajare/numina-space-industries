@@ -46,6 +46,7 @@ public:
     const SimulationStepTiming& stepTimings() const {return timing_;}
     const nsi::systems::CellAtmosphereTransport& model() const {return model_;}
 private:
+    friend struct CellPlaybackRuntimeTestAccess;
     std::optional<nsi::systems::CellGasInjection> resolveInjector(const GasInjector&) const;
     void publish(double seconds);
     void doorConditions();

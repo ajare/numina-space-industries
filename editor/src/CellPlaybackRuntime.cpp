@@ -124,17 +124,19 @@ bool CellPlaybackRuntime::update(double seconds,std::size_t acousticBudget,std::
         snapshot_.healthy=false;diagnostics_=lifecycle_.diagnostics();return false;
     }
     const auto luaEnd=std::chrono::steady_clock::now();
-    if (!model_.advance(seconds,{},acousticBudget,thermalBudget,source)) {
-        snapshot_.healthy=false;diagnostics_.push_back({snapshot_.worldTick,"native-cell-fluid",ScriptExecutionFailure::None,model_.diagnostic()});return false;
+    bool solarRefused=false;
+    // Keep the solar gate inside native rollback, after numerical success.
+    // Moving it before advance would instead advance solar on native refusal.
+    const auto accept=[&] {
+        solarRefused=solar_ && !nsi::systems::updateSystemsWithAuthoredSky(*solar_,solarSky_,seconds);
+        return !solarRefused;
+    };
+    if (!model_.advance(seconds,{},acousticBudget,thermalBudget,source,accept)) {
+        snapshot_.healthy=false;
+        diagnostics_.push_back({snapshot_.worldTick,solarRefused ? "solar-array" : "native-cell-fluid",
+            ScriptExecutionFailure::None,solarRefused ? "Solar array update failed" : model_.diagnostic()});return false;
     }
-    if (solar_) {
-        if (!nsi::systems::updateSystemsWithAuthoredSky(*solar_,solarSky_,seconds)) {
-            snapshot_.healthy=false;
-            diagnostics_.push_back({snapshot_.worldTick,"solar-array",ScriptExecutionFailure::None,"Solar array update failed"});
-            return false;
-        }
-        snapshot_.power=solar_->snapshot().power;
-    }
+    if (solar_) snapshot_.power=solar_->snapshot().power;
     const auto solverEnd=std::chrono::steady_clock::now();
     lifecycle_.commit();snapshot_.worldTick=lifecycle_.completedSteps();snapshot_.completedTicks=lifecycle_.completedTicks();
     snapshot_.systemsTimestepSeconds=seconds;snapshot_.elapsedSeconds=model_.elapsedSeconds();snapshot_.healthy=true;
