@@ -524,7 +524,7 @@ int runEditor() {
                              "time of day to set: the mission starts at 00:00Z.");
         ImGui::EndDisabled();
         try {
-            if (station::editor::drawSolarArrayControls(session)) file_status.clear();
+            if (station::editor::drawSolarArrayPanel(session, simulation.snapshotFor(session.installation()))) file_status.clear();
         } catch (const std::exception& error) { file_status = error.what(); }
         // The authored sky splits into the world and the ride around it.
         // The star's light and the planet's answer to it - how much it

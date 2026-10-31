@@ -59,6 +59,7 @@ public:
     // stellar gain, never a substituted default.
     void setOrbit(std::optional<Installation::Orbit> orbit);
     void setSolarArrayEnabled(bool enabled);
+    void setSolarArray(std::optional<Installation::SolarArray> array);
     void undo();
     void redo();
     bool canUndo() const noexcept { return mEditingEnabled && !mUndoHistory.empty(); }

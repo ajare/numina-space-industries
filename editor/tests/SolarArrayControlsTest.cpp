@@ -1,4 +1,8 @@
 #include "SolarArrayControls.h"
+#include "SimulationPlayback.h"
+#include "imgui_internal.h"
+#include <cmath>
+#include <limits>
 #include "station/editor/EditorSession.h"
 #include "imgui.h"
 #include <filesystem>
@@ -65,10 +69,99 @@ void check() {
     files.write(path,session.installation());
     require(files.read(path)==session.installation(), "enabled design changed during save/reload");
 }
+void header() {
+    EditorSession session;
+    SimulationPlayback playback;
+    auto& io=ImGui::GetIO();
+    ImVec2 button;
+    auto render=[&] {
+        playback.synchronize(session.installation());
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos({0,0}); ImGui::SetNextWindowSize({600,450});
+        ImGui::Begin("Solar header",nullptr,ImGuiWindowFlags_NoTitleBar);
+        ImGui::LogToBuffer();
+        drawSolarArrayPanel(session,playback.snapshotFor(session.installation()));
+        const auto min=ImGui::GetItemRectMin(),max=ImGui::GetItemRectMax();
+        button={(min.x+max.x)/2,(min.y+max.y)/2};
+        std::string text=ImGui::GetCurrentContext()->LogBuffer.c_str();
+        ImGui::LogFinish(); ImGui::End(); ImGui::Render();
+        return text;
+    };
+    render();
+    require(render().find("Solar array —")==std::string::npos,"absent array header visible");
+    const auto original=session.installation().serialize();
+    session.setSolarArray(Installation::SolarArray{60});
+    require(session.unsavedChanges(),"array creation did not dirty document");
+    session.undo(); require(session.installation().serialize()==original,"array undo changed legacy bytes");
+    session.redo();
+    require(render().find("Solar array — 22.2 kW")!=std::string::npos,"lit header not rendered");
+    auto snapshot=playback.snapshotFor(session.installation());
+    require(std::abs(snapshot->power.sources.front().availableKW-22.21152)<1e-8,"wrong unclipped generation");
+    require(snapshot->elapsedSeconds==0,"preview advanced the playback clock");
+    playback.togglePlaying(); playback.update(.1);
+    snapshot=playback.snapshotFor(session.installation());
+    require(snapshot->healthy && std::abs(snapshot->power.sources.front().availableKW-22.21152)<1e-8,
+        "running output was clipped by consumer-less bus");
+    require(std::abs(snapshot->elapsedSeconds-.1)<1e-8,"power clock changed native playback");
+    auto orbit=*session.installation().orbit();
+    orbit.orbitalPeriodS=1; session.setOrbit(orbit); render();
+    playback.togglePlaying();
+    for (int i=0;i<5;++i) playback.update(.1);
+    require(render().find("Solar array — Eclipse")!=std::string::npos,"live playback did not enter eclipse");
+    // At the geometric shadow boundary the centred penumbra transmits half
+    // the direct beam. Offset the next tick's midpoint to that boundary.
+    nsi::systems::StellarExposureEvaluator sky(orbit);
+    orbit.phaseOffsetPercent=50-50*sky.eclipseDurationSeconds()/orbit.orbitalPeriodS-5;
+    session.setOrbit(orbit);
+    require(render().find("Solar array — 11.1 kW")!=std::string::npos,"penumbra generation not rendered");
+    orbit.orbitalPeriodS=5570; orbit.phaseOffsetPercent=50;
+    session.setOrbit(orbit);
+    require(render().find("Solar array — Eclipse")!=std::string::npos,"eclipse shown as a measured zero");
+    session.setOrbit(std::nullopt);
+    require(render().find("Solar array — No star")!=std::string::npos,"absent Orbit shown as eclipse");
+    session.setSolarArrayEnabled(false);
+    require(render().find("Solar array — Disabled")!=std::string::npos,"disabled precedence lost");
+    playback.togglePlaying(); playback.update(.1);
+    snapshot=playback.snapshotFor(session.installation());
+    require(snapshot->power.sources.front().disabled && snapshot->power.sources.front().availableKW==0,
+        "disabled choice not mapped into running systems");
+    session.setSolarArrayEnabled(true); orbit.phaseOffsetPercent=0; session.setOrbit(orbit);
+    session.setSolarArray(Installation::SolarArray{60,Installation::SolarCellTechnology::SpaceSilicon});
+    require(render().find("Solar array — 9.1 kW")!=std::string::npos,"technology not mapped");
+    Installation restored; restored.deserialize(session.installation().serialize());
+    require(restored==session.installation(),"array round trip lost authored properties");
+    auto noArray=restored; noArray.setSolarArray(std::nullopt);
+    CellPlaybackRuntime nativeOnly(noArray),withPower(restored);
+    require(nativeOnly.update(.1) && withPower.update(.1),"power/native coexistence update failed");
+    require(nativeOnly.snapshot().atmospheres==withPower.snapshot().atmospheres
+        && nativeOnly.snapshot().cellAtmospheres==withPower.snapshot().cellAtmospheres,
+        "isolated power altered native atmosphere ownership");
+    auto zero=restored; zero.setSolarArray(Installation::SolarArray{0});
+    CellPlaybackRuntime zeroRuntime(zero);
+    require(zeroRuntime.snapshot().power.sources.front().disabled,"zero area misreported as eclipse");
+    session.setEditingEnabled(false); session.setSolarArray(std::nullopt);
+    require(session.installation().solarArray().has_value(),"array command bypassed edit lock");
+    session.setEditingEnabled(true); session.setSolarArray(std::nullopt);
+    require(render().find("Solar array —")==std::string::npos,"removed header remains visible");
+    for (double invalid : {-1.0,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        bool rejected=false;
+        try { restored.setSolarArray(Installation::SolarArray{invalid}); } catch (...) { rejected=true; }
+        require(rejected,"invalid blanket area accepted");
+    }
+    auto click=[&] {
+        io.AddMousePosEvent(button.x,button.y); render();
+        io.AddMouseButtonEvent(0,true); render();
+        io.AddMouseButtonEvent(0,false); render();
+    };
+    session.setEditingEnabled(false); click();
+    require(!session.installation().solarArray(),"locked Add control mutated document");
+    session.setEditingEnabled(true); click();
+    require(session.installation().solarArray().has_value(),"Add control did not author an array");
+}
 }
 int main() {
     ImGui::CreateContext();
-    try { check(); }
+    try { check(); header(); }
     catch (const std::exception& e) { ImGui::DestroyContext(); std::cerr<<e.what()<<'\n'; return 1; }
     ImGui::DestroyContext();
 }

@@ -243,6 +243,14 @@ public:
     // never applies this default - see deserialize.
     std::optional<Orbit> orbit() const noexcept { return orbit_; }
     void setOrbit(std::optional<Orbit> orbit);
+    enum class SolarCellTechnology { TripleJunctionGaAs, SingleJunctionGaAs, SpaceSilicon };
+    struct SolarArray {
+        double areaM2{60.0}; // deployed blanket area, including gaps and frame
+        SolarCellTechnology cellTechnology{SolarCellTechnology::TripleJunctionGaAs};
+        bool operator==(const SolarArray&) const = default;
+    };
+    const std::optional<SolarArray>& solarArray() const noexcept { return solarArray_; }
+    void setSolarArray(std::optional<SolarArray> array);
     // Authored solar-array switch, independent of its size/technology.
     bool solarArrayEnabled() const noexcept { return solarArrayEnabled_; }
     void setSolarArrayEnabled(bool enabled) noexcept { solarArrayEnabled_ = enabled; }
@@ -278,6 +286,7 @@ public:
 private:
     std::string name_;
     bool solarArrayEnabled_ = true;
+    std::optional<SolarArray> solarArray_;
     std::optional<HullType> hullType_ = HullType::MultiLayerBlanket;
     std::optional<PartitionType> partitionType_ = PartitionType::InsulatedPartition;
     // The member initialisers above are the ISS-like sky: full Sun at

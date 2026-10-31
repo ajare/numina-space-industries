@@ -422,6 +422,16 @@ void Installation::Orbit::validate() const {
     // percentage is meaningful: the evaluator folds it. Non-finite is not.
     require(std::isfinite(phaseOffsetPercent), "Orbit phase offset must be finite");
 }
+void Installation::setSolarArray(std::optional<SolarArray> array) {
+    if (array) {
+        require(std::isfinite(array->areaM2) && array->areaM2 >= 0,
+            "Solar array blanket area must be finite and nonnegative");
+        require(array->cellTechnology == SolarCellTechnology::TripleJunctionGaAs
+            || array->cellTechnology == SolarCellTechnology::SingleJunctionGaAs
+            || array->cellTechnology == SolarCellTechnology::SpaceSilicon, "Unknown solar cell technology");
+    }
+    solarArray_ = array;
+}
 void Installation::setOrbit(std::optional<Orbit> orbit) {
     if (orbit) orbit->validate();
     orbit_ = orbit;
@@ -496,6 +506,11 @@ std::string Installation::serialize() const {
     root["partition"] = partition;
     // Default enabled is omitted so feature-absent documents do not churn.
     if (!solarArrayEnabled_) root["solarArrayEnabled"] = false;
+    if (solarArray_) {
+        root["solarArray"]["areaM2"] = solarArray_->areaM2;
+        constexpr const char* names[]{"TripleJunctionGaAs", "SingleJunctionGaAs", "SpaceSilicon"};
+        root["solarArray"]["cellTechnology"] = names[static_cast<int>(solarArray_->cellTechnology)];
+    }
     // Written as a calendar date rather than the epoch integer the record
     // holds, because a bare 2524608000 in a hand-read save tells nobody
     // anything and the field means a day, not a count of seconds.
@@ -720,6 +735,15 @@ void Installation::deserialize(const std::string& text) {
         next.partitionType_ = partition;
         next.orbit_ = orbit; // Never apply creation-time defaults when loading.
         next.startDateUtcS_ = startDate;
+        if (const auto a = root["solarArray"]) {
+            SolarArray array;
+            array.areaM2 = a["areaM2"].as<double>();
+            const auto technology = a["cellTechnology"].as<std::string>("TripleJunctionGaAs");
+            if (technology == "SingleJunctionGaAs") array.cellTechnology = SolarCellTechnology::SingleJunctionGaAs;
+            else if (technology == "SpaceSilicon") array.cellTechnology = SolarCellTechnology::SpaceSilicon;
+            else require(technology == "TripleJunctionGaAs", "Unknown solar cell technology");
+            next.setSolarArray(array);
+        }
         next.solarArrayEnabled_ = root["solarArrayEnabled"]
             ? root["solarArrayEnabled"].as<bool>() : true;
         *this=std::move(next);

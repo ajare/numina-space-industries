@@ -59,6 +59,29 @@ CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installa
         s.areaM2=f.areaM2;s.dischargeCoefficient=f.dischargeCoefficient;s.spatialApproximation=true;
         snapshot_.atmospherePathways.push_back(std::move(s));paths_.push_back({i,1});
     }
+    if (installation.solarArray()) {
+        StationSystemsSettings settings; settings.enabled=true;
+        settings.powerBuses={{"solar", "Solar array (unconnected)"}};
+        SolarArraySettings array; array.id="solar-array"; array.busIds={"solar"};
+        array.areaM2=installation.solarArray()->areaM2;
+        switch (installation.solarArray()->cellTechnology) {
+        case nsi::core::Installation::SolarCellTechnology::TripleJunctionGaAs:
+            array.cellTechnology=SolarCellTechnology::TripleJunctionGaAs; break;
+        case nsi::core::Installation::SolarCellTechnology::SingleJunctionGaAs:
+            array.cellTechnology=SolarCellTechnology::SingleJunctionGaAs; break;
+        case nsi::core::Installation::SolarCellTechnology::SpaceSilicon:
+            array.cellTechnology=SolarCellTechnology::SpaceSilicon; break;
+        }
+        array.enabled=installation.solarArrayEnabled(); settings.solarArrays={array};
+        if (installation.orbit()) solarSky_=nsi::systems::StellarExposureEvaluator(*installation.orbit());
+        // Edit-time preview of the next 10 Hz tick, obtained from the same
+        // public systems snapshot as playback, not a duplicate GUI formula.
+        StationSystemsRuntime preview(settings,StationSystemsUpdateMode::Variable);
+        if (!nsi::systems::updateSystemsWithAuthoredSky(preview,solarSky_,0.1))
+            throw std::runtime_error("Solar array preview failed");
+        snapshot_.power=preview.snapshot().power;
+        solar_=std::make_unique<StationSystemsRuntime>(settings,StationSystemsUpdateMode::Variable);
+    }
     publish(0);
     for (auto& s:snapshot_.atmospheres) {
         s.startingOxygenKg=s.oxygenKg;s.startingNitrogenKg=s.nitrogenKg;s.startingCarbonDioxideKg=s.carbonDioxideKg;
@@ -103,6 +126,14 @@ bool CellPlaybackRuntime::update(double seconds,std::size_t acousticBudget,std::
     const auto luaEnd=std::chrono::steady_clock::now();
     if (!model_.advance(seconds,{},acousticBudget,thermalBudget,source)) {
         snapshot_.healthy=false;diagnostics_.push_back({snapshot_.worldTick,"native-cell-fluid",ScriptExecutionFailure::None,model_.diagnostic()});return false;
+    }
+    if (solar_) {
+        if (!nsi::systems::updateSystemsWithAuthoredSky(*solar_,solarSky_,seconds)) {
+            snapshot_.healthy=false;
+            diagnostics_.push_back({snapshot_.worldTick,"solar-array",ScriptExecutionFailure::None,"Solar array update failed"});
+            return false;
+        }
+        snapshot_.power=solar_->snapshot().power;
     }
     const auto solverEnd=std::chrono::steady_clock::now();
     lifecycle_.commit();snapshot_.worldTick=lifecycle_.completedSteps();snapshot_.completedTicks=lifecycle_.completedTicks();

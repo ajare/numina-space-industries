@@ -65,8 +65,9 @@ profiles. Perfect star-tracking needs no surface cosine. No Orbit supplies zero;
 planetary infrared and reflected sunlight never enter conversion. Fixed-mode
 runtimes and invalid durations are refused. Irradiance changes are journalled
 by the systems runtime, preserving YAML/binary replay and held-input continuation.
-This operation does not start a systems gas/heat runtime alongside native
-Editor playback; Editor solar-array ownership and authoring are separate work.
+The Editor uses this operation for its optional, isolated power-only solar-array
+runtime. It does not start a systems gas/heat runtime alongside native playback;
+see `editor/document/README.md` for authoring and readout semantics.
 
 ## Compartment and thermal mapping
 

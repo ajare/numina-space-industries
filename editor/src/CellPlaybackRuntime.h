@@ -4,6 +4,8 @@
 #include <station/StationSystems.h>
 #include <station/CellAerodynamics.h>
 #include <station/StationLifecycleRuntime.h>
+#include <nsi/systems/SolarGeneration.h>
+#include <memory>
 
 namespace station::editor {
 struct GasInjector {
@@ -50,6 +52,9 @@ private:
     void publishDiagnostics();
     nsi::systems::CellAtmosphereTransport model_;
     StationLifecycleRuntime lifecycle_;
+    // Power-only settings: no second owner of native gas or heat inventories.
+    std::unique_ptr<StationSystemsRuntime> solar_;
+    nsi::systems::StellarExposureEvaluator solarSky_;
     CellAerodynamicField aerodynamics_;
     CellObservationOptions options_;
     StationSystemsSnapshot snapshot_;

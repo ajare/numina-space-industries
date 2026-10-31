@@ -74,10 +74,23 @@ cancelled or failed actions preserve the existing lock and preview.
 The inspector's **Solar array enabled** checkbox writes the Installation's
 `solarArrayEnabled` choice through `EditorSession`, including dirty tracking and
 undo/redo. Missing YAML fields mean enabled; only a disabled choice is emitted,
-so existing documents gain no default-only field. This control authors the
-choice only: solar-array creation, mapping this choice to systems settings and
-the live generation header are the follow-up Editor integration in #65. It does
-not construct a second systems runtime alongside native gas/heat playback.
+so existing documents gain no default-only field. **Add solar array** creates an
+optional `solarArray` record (60 m² blanket, triple-junction GaAs initially);
+missing records remain absent on load/save. Its collapsible header contains
+blanket area, cell technology, enable and removal controls, all edit-locked and
+undoable. Removing the array preserves its independent enable choice.
+
+The header reads unclipped per-array generation from a power-only systems
+runtime on the consumer-less `solar` bus, never a bus dispatch total. Disabled
+(including zero usable area) takes precedence, then absent Orbit means **No
+star**, then zero systems generation means **Eclipse**; positive output is shown
+in kW, including through penumbra. An absent array hides the header entirely.
+Missing/stale snapshots show **Unavailable**, never a measured zero. Dynamic
+labels retain one stable ImGui ID so collapse state survives output changes.
+Before playback the readout previews the next 0.1-second midpoint tick without
+advancing playback time; during playback it reports the last committed tick.
+See [ADR-0006](../../docs/adr/0006-native-playback-lifecycle-stage.md) for the
+power-only exception: no second runtime owns any native gas or heat.
 
 The left inspector's **Update time** chart stacks native fluid/thermal solver
 and Lua lifecycle durations for the last **50 successful updates** (five seconds
