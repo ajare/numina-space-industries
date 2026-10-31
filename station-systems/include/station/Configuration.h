@@ -554,8 +554,11 @@ namespace station
 	};
 	inline constexpr std::array<char const*, 3> SolarCellTechnologyNames{
 		"triple-junction-gaas", "single-junction-gaas", "space-silicon"};
+	// Display names for the same three entries. "Space-grade silicon" is the
+	// wording CONTEXT.md uses for Cell technology; the Editor renders these
+	// strings rather than keeping its own copy (#73).
 	inline constexpr std::array<char const*, 3> SolarCellTechnologyLabels{
-		"Triple-junction GaAs", "Single-junction GaAs", "Space silicon"};
+		"Triple-junction GaAs", "Single-junction GaAs", "Space-grade silicon"};
 	// Manufacturing properties, selected together rather than authored.
 	struct SolarCellSpec
 	{

@@ -3,6 +3,7 @@
 #include "imgui.h"
 #include <cstdio>
 #include <cmath>
+#include <string>
 
 namespace station::editor {
 bool drawSolarArrayControls(EditorSession& session) {
@@ -51,8 +52,19 @@ bool drawSolarArrayPanel(EditorSession& session, const std::optional<StationSyst
             session.setSolarArray(array); changed=true;
         } else array=session.installation().solarArray();
     }
+    // The catalogue's display names live in the systems library; the Editor
+    // keeps no second copy of the wording (#73). ImGui's Combo wants one
+    // '\0'-delimited block instead of a char const*[], so join them once.
+    static const std::string kCellTechnologyItems=[] {
+        std::string items;
+        for (const auto* label : station::SolarCellTechnologyLabels) {
+            items += label;
+            items += '\0';
+        }
+        return items;
+    }();
     int technology=static_cast<int>(array->cellTechnology);
-    if (ImGui::Combo("Cell technology",&technology,"Triple-junction GaAs\0Single-junction GaAs\0Space-grade silicon\0")) {
+    if (ImGui::Combo("Cell technology",&technology,kCellTechnologyItems.c_str())) {
         array->cellTechnology=static_cast<Installation::SolarCellTechnology>(technology);
         session.setSolarArray(array); changed=true;
     }

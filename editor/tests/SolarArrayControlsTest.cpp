@@ -201,10 +201,37 @@ void header() {
     session.setEditingEnabled(true); click();
     require(session.installation().solarArray().has_value(),"Add control did not author an array");
 }
+// #73: the Cell technology combo shows the systems catalogue's display
+// names and nothing else. The Editor keeps no private copy of the wording,
+// so the silicon entry reads "Space-grade silicon" the way CONTEXT.md
+// spells it and the stale "Space silicon" never reaches the screen.
+void technologyLabels() {
+    EditorSession session;
+    SimulationPlayback playback;
+    auto render = [&](Installation::SolarCellTechnology tech) {
+        session.setSolarArray(Installation::SolarArray{60, tech});
+        playback.synchronize(session.installation());
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos({0,0}); ImGui::SetNextWindowSize({600,450});
+        ImGui::Begin("Cell technology", nullptr, ImGuiWindowFlags_NoTitleBar);
+        ImGui::LogToBuffer();
+        drawSolarArrayPanel(session, playback.snapshotFor(session.installation()));
+        std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+        ImGui::LogFinish(); ImGui::End(); ImGui::Render();
+        return text;
+    };
+    for (std::size_t i = 0; i < station::SolarCellTechnologyLabels.size(); ++i) {
+        const auto text = render(static_cast<Installation::SolarCellTechnology>(i));
+        require(text.find(station::SolarCellTechnologyLabels[i]) != std::string::npos,
+            "cell technology combo did not render the catalogue display label");
+    }
+    require(render(Installation::SolarCellTechnology::SpaceSilicon).find("Space silicon")
+        == std::string::npos, "stale silicon wording reached the Editor");
+}
 }
 int main() {
     ImGui::CreateContext();
-    try { check(); header(); }
+    try { check(); header(); technologyLabels(); }
     catch (const std::exception& e) { ImGui::DestroyContext(); std::cerr<<e.what()<<'\n'; return 1; }
     ImGui::DestroyContext();
 }

@@ -38,21 +38,29 @@ inline void catalogue()
 	{
 		station::SolarCellTechnology technology;
 		char const* name;
+		// Display name, spelled the way CONTEXT.md spells the Cell technology
+		// entry. The Editor renders this string, so a retune here retitles the
+		// UI and must stay agreed rather than drift (#73).
+		char const* label;
 		double efficiency;
 		double packingFactor;
 		double arrayFactor;
 	};
 	constexpr Expected expected[]{
-		{station::SolarCellTechnology::TripleJunctionGaAs, "triple-junction-gaas", 0.32, 0.85, 0.85},
-		{station::SolarCellTechnology::SingleJunctionGaAs, "single-junction-gaas", 0.19, 0.85, 0.85},
-		{station::SolarCellTechnology::SpaceSilicon, "space-silicon", 0.14, 0.80, 0.75},
+		{station::SolarCellTechnology::TripleJunctionGaAs, "triple-junction-gaas", "Triple-junction GaAs", 0.32, 0.85, 0.85},
+		{station::SolarCellTechnology::SingleJunctionGaAs, "single-junction-gaas", "Single-junction GaAs", 0.19, 0.85, 0.85},
+		{station::SolarCellTechnology::SpaceSilicon, "space-silicon", "Space-grade silicon", 0.14, 0.80, 0.75},
 	};
 	require(station::SolarCellTechnologyNames.size() == std::size(expected),
 		"cell technology catalogue is not the three decided entries");
+	require(station::SolarCellTechnologyLabels.size() == std::size(expected),
+		"cell technology labels do not cover the decided catalogue");
 	for (auto const& entry : expected)
 	{
 		require(std::string(station::SolarCellTechnologyNames.at(static_cast<size_t>(entry.technology)))
 			== entry.name, "cell technology name does not match its catalogue slot");
+		require(std::string(station::SolarCellTechnologyLabels.at(static_cast<size_t>(entry.technology)))
+			== entry.label, "cell technology display label does not match its catalogue slot");
 		auto const spec = station::solarCellSpec(entry.technology);
 		require(spec.efficiency == entry.efficiency, "incorrect cell technology conversion efficiency");
 		require(spec.packingFactor == entry.packingFactor, "incorrect cell technology packing factor");
