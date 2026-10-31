@@ -137,6 +137,10 @@ namespace station
 			sourceResult.capacityKW = array.capacityKW();
 			sourceResult.availableKW = array.lastUnclippedAvailableKW;
 			sourceResult.disabled = array.lastDisabled;
+			// #69: the shadow state travels with the numbers so a reader never
+			// has to guess it from a zero. It is the illumination term's story,
+			// not the delivered power's: see SolarState::illuminationTerm().
+			sourceResult.eclipse = array.lastEclipse;
 			// #845: the availability the array's fault ledger leaves it,
 			// and the ledger itself. A pending Fault is not published as
 			// active; its derived impact is the capacity fraction the

@@ -613,7 +613,11 @@ namespace station
 					array.trackingAvailability);
 			array.lastAvailableKW = array.lastDisabled
 				? 0.0 : array.effectiveWearCapability() * array.lastIllumination * array.availabilityFactor;
-			array.lastEclipse = !array.lastDisabled && array.lastAvailableKW <= 0.0;
+			// #69: eclipse is the sky's verdict, taken from the light term
+			// alone. A zero that arrives from the fault ledger or from Wear is
+			// a broken or spent panel standing in full sun, and must not be
+			// announced - or rendered - as night.
+			array.lastEclipse = !array.lastDisabled && array.illuminationTerm() <= 0.0;
 			array.lastUnclippedAvailableKW = array.lastAvailableKW;
 			array.lastAvailableKW = addGeneration("Solar", array.authored.id, "Solar generation",
 				array.authored.busIds, array.lastAvailableKW);

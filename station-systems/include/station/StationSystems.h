@@ -601,6 +601,12 @@ namespace station
 		double capacityKW{0.0};
 		double availableKW{0.0};    // array availability before connection/dispatch clipping
 		bool disabled{false};       // authored off or zero usable installed capacity
+		// #69: the shadow state, published rather than inferred. True only
+		// while the planet blocks the star's direct view. Zero output is not
+		// this fact: a Fault, Wear or the switch each produce a zero that is
+		// not an eclipse, and a reader that substitutes one for the other
+		// reports a broken panel as night.
+		bool eclipse{false};
 		// #845: the availability the array's fault ledger leaves it - the
 		// string-loss remainder and the tracking-failure fixed value
 		// composed by minimum. 1.0 with no Fault active.

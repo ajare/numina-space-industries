@@ -83,8 +83,12 @@ undoable. Removing the array preserves its independent enable choice.
 The header reads unclipped per-array generation from a power-only systems
 runtime on the consumer-less `solar` bus, never a bus dispatch total. Disabled
 (including zero usable area) takes precedence, then absent Orbit means **No
-star**, then zero systems generation means **Eclipse**; positive output is shown
-in kW, including through penumbra. An absent array hides the header entirely.
+star**, then the systems-side shadow state means **Eclipse** — the snapshot's
+`eclipse` flag, which the systems side sets from the light alone and the header
+never infers from zero output. A tracking failure pinned at zero availability
+and a blanket worn to nothing both deliver nothing in full sun and are not
+night. Output too small to print as a tenth reads **<0.1 kW** rather than a
+rounded-away `0.0 kW`. An absent array hides the header entirely.
 Missing/stale snapshots show **Unavailable**, never a measured zero. Dynamic
 labels retain one stable ImGui ID so collapse state survives output changes.
 Before playback the readout previews the next 0.1-second midpoint tick without

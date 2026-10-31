@@ -222,6 +222,89 @@ void solarArrayWearDisablesDerivedArray(smoke::Context const&)
     }
 }
 
+// #69: the published eclipse state is the sky's verdict, never a restatement
+// of zero output. Each run pairs a derived blanket (which reads the pushed
+// direct irradiance) with a legacy rating (which reads the authored solar
+// cycle), so "the light went out" has to mean the same thing for both light
+// sources, and every other cause of a zero has to keep its own name.
+station::StationSystemsSnapshot runEclipsePair(double irradiance, double cycleLevel,
+    bool withTrackingFailure)
+{
+    station::StationSystemsSettings settings;
+    settings.enabled = true;
+    station::SolarArraySettings derived;
+    derived.id = "derived";
+    derived.areaM2 = 60.0;
+    derived.cellTechnology = station::SolarCellTechnology::TripleJunctionGaAs;
+    derived.capacityKW = 999.0; // Must never reach the derived nameplate.
+    auto legacy = derived;
+    legacy.id = "legacy";
+    legacy.areaM2.reset();
+    legacy.capacityKW = 20.0;
+    if (withTrackingFailure)
+        for (auto* array : {&derived, &legacy})
+            array->trackingFailure.emplace().availability = 0.0;
+    settings.solarArrays = {derived, legacy};
+    settings.solarCycle.emplace().constantLevel = cycleLevel;
+    station::StationSystemsRuntime runtime(settings, station::StationSystemsUpdateMode::Variable);
+    smoke::require(runtime.setDirectSolarIrradianceWPerM2(irradiance), "irradiance refused");
+    smoke::require(runtime.update(1.0) && runtime.snapshot().healthy, "eclipse fixture step failed");
+    if (withTrackingFailure)
+    {
+        smoke::require(runtime.injectFault("derived", "tracking-failure", {})
+            && runtime.injectFault("legacy", "tracking-failure", {}), "tracking-failure refused");
+        smoke::require(runtime.update(1.0) && runtime.snapshot().healthy, "faulted eclipse step failed");
+    }
+    return runtime.snapshot();
+}
+
+void solarEclipseStateIsIllumination(smoke::Context const&)
+{
+    // Full sun in both modes: generating, and nothing claims a shadow.
+    auto const lit = runEclipsePair(1361.0, 1.0, false);
+    for (auto const& source : lit.power.sources)
+    {
+        smoke::require(!source.eclipse, "a lit array published an eclipse");
+        smoke::require(source.availableKW > 0.0, "a lit array delivered nothing");
+    }
+    // The shadow: the planet blocks the star, so both lights go out at once.
+    auto const dark = runEclipsePair(0.0, 0.0, false);
+    for (auto const& source : dark.power.sources)
+    {
+        smoke::require(source.eclipse, "a blocked star was not published as an eclipse");
+        smoke::require(!source.disabled, "an eclipse was reported as disabled");
+        smoke::require(source.availableKW == 0.0, "an eclipsed array delivered power");
+    }
+    // A tracking failure pinned at zero availability stops the panel, not
+    // the sun. The array still stands in daylight and has to say so.
+    auto const stuck = runEclipsePair(1361.0, 1.0, true);
+    for (auto const& source : stuck.power.sources)
+    {
+        smoke::require(source.availableKW == 0.0,
+            "tracking-failure at availability 0 still delivered power");
+        smoke::require(!source.disabled, "a tracking failure switched the array off");
+        smoke::require(!source.eclipse, "a tracking failure published an eclipse");
+        smoke::require(source.activeFaults.size() == 1,
+            "the fault ledger did not reach the snapshot with the zero");
+    }
+    // Penumbra: a sliver of light is not a blocked star, however small the
+    // reading it produces.
+    auto const penumbra = runEclipsePair(0.0368, 1.0, false);
+    smoke::require(!penumbra.power.sources[0].eclipse, "penumbra published an eclipse");
+    smoke::require(penumbra.power.sources[0].availableKW > 0.0
+        && penumbra.power.sources[0].availableKW < 0.05,
+        "penumbra fixture did not land under the readable floor");
+    // Wear is the machine spending itself, in full sun: disabled, never dark.
+    // A dead array cannot be shadowed either - the eclipse test is behind the
+    // disabled one, so it never claims a night it cannot have.
+    auto const worn = runWornPair(1361.0, 1.0, 1.0);
+    for (auto const& source : worn.snapshot.power.sources)
+    {
+        smoke::require(source.disabled, "a fully worn array reported itself as not disabled");
+        smoke::require(!source.eclipse, "a fully worn array published an eclipse");
+    }
+}
+
 void solarArrayEnableDisable(smoke::Context const&)
 {
     // Exercise both modes together through settings, stepping and snapshots only.
@@ -281,4 +364,5 @@ void registerStationSolarAuthoringChecks(std::vector<smoke::Check>& checks)
     checks.push_back({"solarArrayDerivedGeneration", solarArrayDerivedGeneration});
     checks.push_back({"solarArrayEnableDisable", solarArrayEnableDisable});
     checks.push_back({"solarArrayWearDisablesDerivedArray", solarArrayWearDisablesDerivedArray});
+    checks.push_back({"solarEclipseStateIsIllumination", solarEclipseStateIsIllumination});
 }

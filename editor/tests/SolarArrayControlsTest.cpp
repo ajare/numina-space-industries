@@ -3,6 +3,7 @@
 #include "imgui_internal.h"
 #include <cmath>
 #include <limits>
+#include <optional>
 #include "station/editor/EditorSession.h"
 #include "imgui.h"
 #include <filesystem>
@@ -74,13 +75,14 @@ void header() {
     SimulationPlayback playback;
     auto& io=ImGui::GetIO();
     ImVec2 button;
-    auto render=[&] {
+    auto render=[&](std::optional<station::StationSystemsSnapshot> overrideSnapshot={}) {
         playback.synchronize(session.installation());
         ImGui::NewFrame();
         ImGui::SetNextWindowPos({0,0}); ImGui::SetNextWindowSize({600,450});
         ImGui::Begin("Solar header",nullptr,ImGuiWindowFlags_NoTitleBar);
         ImGui::LogToBuffer();
-        drawSolarArrayPanel(session,playback.snapshotFor(session.installation()));
+        drawSolarArrayPanel(session,overrideSnapshot
+            ? *overrideSnapshot : playback.snapshotFor(session.installation()));
         const auto min=ImGui::GetItemRectMin(),max=ImGui::GetItemRectMax();
         button={(min.x+max.x)/2,(min.y+max.y)/2};
         std::string text=ImGui::GetCurrentContext()->LogBuffer.c_str();
@@ -129,6 +131,46 @@ void header() {
     session.setSolarArrayEnabled(true); orbit.phaseOffsetPercent=0; session.setOrbit(orbit);
     session.setSolarArray(Installation::SolarArray{60,Installation::SolarCellTechnology::SpaceSilicon});
     require(render().find("Solar array — 6.9 kW")!=std::string::npos,"technology not mapped");
+    // #69: Eclipse is the systems-side shadow state, never a restatement of
+    // zero output. Each snapshot below carries the field combination a real
+    // runtime publishes for the case named in it; the header must keep the
+    // cases apart.
+    auto shows=[&](const station::StationSystemsSnapshot& snap,const char* want,const char* reject) {
+        const auto text=render(snap);
+        require(text.find(want)!=std::string::npos,("header did not render "+std::string(want)).c_str());
+        require(reject==nullptr || text.find(reject)==std::string::npos, reject
+            ? ("header rendered "+std::string(reject)+" for a snapshot that does not support it").c_str()
+            : "header rendered a state the snapshot does not support");
+    };
+    auto state=[&](bool disabled,bool eclipse,double availableKW) {
+        auto snap=playback.snapshotFor(session.installation());
+        require(snap.has_value() && !snap->power.sources.empty(),"no preview snapshot to edit");
+        auto& source=snap->power.sources.front();
+        source.disabled=disabled; source.eclipse=eclipse; source.availableKW=availableKW;
+        return *snap;
+    };
+    shows(state(false,true,0.0),"Solar array — Eclipse",nullptr);
+    // A tracker stuck at availability 0 delivers nothing in full sun: the
+    // panel is broken, it is not night.
+    shows(state(false,false,0.0),"Solar array — <0.1 kW","Eclipse");
+    // Penumbra is generating, just too little to print as a tenth.
+    shows(state(false,false,0.000510490),"Solar array — <0.1 kW","0.0 kW");
+    shows(state(false,false,0.049),"Solar array — <0.1 kW","0.0 kW");
+    shows(state(false,false,0.05),"Solar array — 0.1 kW",nullptr);
+    // A blanket worn to nothing is dead, not dark (#68), and Disabled wins
+    // over every other reading, eclipse included.
+    shows(state(true,false,0.0),"Solar array — Disabled","Eclipse");
+    shows(state(true,true,0.0),"Solar array — Disabled",nullptr);
+    // No star outranks the shadow too: an absent Orbit is semantic absence,
+    // whatever the systems side happens to say about the light. The shadowed
+    // snapshot is taken while the preview still matches the document.
+    const auto shadowed=state(false,true,0.0);
+    const auto orbitBeforeHeader=session.installation().orbit();
+    session.setOrbit(std::nullopt);
+    require(render(shadowed).find("Solar array — No star")!=std::string::npos,
+        "absent Orbit did not outrank the published eclipse");
+    session.setOrbit(orbitBeforeHeader);
+    require(session.installation().orbit()==orbitBeforeHeader,"header test lost the authored orbit");
     Installation restored; restored.deserialize(session.installation().serialize());
     require(restored==session.installation(),"array round trip lost authored properties");
     auto noArray=restored; noArray.setSolarArray(std::nullopt);

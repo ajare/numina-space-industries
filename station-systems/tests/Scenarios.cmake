@@ -37,6 +37,7 @@ foreach(check IN ITEMS
     solarArrayDerivedGeneration
     solarArrayEnableDisable
     solarArrayWearDisablesDerivedArray
+    solarEclipseStateIsIllumination
     thermalReservoirSeam
     radiatorSeam
     rateAwareProtection

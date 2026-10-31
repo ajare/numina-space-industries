@@ -186,6 +186,9 @@ using namespace station_detail;
 			double lastUnclippedAvailableKW{0.0};
 			double directIrradianceWPerM2{0.0};
 			bool lastDisabled{false};
+			// #69: the sky's verdict only - the star is blocked. Read from
+			// illuminationTerm(), never from the availability product, so a
+			// zero caused by the machine still cannot announce itself as night.
 			bool lastEclipse{true};
 			// #845: the array's fault ledger. `string-loss` removes a
 			// frozen fraction of installed capacity; `tracking-failure`
@@ -244,6 +247,16 @@ using namespace station_detail;
 			{
 				if (!authored.areaM2) return authored.capacityKW;
 				return derivedCapacityAtWPerM2(1000.0);
+			}
+			// The light term on its own, before anything the machine can do
+			// to its own output: the pushed direct irradiance for a derived
+			// blanket, the authored solar-cycle level for a legacy rating.
+			// Wear, the fault ledger and the switch all act on the other side
+			// of the product, so the eclipse test reads this and never the
+			// delivered figure (#69).
+			double illuminationTerm() const
+			{
+				return authored.areaM2 ? directIrradianceWPerM2 : lastIllumination;
 			}
 			double effectiveWearCapability() const { return capacityKW() * (1.0 - cellDegradation.fraction); }
 			// What the array can deliver in full sun with its wear applied.
