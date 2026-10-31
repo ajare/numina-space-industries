@@ -59,7 +59,7 @@ saving preserves it. Rendering, native dialogs and file I/O remain adapters.
 Installation editing is disabled while playback is playing (even at time zero)
 or elapsed simulation time is non-zero (even when paused). Reset returns to the
 start and re-enables editing. The inspector explains why editing is unavailable.
-This covers names, Hull and Partition types, the solar-array enabled choice, Cells, Walls, Sector properties,
+This covers names, Hull and Partition types, Cells, Walls, Sector properties,
 Level operations and undo/redo, including keyboard shortcuts. Level and Sector
 selection remain available for inspection; saving is still allowed. Runtime
 Door toggles are the exception to locked interaction, not to locked authoring:
@@ -71,18 +71,19 @@ locked, and locking finishes an in-flight stroke as one undo step. New/Open
 replace the scenario and reset playback, rather than mutate the running scenario;
 cancelled or failed actions preserve the existing lock and preview.
 
-The inspector's **Solar array enabled** checkbox writes the Installation's
-`solarArrayEnabled` choice through `EditorSession`, including dirty tracking and
-undo/redo. Missing YAML fields mean enabled; only a disabled choice is emitted,
-so existing documents gain no default-only field. **Add solar array** creates an
-optional `solarArray` record (60 m² blanket, triple-junction GaAs initially);
-missing records remain absent on load/save. Its collapsible header contains
-blanket area, cell technology, enable and removal controls, all edit-locked and
-undoable. Removing the array preserves its independent enable choice.
+**Add solar array** creates the Installation's optional `solarArray` record
+(60 m² blanket, triple-junction GaAs initially) through `EditorSession`, with
+dirty tracking and undo/redo; missing records remain absent on load/save. An
+authored array is always live: the document carries no enable field, so
+removing the array is the only way to stop generating, and a leftover
+`solarArrayEnabled` in an older save is ignored rather than refused. The
+collapsible header holds blanket area, cell technology and removal controls,
+all edit-locked and undoable.
 
 The header reads unclipped per-array generation from a power-only systems
-runtime on the consumer-less `solar` bus, never a bus dispatch total. Disabled
-(including zero usable area) takes precedence, then absent Orbit means **No
+runtime on the consumer-less `solar` bus, never a bus dispatch total. A source
+the systems side reports disabled — zero usable area, or a blanket worn to
+nothing — takes precedence, then absent Orbit means **No
 star**, then the systems-side shadow state means **Eclipse** — the snapshot's
 `eclipse` flag, which the systems side sets from the light alone and the header
 never infers from zero output. A tracking failure pinned at zero availability
@@ -103,7 +104,7 @@ kilowatts fitted to what is actually in the window, one sample per committed
 10 Hz tick. Eclipse is shaded behind the curve in the same band colour the
 Stellar exposure trace uses, so a flat stretch reads as night rather than as
 a dead panel. The states the header reports in words leave the curve blank
-rather than drawing a zero the header refuses to print — switched off, or no
+rather than drawing a zero the header refuses to print — a disabled array, or no
 `Orbit` authored, the graph says there is nothing to plot. A gap breaks an
 eclipse band too: a shadow is never carried across a stretch where nothing
 was read. The history is recorded by the playback runtime alongside the

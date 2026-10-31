@@ -212,9 +212,6 @@ void EditorSession::setOrbit(std::optional<Installation::Orbit> orbit) {
 void EditorSession::setSolarArray(std::optional<Installation::SolarArray> array) {
     edit([&](auto& i){ i.setSolarArray(array); });
 }
-void EditorSession::setSolarArrayEnabled(bool enabled) {
-    edit([&](auto& i){ i.setSolarArrayEnabled(enabled); });
-}
 void EditorSession::undo() {
     if (!mEditingEnabled) return;
     endStroke(); if (mUndoHistory.empty()) return;

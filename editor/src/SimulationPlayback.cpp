@@ -127,10 +127,11 @@ void SimulationPlayback::recordAtmosphereHistory(bool instantaneous) {
     // it rather than inventing a second notion of which array is "the" one.
     const auto& solarSources=snapshot.power.sources;
     const auto* solar=solarSources.empty() ? nullptr : &solarSources.front();
-    // Switched off, or no Orbit to work under, are the states the header
-    // spells out in words instead of a figure. The graph agrees and leaves a
-    // gap rather than plotting a zero nobody measured. Eclipse is not one of
-    // them: it is a real reading of a real sky, and keeps its zero.
+    // A disabled array, or no Orbit to work under, are the states the
+    // header spells out in words instead of a figure. The graph agrees and
+    // leaves a gap rather than plotting a zero nobody measured. Eclipse is
+    // not one of them: it is a real reading of a real sky, and keeps its
+    // zero.
     const bool solarPlotted=solar!=nullptr && !solar->disabled && source_ && source_->orbit().has_value();
     record(solarHistory_,SolarGenerationSample{snapshot.elapsedSeconds,
         solarPlotted ? solar->availableKW : std::numeric_limits<double>::quiet_NaN(),

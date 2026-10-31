@@ -51,21 +51,55 @@ I sceneWith(const std::optional<O>& orbit) {
     scene.setOrbit(orbit);
     return scene;
 }
+// The fixtures here were written against an authored Orbital period and an
+// authored radius from the planet's centre. The record derives the period
+// now, from the world's mass and the height above its surface, so this
+// helper keeps each fixture's intended radius and period by authoring the
+// mass that makes that period the Keplerian one at that radius:
+//
+//     M = 4 pi^2 r^3 / (G T^2)
+//
+// Every reading the fixtures check goes through the period and the radius,
+// which are exactly what was asked for; what changes is that the record
+// says where the period came from.
+O orbitWithPeriod(double irradiance, double periodSeconds, double radiusFromCentreM,
+                 double albedo = 0.3, double tiltDegrees = 0.0,
+                 double phasePercent = 0.0, double planetRadiusM = core::PlanetRadiusM) {
+    O orbit;
+    orbit.stellarIrradianceWPerM2 = irradiance;
+    orbit.albedo = albedo;
+    orbit.axialTiltDeg = tiltDegrees;
+    orbit.phaseOffsetPercent = phasePercent;
+    orbit.planetRadiusM = planetRadiusM;
+    orbit.heightAboveGroundM = radiusFromCentreM - planetRadiusM;
+    orbit.planetMassKg = 4.0 * core::kPi * core::kPi
+                      * radiusFromCentreM * radiusFromCentreM * radiusFromCentreM
+                      / (core::GravitationalConstantM3PerKgS2 * periodSeconds * periodSeconds);
+    orbit.siderealRotationS = core::PlanetSiderealRotationS;
+    return orbit;
+}
 
 // Check the displayed values, including every converted second unit, rather
 // than just the labels or the unformatted summary fields.
 void summaryFormatsNumericValues() {
     const auto lines = orbitSummaryLines(orbitSummary(I(2, 2)));
-    const std::array<std::string_view, 9> expected{
+    const std::array<std::string_view, 13> expected{
         "Stellar irradiance  1361.0 W/m^2",
-        "Orbital period  5570.0 s (92.8 min)",
+        // The period is derived from the world's mass and the height, so
+        // the default record reads the Kepler number rather than the round
+        // one it used to be typed with.
+        "Orbital period  5569.3 s (92.8 min)",
         "Orbital radius  6791000 m (6791 km)",
+        "Height above ground  420000 m (420 km)",
         "Axial tilt  +0.00 deg",
         "Planet radius  6371000 m (6371 km)",
+        "Planet mass  5.9724e+24 kg",
+        "Sidereal day  86164.0 s (23.93 h)",
         "Phase offset  0.0 deg of orbit (0.0 s)",
         "Albedo  0.300",
-        "Eclipse duration  2158.2 s (36.0 min)",
-        "Sunlit duration  3411.8 s (56.9 min)"};
+        "Eclipse duration  2157.9 s (36.0 min)",
+        "Sunlit duration  3411.4 s (56.9 min)",
+        "Synchronous height  35793685 m (35794 km)"};
     for (const auto text : expected) {
         bool found = false;
         for (const auto& line : lines) found = found || line == text;
@@ -75,7 +109,7 @@ void summaryFormatsNumericValues() {
     // A nonzero, signed tilt catches a sign or formatting slip the zero
     // default cannot expose. This sky is past its shadow either way.
     const auto tilted = orbitSummaryLines(orbitSummary(
-        sceneWith(O{1361.0, 6000.0, 42164000.0, 0.3, -23.44, 120.0})));
+        sceneWith(orbitWithPeriod(1361.0, 6000.0, 42164000.0, 0.3, -23.44, 120.0))));
     require(hasLine(tilted, "Axial tilt  -23.44 deg"),
             "a nonzero signed axial tilt was not read out as authored");
     require(hasLine(tilted, "Eclipse duration  0.0 s (0.0 min)"),
@@ -85,7 +119,7 @@ void summaryFormatsNumericValues() {
 
     auto unavailable = orbitSummary(I(2, 2));
     unavailable.orbitalPeriodS = kNaN;
-    unavailable.radiusFromPlanetCentreM = std::numeric_limits<double>::infinity();
+    unavailable.orbitalRadiusM = std::numeric_limits<double>::infinity();
     unavailable.axialTiltDeg = -std::numeric_limits<double>::infinity();
     unavailable.eclipseDurationS = kNaN;
     const auto gaps = orbitSummaryLines(unavailable);
@@ -145,13 +179,14 @@ void phaseAngleFoldsRoundTheCycle() {
 // The authored numbers sit beside the derived ones, and every derived one
 // is the evaluator's own rather than a second opinion.
 void summaryShowsAuthoredBesideDerived() {
-    const O orbit{1361.0, 5570.0, 6791000.0, 0.3, 12.5, 2.0};
+    const O orbit = orbitWithPeriod(1361.0, 5570.0, 6791000.0, 0.3, 12.5, 2.0);
     const auto scene = sceneWith(orbit);
     const auto summary = orbitSummary(scene);
     require(summary.authored && !summary.overridden, "an authored orbit was not reported as authored");
     require(summary.stellarIrradianceWPerM2 == 1361.0, "authored Stellar irradiance lost");
-    require(summary.orbitalPeriodS == 5570.0, "authored Orbital period lost");
-    require(summary.radiusFromPlanetCentreM == 6791000.0, "authored orbital radius lost");
+    require(summary.orbitalPeriodS == 5570.0, "derived Orbital period lost");
+    require(summary.orbitalRadiusM == 6791000.0, "derived orbital radius lost");
+    require(summary.heightAboveGroundM == 6791000.0 - 6371000.0, "authored height lost");
     require(summary.axialTiltDeg == 12.5, "authored axial tilt lost");
     require(summary.phaseOffsetPercent == 2.0, "authored phase offset lost");
     require(summary.albedo == 0.3, "authored Albedo lost");
@@ -168,14 +203,19 @@ void summaryShowsAuthoredBesideDerived() {
     require(near(summary.groundDriftDegPerDay, drift, 1e-6),
             "Ground drift is not the residue between the orbital and sidereal rates");
     require(summary.groundDriftDegPerDay > 0.0, "an under-synchronous orbit did not drift east");
-    require(!summary.geostationary, "an ISS-like period claimed Geostationary");
+    // The synchronous height is a derived readout, not a condition: it is
+    // stated whether or not the author is anywhere near it, and this sky is
+    // a long way short.
+    require(summary.synchronousHeightM > summary.heightAboveGroundM * 10.0,
+            "the synchronous height is not a long way above this low orbit");
 
     const auto lines = orbitSummaryLines(summary);
-    const std::array<std::string_view, 10> labels{"Stellar irradiance", "Orbital period",
-                                               "Orbital radius", "Axial tilt", "Planet radius",
-                                               "Phase offset",
+    const std::array<std::string_view, 14> labels{"Stellar irradiance", "Orbital period",
+                                               "Orbital radius", "Height above ground",
+                                               "Axial tilt", "Planet radius", "Planet mass",
+                                               "Sidereal day", "Phase offset",
                                                "Albedo", "Eclipse duration", "Sunlit duration",
-                                               "Ground drift"};
+                                               "Ground drift", "Synchronous height"};
     for (const auto& label : labels)
         require(hasLine(lines, label), "summary is missing one of its readings");
     require(!hasLine(lines, "unavailable"), "a live sky reported an unavailable reading");
@@ -185,52 +225,67 @@ void summaryShowsAuthoredBesideDerived() {
             "the summary is not labelled with the preset revision");
 }
 
-// The badge is a condition on two numbers, and it goes the moment they part.
-void badgeOnlyAtTheSiderealMatch() {
-    auto badgeShows = [](double period) {
-        const auto scene = sceneWith(O{1361.0, period, 42164000.0});
-        const auto summary = orbitSummary(scene);
-        return summary.geostationary && hasLine(orbitSummaryLines(summary), kGeostationaryBadge);
-    };
-    require(badgeShows(core::PlanetSiderealRotationS), "no Geostationary badge at the sidereal match");
-    require(!badgeShows(core::PlanetSiderealRotationS - 0.1),
-            "the badge survived a tenth of a second short of the match");
-    require(!badgeShows(core::PlanetSiderealRotationS + 0.1),
-            "the badge survived a tenth of a second past the match");
-    require(!badgeShows(5570.0), "the badge appeared for an ISS-like period");
-    require(!badgeShows(core::PlanetSiderealRotationS * 2.0),
-            "a synchronous-with-half-the-rotation period read as Geostationary");
-    // A typed number that round trips through the document still matches.
-    I scene(2, 2);
-    scene.setHullType(I::HullType::BareSkin);
-    scene.setOrbit(O{1361.0, core::PlanetSiderealRotationS, 42164000.0});
-    I reloaded(1, 1);
-    reloaded.deserialize(scene.serialize());
-    require(orbitSummary(reloaded).geostationary,
-            "the badge was lost through a document round trip");
+// The synchronous height is a number on the screen, not a condition that
+// fires. It is printed whatever the author has typed, and it is the height
+// at which the derived period comes back as the world's own day - the same
+// fact the old Geostationary marker used to assert, stated where the
+// author can act on it instead of only learn it after the fact.
+void synchronousHeightIsStatedNotFlagged() {
+    const auto riding = orbitSummary(
+        sceneWith(orbitWithPeriod(1361.0, core::PlanetSiderealRotationS, 42164000.0)));
+    require(near(riding.groundDriftDegPerDay, 0.0, 1e-9),
+            "a synchronous ride still reported drift");
+    require(near(riding.heightAboveGroundM, riding.synchronousHeightM, 1e-3),
+            "a synchronous ride is not sitting at the reported synchronous height");
+    // The readout is there for a sky nowhere near it too. That is the whole
+    // point: it says where the hover actually is rather than only arriving
+    // when the author happens to land on it.
+    const auto low = orbitSummary(sceneWith(O{}));
+    require(std::isfinite(low.synchronousHeightM),
+            "the synchronous height was withheld from an ordinary low orbit");
+    require(low.synchronousHeightM > low.heightAboveGroundM * 10.0,
+            "the low orbit's synchronous height is not far above it");
+    require(hasLine(orbitSummaryLines(low), "Synchronous height"),
+            "the synchronous height is not read out for an ordinary sky");
+    // It follows the world, not the ride. A Jovian sky's synchronous
+    // height is a different number entirely, moved there by that world's
+    // mass and day rather than by anything the author did to the height.
+    O jovian;
+    jovian.planetRadiusM = 69911000.0;
+    jovian.planetMassKg = 1.8982e27;
+    jovian.siderealRotationS = 9.9250 * 3600.0;
+    require(near(jovian.synchronousHeightM(), 90100549.0, 1.0),
+            "the Jovian synchronous height is not about 90,101 km");
+    // A world with no day to be synchronous with says so rather than
+    // printing a plausible zero.
+    O dayless;
+    dayless.siderealRotationS = 0.0;
+    require(std::isnan(dayless.synchronousHeightM()),
+            "a world with no day produced a synchronous height");
+    // A cleared sky reports nothing at all.
     const auto skyless = orbitSummary(sceneWith(std::nullopt));
-    require(!skyless.authored && !skyless.geostationary, "a badge appeared with no orbit at all");
-    require(!hasLine(orbitSummaryLines(skyless), kGeostationaryBadge),
-            "the badge was drawn for a skyless Installation");
+    require(!skyless.authored, "a skyless Installation reported an authored sky");
+    require(!hasLine(orbitSummaryLines(skyless), "Synchronous height"),
+            "a synchronous height was drawn for a skyless Installation");
 }
 
 // Every edit the author can make moves what it should and nothing else.
 void derivedValuesFollowEveryEdit() {
     station::editor::EditorSession session;
     session.setHullType(I::HullType::BareSkin);
-    session.setOrbit(O{1361.0, 5570.0, 6791000.0});
+    session.setOrbit(orbitWithPeriod(1361.0, 5570.0, 6791000.0));
     const auto low = orbitSummary(session.installation());
-    require(low.authored && low.geostationary == false, "the first edit was not read back");
+    require(low.authored, "the first edit was not read back");
 
-    session.setOrbit(O{1361.0, 5570.0, 42164000.0});
+    session.setOrbit(orbitWithPeriod(1361.0, 5570.0, 42164000.0));
     const auto high = orbitSummary(session.installation());
-    require(high.radiusFromPlanetCentreM == 42164000.0, "radius edit not read back");
+    require(high.orbitalRadiusM == 42164000.0, "radius edit not read back");
     require(high.eclipseDurationS < low.eclipseDurationS,
             "raising the orbital radius did not shorten the eclipse");
     require(near(high.groundDriftDegPerDay, low.groundDriftDegPerDay, 1e-9),
             "a radius edit moved Ground drift, which does not depend on radius");
 
-    session.setOrbit(O{1361.0, 6000.0, 42164000.0});
+    session.setOrbit(orbitWithPeriod(1361.0, 6000.0, 42164000.0));
     const auto slower = orbitSummary(session.installation());
     require(!near(slower.groundDriftDegPerDay, high.groundDriftDegPerDay, 1.0),
             "an Orbital period edit did not move Ground drift");
@@ -239,14 +294,14 @@ void derivedValuesFollowEveryEdit() {
     require(near(slower.sunlitDurationS + slower.eclipseDurationS, 6000.0, 1e-9),
             "the durations stopped summing to the new Orbital period");
 
-    session.setOrbit(O{1361.0, 6000.0, 42164000.0, 0.3, 0.5});
+    session.setOrbit(orbitWithPeriod(1361.0, 6000.0, 42164000.0, 0.3, 0.5));
     const auto tilted = orbitSummary(session.installation());
     require(tilted.eclipseDurationS < slower.eclipseDurationS,
             "growing the axial tilt did not shorten the eclipse");
     require(near(tilted.groundDriftDegPerDay, slower.groundDriftDegPerDay, 1e-9),
             "an axial tilt edit moved Ground drift");
 
-    session.setOrbit(O{1361.0, 6000.0, 42164000.0, 0.3, 0.5, 15.0});
+    session.setOrbit(orbitWithPeriod(1361.0, 6000.0, 42164000.0, 0.3, 0.5, 15.0));
     const auto shifted = orbitSummary(session.installation());
     require(shifted.phaseOffsetPercent == 15.0, "phase offset edit not read back");
     require(near(shifted.eclipseDurationS, tilted.eclipseDurationS, 1e-12),
@@ -255,7 +310,7 @@ void derivedValuesFollowEveryEdit() {
     // Swapping the world swaps the sky. The authored radius is the shadow
     // cylinder, so a Jovian world at the same altitude is eclipsed far
     // more of the time, and the summary reads the new ground out too.
-    session.setOrbit(O{50.3, 6000.0, 69911000.0 + 420000.0, 0.503, 3.1, 0.0, 69911000.0});
+    session.setOrbit(orbitWithPeriod(50.3, 6000.0, 69911000.0 + 420000.0, 0.503, 3.1, 0.0, 69911000.0));
     const auto jovian = orbitSummary(session.installation());
     require(jovian.planetRadiusM == 69911000.0, "a world radius edit was not read back");
     require(jovian.eclipseDurationS > shifted.eclipseDurationS * 1.2,
@@ -263,11 +318,12 @@ void derivedValuesFollowEveryEdit() {
     require(hasLine(orbitSummaryLines(jovian), "Planet radius  69911000 m (69911 km)"),
             "the Jovian world radius was not read out");
 
-    session.setOrbit(O{1361.0, core::PlanetSiderealRotationS, 42164000.0, 0.3, 0.0, 0.0});
+    session.setOrbit(orbitWithPeriod(1361.0, core::PlanetSiderealRotationS, 42164000.0, 0.3, 0.0, 0.0));
     const auto synchronous = orbitSummary(session.installation());
-    require(synchronous.geostationary, "editing into the sidereal period did not raise the badge");
     require(near(synchronous.groundDriftDegPerDay, 0.0, 1e-9),
-            "a Geostationary orbit still reported drift");
+            "a synchronous ride still reported drift");
+    require(near(synchronous.heightAboveGroundM, synchronous.synchronousHeightM, 1e-3),
+            "editing to the sidereal period did not land on the synchronous height");
 
     session.setOrbit(std::nullopt);
     const auto cleared = orbitSummary(session.installation());
@@ -284,7 +340,7 @@ void derivedValuesFollowEveryEdit() {
 void traceMatchesThePublishedEvaluator() {
     // A short Orbital period so a whole day/night cycle fits inside the
     // sixty-second window the graph keeps.
-    const auto scene = sceneWith(O{1361.0, 20.0, 6791000.0});
+    const auto scene = sceneWith(orbitWithPeriod(1361.0, 20.0, 6791000.0));
     SimulationPlayback playback(std::nullopt);
     playback.reset(scene);
     playback.togglePlaying();
@@ -328,7 +384,7 @@ void traceMatchesThePublishedEvaluator() {
 }
 
 void tracePreservesPartialPenumbra() {
-    O orbit{1361.0, 5570.0, 6791000.0};
+    O orbit = orbitWithPeriod(1361.0, 5570.0, 6791000.0);
     const nsi::systems::StellarExposureEvaluator evaluator(orbit);
     orbit.phaseOffsetPercent = (0.5 - evaluator.eclipseFraction() / 2.0) * 100.0;
     SimulationPlayback playback(std::nullopt);
@@ -392,7 +448,7 @@ void unavailableObservationsAreGaps() {
 // A hand-authored solar profile owns the whole stellar term, so the
 // orbital sky is not being flown and neither readout may claim it is.
 void aProfileOverrideLeavesNoSkyToReport() {
-    const auto scene = sceneWith(O{1361.0, 5570.0, 6791000.0});
+    const auto scene = sceneWith(orbitWithPeriod(1361.0, 5570.0, 6791000.0));
     auto expansion = nsi::systems::expandCellAtmosphere(scene, true);
     expansion.thermal.solarCycle = station::ProfileSettings{1.0};
     nsi::systems::CellAtmosphereTransport transport(std::move(expansion),
@@ -403,7 +459,6 @@ void aProfileOverrideLeavesNoSkyToReport() {
     require(std::isnan(summary.eclipseDurationS) && std::isnan(summary.sunlitDurationS)
                 && std::isnan(summary.groundDriftDegPerDay),
             "derived orbital numbers were shown while a profile owned the sky");
-    require(!summary.geostationary, "the badge was raised under a profile override");
     require(hasLine(orbitSummaryLines(summary), "unavailable"),
             "the override was not explained in the summary");
     require(hasLine(orbitSummaryLines(summary), "solar profile"),
@@ -427,7 +482,7 @@ void graphCarriesTheLabelledTrace() {
     int height = 0;
     io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
-    const auto scene = sceneWith(O{1361.0, 20.0, 6791000.0});
+    const auto scene = sceneWith(orbitWithPeriod(1361.0, 20.0, 6791000.0));
     SimulationPlayback playback(std::nullopt);
     playback.reset(scene);
     playback.togglePlaying();
@@ -465,7 +520,7 @@ void graphCarriesTheLabelledTrace() {
     require(ImGui::GetDrawData()->TotalVtxCount > 0, "the thermal graph failed to render");
 
     // The summary panel draws too, under both a live and a cleared sky.
-    for (const auto& shown : {sceneWith(O{1361.0, core::PlanetSiderealRotationS, 42164000.0}),
+    for (const auto& shown : {sceneWith(orbitWithPeriod(1361.0, core::PlanetSiderealRotationS, 42164000.0)),
                              sceneWith(std::nullopt)}) {
         for (int frame = 0; frame < 2; ++frame) {
             ImGui::NewFrame();
@@ -486,7 +541,7 @@ int main() {
         summaryFormatsNumericValues();
         phaseAngleFoldsRoundTheCycle();
         summaryShowsAuthoredBesideDerived();
-        badgeOnlyAtTheSiderealMatch();
+        synchronousHeightIsStatedNotFlagged();
         derivedValuesFollowEveryEdit();
         traceMatchesThePublishedEvaluator();
         tracePreservesPartialPenumbra();

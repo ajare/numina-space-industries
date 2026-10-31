@@ -58,7 +58,8 @@ public:
     // The authored sky. Clearing it means no orbit: a dark sky and no
     // stellar gain, never a substituted default.
     void setOrbit(std::optional<Installation::Orbit> orbit);
-    void setSolarArrayEnabled(bool enabled);
+    // Authoring an array makes it live; clearing it is the only way to stop
+    // generating. There is no separate enable choice to undo.
     void setSolarArray(std::optional<Installation::SolarArray> array);
     void undo();
     void redo();

@@ -74,7 +74,17 @@ void boundaryChecks() {
     require(restored->snapshot()==fixed.snapshot(),"Fixed replay lost sky input");
 }
 void eclipseAndDark() {
-    nsi::core::Installation::Orbit orbit;orbit.orbitalPeriodS=360;
+    nsi::core::Installation::Orbit orbit;
+    // The Orbital period is derived now, from the world's mass and the
+    // height above its surface, so a fast test cycle is authored as the
+    // mass that makes a 360 s orbit true at this height rather than as a
+    // typed period. Same quick sky the fixture needs, and the record says
+    // honestly what world it would take to have it.
+    const double radiusM = orbit.orbitalRadiusM();
+    const double periodS = 360.0;
+    orbit.planetMassKg = 4.0 * nsi::core::kPi * nsi::core::kPi
+                      * radiusM * radiusM * radiusM
+                      / (nsi::core::GravitationalConstantM3PerKgS2 * periodS * periodS);
     StellarExposureEvaluator sky(orbit);
     StationSystemsRuntime run(settings(),StationSystemsUpdateMode::Variable);
     StationSystemsRuntime quiet(settings(),StationSystemsUpdateMode::Variable);

@@ -62,7 +62,9 @@ void thermalDefaults() {
 
     // The native sky is driven by the authored Orbit, not by a hand-authored
     // solar profile: an authored Orbit number reaches a hull temperature.
-    expansion.thermal.orbit=I::Orbit{1361.0,5570.0,6791000.0};
+    // The default record: full Sun at Earth, 420 km up. The Orbital period
+    // is derived from the world mass, so there is nothing to type for it.
+    expansion.thermal.orbit=I::Orbit{};
     CellAtmosphereTransport solar(expansion);
     require(solar.advance(.1) && solar.structure().paths.absorbedSolarJ>0,"Stellar input did not enter structural ledger");audit(solar);
 

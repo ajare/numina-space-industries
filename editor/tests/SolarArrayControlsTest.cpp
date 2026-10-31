@@ -18,43 +18,35 @@
 using namespace station::editor;
 namespace {
 void require(bool ok, const char* why) { if (!ok) throw std::runtime_error(why); }
+// The Orbital period is derived now, from the world's mass and the height
+// above its surface. These fixtures want a fast clock so an eclipse cycle
+// arrives inside a handful of frames, so rather than typing a period they
+// can no longer type they author the mass that makes the requested period
+// true at the fixture's own radius: M = 4 pi^2 r^3 / (G T^2). The ride
+// comes out exactly as the fixture wanted it and the record says honestly
+// what world it would take.
+void setPeriod(nsi::core::Installation::Orbit& orbit, double periodS) {
+    const double r = orbit.orbitalRadiusM();
+    orbit.planetMassKg = 4.0 * nsi::core::kPi * nsi::core::kPi * r * r * r
+                      / (nsi::core::GravitationalConstantM3PerKgS2 * periodS * periodS);
+}
 void check() {
     EditorSession session;
-    require(session.installation().solarArrayEnabled(), "new document solar is not enabled");
+    session.setSolarArray(Installation::SolarArray{60});
     const auto original = session.installation().serialize();
-    require(original.find("solarArrayEnabled") == std::string::npos, "default adds wire churn");
-    Installation legacy;
-    legacy.setSolarArrayEnabled(false);
-    legacy.deserialize(original);
-    require(legacy.solarArrayEnabled(), "missing field did not restore enabled default");
+    require(original.find("solarArrayEnabled") == std::string::npos,
+        "the removed enable field is still written to the wire");
 
-    auto& io = ImGui::GetIO();
-    io.DisplaySize = {640, 480}; io.DeltaTime = 1.0f/60;
-    io.IniFilename = nullptr;
-    unsigned char* pixels; int width, height;
-    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-    ImVec2 point;
-    auto frame = [&] {
-        ImGui::NewFrame();
-        ImGui::SetNextWindowPos({0,0}); ImGui::SetNextWindowSize({400,200});
-        ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoTitleBar);
-        drawSolarArrayControls(session);
-        const auto min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
-        point = {(min.x+max.x)/2, (min.y+max.y)/2};
-        ImGui::End(); ImGui::Render();
-    };
-    auto click = [&] {
-        io.AddMousePosEvent(point.x, point.y); frame();
-        io.AddMouseButtonEvent(0,true); frame();
-        io.AddMouseButtonEvent(0,false); frame();
-    };
-    frame(); frame(); click();
-    require(!session.installation().solarArrayEnabled(), "checkbox did not write authored flag");
-    require(session.unsavedChanges(), "checkbox did not dirty document");
-    session.undo();
-    require(session.installation().serialize()==original && !session.unsavedChanges(), "undo did not restore document");
-    session.redo();
-    require(!session.installation().solarArrayEnabled(), "redo did not restore disabled choice");
+    // A document saved while the array carried its own switch still loads.
+    // The leftover field is ignored rather than refused - an authored array
+    // is live whatever it said - and the size and technology the author
+    // chose carry over untouched.
+    Installation legacy;
+    legacy.deserialize("solarArrayEnabled: false\n" + original);
+    require(legacy == session.installation(),
+        "a leftover enable field changed the document it cannot honour");
+    require(legacy.serialize() == original,
+        "a leftover enable field survived the round trip");
 
     // Exercise the actual Editor file boundary, not just a settings copy.
     YamlDocumentFiles files;
@@ -62,18 +54,9 @@ void check() {
     struct Cleanup { std::filesystem::path p; ~Cleanup() { std::filesystem::remove(p); } } cleanup{path};
     files.write(path,session.installation());
     auto loaded=files.read(path);
-    require(loaded==session.installation(), "disabled design changed during save/reload");
+    require(loaded==session.installation(), "authored array changed during save/reload");
     session.replaceDocument(std::move(loaded));
     require(!session.unsavedChanges(), "loaded design is dirty");
-    session.setEditingEnabled(false);
-    click();
-    require(!session.installation().solarArrayEnabled() && !session.unsavedChanges(), "locked checkbox mutated document");
-    session.setSolarArrayEnabled(true);
-    require(!session.installation().solarArrayEnabled(), "session command bypassed playback lock");
-    session.setEditingEnabled(true); click();
-    require(session.installation().solarArrayEnabled() && session.unsavedChanges(), "reset did not unlock checkbox");
-    files.write(path,session.installation());
-    require(files.read(path)==session.installation(), "enabled design changed during save/reload");
 }
 void header() {
     EditorSession session;
@@ -112,28 +95,22 @@ void header() {
         "running output was clipped by consumer-less bus");
     require(std::abs(snapshot->elapsedSeconds-.1)<1e-8,"power clock changed native playback");
     auto orbit=*session.installation().orbit();
-    orbit.orbitalPeriodS=1; session.setOrbit(orbit); render();
+    setPeriod(orbit,1); session.setOrbit(orbit); render();
     playback.togglePlaying();
     for (int i=0;i<5;++i) playback.update(.1);
     require(render().find("Solar array — Eclipse")!=std::string::npos,"live playback did not enter eclipse");
     // At the geometric shadow boundary the centred penumbra transmits half
     // the direct beam. Offset the next tick's midpoint to that boundary.
     nsi::systems::StellarExposureEvaluator sky(orbit);
-    orbit.phaseOffsetPercent=50-50*sky.eclipseDurationSeconds()/orbit.orbitalPeriodS-5;
+    orbit.phaseOffsetPercent=50-50*sky.eclipseDurationSeconds()/orbit.orbitalPeriodSeconds()-5;
     session.setOrbit(orbit);
     require(render().find("Solar array — 9.4 kW")!=std::string::npos,"penumbra generation not rendered");
-    orbit.orbitalPeriodS=5570; orbit.phaseOffsetPercent=50;
+    setPeriod(orbit,5570); orbit.phaseOffsetPercent=50;
     session.setOrbit(orbit);
     require(render().find("Solar array — Eclipse")!=std::string::npos,"eclipse shown as a measured zero");
     session.setOrbit(std::nullopt);
     require(render().find("Solar array — No star")!=std::string::npos,"absent Orbit shown as eclipse");
-    session.setSolarArrayEnabled(false);
-    require(render().find("Solar array — Disabled")!=std::string::npos,"disabled precedence lost");
-    playback.togglePlaying(); playback.update(.1);
-    snapshot=playback.snapshotFor(session.installation());
-    require(snapshot->power.sources.front().disabled && snapshot->power.sources.front().availableKW==0,
-        "disabled choice not mapped into running systems");
-    session.setSolarArrayEnabled(true); orbit.phaseOffsetPercent=0; session.setOrbit(orbit);
+    orbit.phaseOffsetPercent=0; session.setOrbit(orbit);
     session.setSolarArray(Installation::SolarArray{60,Installation::SolarCellTechnology::SpaceSilicon});
     require(render().find("Solar array — 6.9 kW")!=std::string::npos,"technology not mapped");
     // #69: Eclipse is the systems-side shadow state, never a restatement of
@@ -275,15 +252,18 @@ void generationSamples() {
     require(window.back().seconds - window.front().seconds <= 60.0 + 1e-9,
         "generation history outgrew the last minute");
 
-    // Switched off and starless are the states the header spells in words.
-    // The history agrees, and leaves them out rather than recording a zero
-    // that would read as a panel generating nothing under a live sky.
-    session.setSolarArrayEnabled(false);
-    SimulationPlayback switchedOff;
-    switchedOff.reset(session.installation());
-    require(std::isnan(switchedOff.solarHistory().front().availableKW),
-        "a switched-off array recorded a measured zero");
-    session.setSolarArrayEnabled(true);
+    // A disabled array and a starless one are the states the header spells
+    // in words. The history agrees, and leaves them out rather than
+    // recording a zero that would read as a panel generating nothing under
+    // a live sky. Zero blanket area is how an author disables an array now
+    // that the enable switch is gone, and the systems side reports it as
+    // such.
+    session.setSolarArray(Installation::SolarArray{0});
+    SimulationPlayback disabledArray;
+    disabledArray.reset(session.installation());
+    require(std::isnan(disabledArray.solarHistory().front().availableKW),
+        "a disabled array recorded a measured zero");
+    session.setSolarArray(Installation::SolarArray{60});
 
     session.setOrbit(std::nullopt);
     SimulationPlayback starless;
@@ -393,7 +373,7 @@ void eclipseGraph() {
     EditorSession session;
     session.setSolarArray(Installation::SolarArray{60});
     auto orbit = *session.installation().orbit();
-    orbit.orbitalPeriodS = 10;
+    setPeriod(orbit, 10);
     session.setOrbit(orbit);
     SimulationPlayback playback;
     playback.reset(session.installation());
@@ -433,6 +413,14 @@ void eclipseGraph() {
 int main() {
     ImGui::CreateContext();
     ImPlot::CreateContext();
+    // The shared frame setup every renderer below draws into. It lives here
+    // rather than in one test so the ones that count painted vertices see a
+    // screen the same size the app would give them.
+    auto& io = ImGui::GetIO();
+    io.DisplaySize = {640, 480}; io.DeltaTime = 1.0f/60;
+    io.IniFilename = nullptr;
+    unsigned char* pixels; int width, height;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
     try {
         check();
         header();

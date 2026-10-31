@@ -442,7 +442,7 @@ void hullPlayback() {
     // The inversion the default orbit brings: the same fixture under the
     // default ISS-like sky is lit, and BareSkin takes far more of it than
     // the blanket does.
-    const I::Orbit iss{1361.0,5570.0,6791000.0};
+    const I::Orbit iss{};
     const auto litBare=temperature(I::HullType::BareSkin,iss);
     const auto litBlanket=temperature(I::HullType::MultiLayerBlanket,iss);
     require(litBare.second>0.0L && litBlanket.second>0.0L,
@@ -470,19 +470,21 @@ void orbitPlayback() {
     };
     const auto dark=run(std::nullopt);
     require(dark.first==0.0L,"Dark control of the orbit playback fixture absorbed starlight");
-    const auto lit=run(I::Orbit{1361.0,5570.0,6791000.0});
+    const auto lit=run(I::Orbit{});
     require(lit.first>0.0L,"Authored orbit did not heat the playback hull");
     require(lit.second>0.0L,"Playback Hull did not radiate");
     // The same run opened part-way through an eclipse: the authored phase
     // offset puts the shadow over the whole first minute of playback,
     // where the unshifted run was in full daylight.
-    const auto shifted=run(I::Orbit{1361.0,5570.0,6791000.0,0.3,23.44,50.0});
+    I::Orbit shiftedSky; shiftedSky.axialTiltDeg=23.44; shiftedSky.phaseOffsetPercent=50.0;
+    const auto shifted=run(shiftedSky);
     require(shifted.first==0.0L,
            "The authored phase offset did not open playback inside the eclipse");
     require(shifted.second>0.0L,"The eclipsed playback Hull stopped radiating");
     // Tilted but unshifted: the axial tilt reaches the playback hull and changes
     // the load it takes, because the star is no longer overhead.
-    const auto tilted=run(I::Orbit{1361.0,5570.0,6791000.0,0.3,23.44,0.0});
+    I::Orbit tiltedSky; tiltedSky.axialTiltDeg=23.44;
+    const auto tilted=run(tiltedSky);
     require(tilted.first>0.0L,"A tilted orbit delivered no stellar energy to the playback hull");
     require(std::abs(double(tilted.first-lit.first))>1e-3*std::abs(double(lit.first)),
            "The axial tilt made no difference to the load the playback hull took");

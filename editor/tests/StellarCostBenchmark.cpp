@@ -67,12 +67,14 @@ double ms(Clock::time_point start) {return std::chrono::duration<double,std::mil
 double us(Clock::time_point start) {return std::chrono::duration<double,std::micro>(Clock::now()-start).count();}
 void require(bool x,const std::string& why) {if(!x) throw std::runtime_error(why);}
 
-// The compressed thermal cycle. Orbital period and orbital radius are
-// independent authored inputs (ADR-0008: no Kepler, no gravity model), so
-// shortening the period leaves the ISS-radius eclipse fraction - and with it
-// the whole shape of the exposure profile, both crossings and the arcs
-// between them - exactly as a real LEO orbit has it, while putting a
-// complete cycle inside a measurement budget instead of an hour of clock.
+// The compressed thermal cycle. The Orbital period is derived from the
+// world's mass and the height above its surface, so a 60 s cycle is
+// authored as the mass that makes that period true at ISS radius rather
+// than as a typed period. The eclipse fraction - and with it the whole
+// shape of the exposure profile, both crossings and the arcs between them
+// - depends on the radius and the tilt alone, so the sky is exactly what a
+// real LEO orbit has. Only the clock is compressed, which is what puts a
+// complete cycle inside a measurement budget instead of an hour of it.
 constexpr double kCyclePeriod=60.0;
 constexpr double kIssRadius=6791000.0;
 constexpr double kFullSun=1361.0;
@@ -113,13 +115,31 @@ const std::vector<Scenario> kScenarios={
     {"rest-recheck","no Orbit authored - dark sky - re-measured last as the host-drift control",true,0.0,false,false},
 };
 
+// The fixture's sky: full Sun at Earth, an ISS-radius ride, and the world
+// mass that makes the compressed 60 s cycle the Keplerian one at that
+// radius - M = 4 pi^2 r^3 / (G T^2). The record is honest about the
+// gravity it is pretending to, and every derived exposure quantity comes
+// out as it would for a real low orbit.
+O cycleSky(double tiltDegrees) {
+    O sky;
+    sky.stellarIrradianceWPerM2=kFullSun;
+    sky.albedo=kEarthAlbedo;
+    sky.axialTiltDeg=tiltDegrees;
+    sky.planetRadiusM=nsi::core::PlanetRadiusM;
+    sky.siderealRotationS=nsi::core::PlanetSiderealRotationS;
+    sky.heightAboveGroundM=kIssRadius-nsi::core::PlanetRadiusM;
+    sky.planetMassKg=4.0*nsi::core::kPi*nsi::core::kPi
+                   *kIssRadius*kIssRadius*kIssRadius
+                   /(nsi::core::GravitationalConstantM3PerKgS2*kCyclePeriod*kCyclePeriod);
+    return sky;
+}
+
 I sceneFor(const Scenario& scenario,unsigned size) {
     // The same sealed 4,096-Cell MultiLayerBlanket fixture the #35 gate ran,
     // so a row here reads against a row there. Only the sky changes.
     auto scene=structural_cost::fixture("rest",size);
     if(scenario.dark) scene.setOrbit(std::nullopt);
-    else scene.setOrbit(O{kFullSun,kCyclePeriod,kIssRadius,kEarthAlbedo,
-        scenario.tiltDegrees,0.0});
+    else scene.setOrbit(cycleSky(scenario.tiltDegrees));
     return scene;
 }
 double eclipseEntrySeconds(const CellAtmosphereTransport& model) {

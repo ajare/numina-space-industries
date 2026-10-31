@@ -196,13 +196,17 @@ void hullHistory() {
 }
 void orbitHistory() {
     EditorSession session; session.newDocument(1,1);
-    // A new document arrives already under an ISS-like sky, so the author
+    // A new document arrives already under a low Earth sky, so the author
     // sees day/night cycling without typing anything. The undo baseline is
     // that default, not an absent orbit.
-    const I::Orbit kDefault{1361.0,5570.0,6791000.0,0.3,0.0,0.0};
+    const I::Orbit kDefault{};
     check(session.installation().orbit()==kDefault,
-          "New document must author the ISS-like default orbit");
-    const I::Orbit geo{1361.0,86164.0,42164000.0,0.3,0.0,0.0};
+          "New document must author the default low-orbit sky");
+    // A synchronous ride: the height at which the derived Orbital period
+    // comes back as the world's own day. Authored as a height, because the
+    // period is no longer a thing to type.
+    I::Orbit geo{};
+    geo.heightAboveGroundM = geo.synchronousHeightM();
     session.setOrbit(geo);
     check(session.installation().orbit()==geo && session.unsavedChanges() && session.canUndo(),
           "Orbit edit did not dirty the document");
@@ -216,26 +220,32 @@ void orbitHistory() {
     session.undo(); check(session.installation().orbit()==geo,"Undo no orbit");
     session.redo(); check(!session.installation().orbit(),"Redo no orbit");
     // Numbers the loader would refuse never reach the document at all.
+    // Each case is built off the defaults through the one field it breaks,
+    // so a change to the field order shows up as a changed test rather
+    // than as a silently different sky.
     const auto untouched=session.installation();
-    for (const auto invalid : {I::Orbit{0.0,5570.0,6791000.0},
-                              I::Orbit{1361.0,0.0,6791000.0},
-                              I::Orbit{1361.0,5570.0,nsi::core::PlanetRadiusM},
-                              I::Orbit{1361.0,5570.0,6791000.0,-0.1},
-                              I::Orbit{1361.0,5570.0,6791000.0,1.1}}) {
+    auto broken=[](auto tweak){ I::Orbit o; tweak(o); return o; };
+    for (const auto invalid : {broken([](I::Orbit& o){o.stellarIrradianceWPerM2=0.0;}),
+                              broken([](I::Orbit& o){o.heightAboveGroundM=0.0;}),
+                              broken([](I::Orbit& o){o.planetMassKg=0.0;}),
+                              broken([](I::Orbit& o){o.siderealRotationS=0.0;}),
+                              broken([](I::Orbit& o){o.albedo=-0.1;}),
+                              broken([](I::Orbit& o){o.albedo=1.1;})}) {
         bool refused=false;
         try { session.setOrbit(invalid); } catch (const std::exception&) { refused=true; }
         check(refused && session.installation()==untouched,
               "Invalid orbit reached the document");
     }
     // Both ends of the Albedo interval are authorable, and the value sticks.
-    session.setOrbit(I::Orbit{1361.0,5570.0,6791000.0,0.0});
+    session.setOrbit(broken([](I::Orbit& o){o.albedo=0.0;}));
     check(session.installation().orbit()->albedo==0.0,"Albedo 0 was not authored");
-    session.setOrbit(I::Orbit{1361.0,5570.0,6791000.0,1.0});
+    session.setOrbit(broken([](I::Orbit& o){o.albedo=1.0;}));
     check(session.installation().orbit()->albedo==1.0,"Albedo 1 was not authored");
     // The axial tilt and the phase offset ride the same command and the same undo
     // discipline as the rest of the record.
     const auto unshifted=session.installation().orbit();
-    const I::Orbit tilted{1361.0,5570.0,6791000.0,0.3,23.44,1234.5};
+    const I::Orbit tilted = broken([](I::Orbit& o){
+        o.axialTiltDeg=23.44; o.phaseOffsetPercent=1234.5; });
     session.setOrbit(tilted);
     check(session.installation().orbit()==tilted,"Axial tilt and phase offset were not authored");
     session.undo();
@@ -243,22 +253,22 @@ void orbitHistory() {
     session.redo();
     check(session.installation().orbit()==tilted,"Redo did not restore the axial tilt and phase offset");
     // A tilt the model cannot sweep, and a phase offset that is not a
-    // number of seconds, never reach the document.
+    // number, never reach the document.
     const auto authored=session.installation();
     const double nan=std::numeric_limits<double>::quiet_NaN();
     const double inf=std::numeric_limits<double>::infinity();
-    for (const auto invalid : {I::Orbit{1361.0,5570.0,6791000.0,0.3,90.0,0.0},
-                              I::Orbit{1361.0,5570.0,6791000.0,0.3,-90.5,0.0},
-                              I::Orbit{1361.0,5570.0,6791000.0,0.3,nan,0.0},
-                              I::Orbit{1361.0,5570.0,6791000.0,0.3,0.0,nan},
-                              I::Orbit{1361.0,5570.0,6791000.0,0.3,0.0,inf}}) {
+    for (const auto invalid : {broken([](I::Orbit& o){o.axialTiltDeg=90.0;}),
+                              broken([](I::Orbit& o){o.axialTiltDeg=-90.5;}),
+                              broken([&](I::Orbit& o){o.axialTiltDeg=nan;}),
+                              broken([&](I::Orbit& o){o.phaseOffsetPercent=nan;}),
+                              broken([&](I::Orbit& o){o.phaseOffsetPercent=inf;})}) {
         bool refused=false;
         try { session.setOrbit(invalid); } catch (const std::exception&) { refused=true; }
         check(refused && session.installation()==authored,
               "Invalid axial tilt or phase offset reached the document");
     }
     // A tilt just inside the pole is legal, however steep.
-    session.setOrbit(I::Orbit{1361.0,5570.0,6791000.0,0.3,89.9,0.0});
+    session.setOrbit(broken([](I::Orbit& o){o.axialTiltDeg=89.9;}));
     check(session.installation().orbit()->axialTiltDeg==89.9,"A steep legal tilt was refused");
 }
 void history() {

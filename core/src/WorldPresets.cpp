@@ -9,7 +9,9 @@ std::size_t worldPresetMatching(const Installation::Orbit& orbit) {
         const auto& world = kWorldPresets[index];
         if (orbit.stellarIrradianceWPerM2 == world.stellarIrradianceWPerM2
             && orbit.albedo == world.albedo && orbit.axialTiltDeg == world.axialTiltDeg
-            && orbit.planetRadiusM == world.planetRadiusM)
+            && orbit.planetRadiusM == world.planetRadiusM
+            && orbit.planetMassKg == world.planetMassKg
+            && orbit.siderealRotationS == world.siderealRotationS)
             return index;
     }
     return kNoWorldPreset;
@@ -24,14 +26,14 @@ Installation::Orbit applyWorldPreset(const Installation::Orbit& orbit, std::size
     next.albedo = world.albedo;
     next.axialTiltDeg = world.axialTiltDeg;
     next.planetRadiusM = world.planetRadiusM;
-    // Keep the altitude the author had above the surface, so a low orbit
-    // about Earth stays a low orbit about Jupiter rather than a Hull
-    // buried under a gas giant. It only moves when the new world would
-    // otherwise have swallowed the orbit: an orbit already high enough is
-    // left exactly where it was, because nothing asked for it to move.
-    const double altitudeM = orbit.radiusFromPlanetCentreM - orbit.planetRadiusM;
-    if (next.radiusFromPlanetCentreM <= next.planetRadiusM)
-        next.radiusFromPlanetCentreM = next.planetRadiusM + altitudeM;
+    next.planetMassKg = world.planetMassKg;
+    next.siderealRotationS = world.siderealRotationS;
+    // The height above the surface and the phase offset are left exactly as
+    // they were. Which world you are about does not decide how high above it
+    // you fly, and the Orbital period is not a field to leave alone any
+    // more: it is derived, so it moves because the world moved under it.
+    // That is the ride following the world by itself rather than the author
+    // having to go and retune a number they never meant to own.
     return next;
 }
 

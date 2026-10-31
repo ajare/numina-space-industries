@@ -581,12 +581,18 @@ int runEditor() {
             // zero irradiance and zero radius, because a world with no
             // radius is not a world and the model rightly refuses one.
             //
-            // Picking a planet writes the four fields below and leaves the
-            // ride alone: the Orbital period and the phase offset stay
-            // exactly as authored, because which world you are about does
-            // not decide how fast you travel around it. If the new world
-            // would swallow the current orbit, the orbit radius moves out
-            // with the ground and keeps the altitude above the surface.
+            // Picking a planet writes the six fields below and leaves the
+            // ride alone: the height above the surface and the phase offset
+            // stay exactly as authored, because which world you are about
+            // does not decide how high above it you fly. The Orbital period
+            // is not left alone because it is no longer a field to leave -
+            // it is derived from the world's mass and that height, so it
+            // moves because the world moved, which is the ride following
+            // the world rather than the author retuning a number they never
+            // meant to own. Nothing has to be rescued for the geometry
+            // either: the height is measured from the surface, so a wider
+            // world cannot swallow an orbit the way an authored radius
+            // from the centre could.
             // Coming back from Deep space starts from the documented
             // defaults, since clearing threw the old ride away with the
             // rest of the record.
@@ -623,8 +629,9 @@ int runEditor() {
                 ImGui::SetTooltip("Deep space: no star and no planet. Clears the Orbit\n"
                                  "record and leaves the hull radiating to the\n"
                                  "deep-space sink alone. A planet sets irradiance,\n"
-                                 "albedo, tilt and planet radius, and leaves the\n"
-                                 "Orbital period and phase offset as authored.");
+                                 "albedo, tilt, radius, mass and day length, and\n"
+                                 "leaves the height above the surface and the\n"
+                                 "phase offset as authored.");
             ImGui::EndDisabled();
             ImGui::BeginDisabled(locked);
             if (orbit) {
@@ -657,6 +664,39 @@ int runEditor() {
                     writeOrbit(&Orbit::planetRadiusM, planetRadiusKm * 1000.0);
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Stored as %.0f m", orbit->planetRadiusM);
+                // The world's mass, published in units of 10^24 kg because
+                // that is the scale the fact sheet writes it at and the only
+                // one at which the eight planets are readable numbers side
+                // by side. This is not decoration: it is what turns the
+                // height in the Orbit group into a period. Change it and the
+                // ride changes, which is the point - a catalogue that drew
+                // the ground without it would put the station at the wrong
+                // speed around the right planet.
+                double massYottagram = orbit->planetMassKg / 1.0e24;
+                if (ImGui::InputDouble("Planet mass (10^24 kg)", &massYottagram, 0, 0, "%.4f"))
+                    writeOrbit(&Orbit::planetMassKg, massYottagram * 1.0e24);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Stored as %.6e kg\n"
+                                     "The Orbital period is derived from this\n"
+                                     "and the height above the surface.",
+                                     orbit->planetMassKg);
+                // How long the world takes to turn once, published in hours.
+                // Nothing thermal reads it - the shadow cylinder is fixed in
+                // the inertial frame, so a planet spinning underneath its
+                // own shadow does not move it - but Ground drift and the
+                // synchronous height are both stated against it, and reading
+                // Earth's day out of a constant under a Jovian sky would be
+                // the same mistake the hardcoded radius was before it was
+                // authored. Retrograde worlds need no negative sign here: the
+                // tilt fold already flips the pole.
+                double dayHours = orbit->siderealRotationS / 3600.0;
+                if (ImGui::InputDouble("Sidereal day (h)", &dayHours, 0, 0, "%.4f"))
+                    writeOrbit(&Orbit::siderealRotationS, dayHours * 3600.0);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Stored as %.1f s\n"
+                                     "Drives Ground drift and the synchronous\n"
+                                     "height only, never the heat.",
+                                     orbit->siderealRotationS);
             }
             ImGui::EndDisabled();
             ImGui::PopItemWidth();
@@ -665,22 +705,46 @@ int runEditor() {
             ImGui::PushItemWidth(kSkyFieldWidthPx);
             ImGui::BeginDisabled(locked);
             if (orbit) {
-                // Authored in hours and kilometres: nobody plans a ride in
-                // seconds and metres, and the whole number is only ever a
-                // rounding of what is stored. Each widget says what it is
-                // holding on hover, so the exact seconds and metres are
-                // never more than a mouse away, and the summary below
-                // reads them back unconverted.
-                double periodHours = orbit->orbitalPeriodS / 3600.0;
-                if (ImGui::InputDouble("Orbital period (h)", &periodHours, 0, 0, "%.3f"))
-                    writeOrbit(&Orbit::orbitalPeriodS, periodHours * 3600.0);
+                // Authored in kilometres above the ground: the one number
+                // about the ride a person can actually picture, and the
+                // only one left to type now the period is derived. The
+                // radius from the planet's centre is what the model works
+                // in, but it is a number you have to add the planet to
+                // yourself - which is no use at all for a world you have
+                // not memorised, and worse than no use about Jupiter,
+                // where "70,331 km" reads as nothing while "420 km up"
+                // reads the same way it does at home.
+                double heightKm = orbit->heightAboveGroundM / 1000.0;
+                if (ImGui::InputDouble("Height above ground (km)", &heightKm, 0, 0, "%.1f"))
+                    writeOrbit(&Orbit::heightAboveGroundM, heightKm * 1000.0);
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Stored as %.1f s", orbit->orbitalPeriodS);
-                double radiusKm = orbit->radiusFromPlanetCentreM / 1000.0;
-                if (ImGui::InputDouble("Orbit radius from planet centre (km)", &radiusKm, 0, 0, "%.0f"))
-                    writeOrbit(&Orbit::radiusFromPlanetCentreM, radiusKm * 1000.0);
+                    ImGui::SetTooltip("Stored as %.0f m above the surface",
+                                     orbit->heightAboveGroundM);
+                // Derived, and read-only because there is nothing left to
+                // set: with the world's mass on the record there is exactly
+                // one period this height can have. Printed directly under
+                // the field that decides it, so the consequence of the
+                // number just typed is on the screen at the moment of the
+                // typing rather than somewhere else to go and check.
+                const double derivedPeriodS = orbit->orbitalPeriodSeconds();
+                ImGui::Text("Orbital period  %.1f s (%.1f min)", derivedPeriodS,
+                           derivedPeriodS / 60.0);
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Stored as %.0f m", orbit->radiusFromPlanetCentreM);
+                    ImGui::SetTooltip("Derived from the planet mass and the\n"
+                                     "height above the surface. There is\n"
+                                     "nothing to set here.");
+                // The height at which the Installation would hover over one
+                // spot on the surface. Printed rather than flagged with a
+                // condition of its own: seeing that the synchronous height
+                // is 35,794 km while you are typing 420 tells you more than
+                // a marker that only appears if you happen to land on it.
+                const double syncHeightM = orbit->synchronousHeightM();
+                ImGui::Text("Synchronous height  %.0f km", syncHeightM / 1000.0);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("The height at which the Orbital period\n"
+                                     "equals the planet's sidereal day, so the\n"
+                                     "Installation holds over one spot.\n"
+                                     "Derived from the planet mass and day.");
                 // Where in the cycle the run opens, as an angle: 0 deg is
                 // Local noon, 180 deg local midnight, so 144 deg opens
                 // part-way into the eclipse. It moves when, never what -

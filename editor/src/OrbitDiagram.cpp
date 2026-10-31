@@ -142,7 +142,7 @@ void drawOrbitDiagram(const nsi::core::Installation& installation,
     const float canvas =
         std::clamp(ImGui::GetContentRegionAvail().x, kMinCanvasPx, kMaxCanvasPx);
     const auto layout =
-        orbitDiagramLayout(orbit->planetRadiusM, orbit->radiusFromPlanetCentreM,
+        orbitDiagramLayout(orbit->planetRadiusM, orbit->orbitalRadiusM(),
                           orbitAngleRadians(exposure), canvas / 2.0f, kMarginPx,
                           kInstallationRadiusPx);
     if (!layout.valid) {

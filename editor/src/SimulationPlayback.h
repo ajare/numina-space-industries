@@ -64,7 +64,7 @@ public:
     // observation. Like the exposure trace it is one thing rather than a
     // per-Sector copy: a Station has one Solar array record. Samples are NaN
     // where the header would refuse a figure - no array, no authored Orbit,
-    // or the array switched off - which renders as a gap.
+    // or a disabled array - which renders as a gap.
     std::span<const SolarGenerationSample> solarHistory() const noexcept { return solarHistory_; }
 private:
     void recordAtmosphereHistory(bool instantaneous=false);

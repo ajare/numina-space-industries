@@ -16,12 +16,6 @@ constexpr double kStefanBoltzmannWPerM2K4 = 5.670374419e-8;
 // neighbours of the poles.
 constexpr double kMaxTiltDegrees = 90.0;
 constexpr double kDegToRad = kPi / 180.0;
-// The Geostationary match tolerance, relative to the planet's sidereal
-// rotation. Tight enough that no author can type their way into the badge
-// by rounding: a tenth of a second off an Earth-sidereal period is over a
-// thousand times the tolerance, while the constant itself survives a
-// document round trip bit for bit.
-constexpr double kGeostationaryTolerance = 1e-9;
 constexpr double kDegreesPerTurn = 360.0;
 // The ramp width comes from the header, so the solar diameter the shadow
 // edges are smoothed by is one number in the model and not two that have
@@ -38,21 +32,21 @@ inline double fractionalTurns(double turns) noexcept {
 // first so the quotient stays bounded by one, even for subnormal periods.
 inline double phaseTurns(double seconds, double period) noexcept {
     return fractionalTurns(std::fmod(seconds, period) / period);
-}
-}
+}}
 
 StellarExposureEvaluator::StellarExposureEvaluator(
     const core::Installation::Orbit& orbit) noexcept {
     if (!std::isfinite(orbit.stellarIrradianceWPerM2) || orbit.stellarIrradianceWPerM2 <= 0.0
         || orbit.stellarIrradianceWPerM2 > core::Installation::Orbit::MaxStellarIrradianceWPerM2
-        || !std::isfinite(orbit.orbitalPeriodS) || orbit.orbitalPeriodS <= 0.0
-        || !std::isfinite(orbit.radiusFromPlanetCentreM)
         // The world is authored now, so the boundary is authored too. A
-        // Hull at or below the authored ground line has no sky, and a
-        // world with no radius, or no finite one, cannot make a sky
-        // either. Refused here exactly as core refuses it on the way in.
+        // Hull at or below the authored ground line has no sky, a world
+        // with no mass has no gravity to orbit, and a world with no day
+        // length cannot be rotated against to say anything about drift.
+        // Refused here exactly as core refuses it on the way in.
         || !std::isfinite(orbit.planetRadiusM) || orbit.planetRadiusM <= 0.0
-        || orbit.radiusFromPlanetCentreM <= orbit.planetRadiusM
+        || !std::isfinite(orbit.planetMassKg) || orbit.planetMassKg <= 0.0
+        || !std::isfinite(orbit.siderealRotationS) || orbit.siderealRotationS <= 0.0
+        || !std::isfinite(orbit.heightAboveGroundM) || orbit.heightAboveGroundM <= 0.0
         // An Albedo outside [0, 1] would take the energy balance under zero
         // and hand back a NaN planet temperature, so it is refused here as
         // loudly as core refuses it on the way in.
@@ -69,8 +63,22 @@ StellarExposureEvaluator::StellarExposureEvaluator(
     const double cosTilt = std::cos(tiltRadians);
 
     irradianceWPerM2_ = orbit.stellarIrradianceWPerM2;
-    periodSeconds_ = orbit.orbitalPeriodS;
-    radiusMeters_ = orbit.radiusFromPlanetCentreM;
+    // The Orbital period and the orbital radius are derived, not read off
+    // the record: core owns Kepler's third law next to the world mass it
+    // derives from, and this evaluator owns everything that turns the
+    // resulting period into a sky. A record that cannot produce a period
+    // is dark rather than a sky with a NaN in its clock, so the check is
+    // here rather than further down where it would be too late.
+    const double period = orbit.orbitalPeriodSeconds();
+    if (!std::isfinite(period) || period <= 0.0) return;
+    const double radius = orbit.orbitalRadiusM();
+    if (!std::isfinite(radius) || radius <= orbit.planetRadiusM) return;
+    periodSeconds_ = period;
+    radiusMeters_ = radius;
+    // The authored world's own day, which is what Ground drift is measured
+    // against. Reading Earth's day out of a constant here would be the
+    // same mistake the hardcoded radius was before the world was authored.
+    siderealRotationS_ = orbit.siderealRotationS;
     albedo_ = orbit.albedo;
     axialTiltDeg_ = tilt;
     tiltRadians_ = tiltRadians;
@@ -104,7 +112,7 @@ StellarExposureEvaluator::StellarExposureEvaluator(
     // -sqrt(1 - (Rp/r)^2). The tilt does not move that boundary. Rp is
     // the authored world radius, so a wide world casts a wide shadow and a
     // narrow one lets the orbit nearly past it.
-    const double ratio = orbit.planetRadiusM / orbit.radiusFromPlanetCentreM;
+    const double ratio = orbit.planetRadiusM / radius;
     planetViewScale_ = ratio * ratio;
     const double horizon = std::sqrt(std::max(0.0, 1.0 - ratio * ratio));
     // What the tilt moves is how far down the star ever travels - its lowest
@@ -165,18 +173,12 @@ double StellarExposureEvaluator::groundDriftDegreesPerDay() const noexcept {
     // Two angular rates over the same axis: the sub-point is carried east by
     // the orbit at 360 degrees per Orbital period, and the surface carries
     // it back west at 360 degrees per sidereal rotation. The residue is
-    // the drift an observer on the ground would measure, and it is exactly
-    // zero when the two periods match - which is why the badge and this
-    // number are shown together. Nothing in the thermal model reads either
-    // rate: ADR-0008 puts the planet's rotation outside it entirely.
+    // the drift an observer on the ground would measure. Nothing in the
+    // thermal model reads either rate: ADR-0008 puts the planet's rotation
+    // outside it entirely. The day is the authored world's own, so a
+    // Jovian sky drifts against a Jovian day rather than an Earth one.
     return kDegreesPerTurn * kSecondsPerDay
-         * (1.0 / periodSeconds_ - 1.0 / core::PlanetSiderealRotationS);
-}
-
-bool StellarExposureEvaluator::geostationary() const noexcept {
-    if (dark_) return false;
-    return std::abs(periodSeconds_ - core::PlanetSiderealRotationS)
-         <= kGeostationaryTolerance * core::PlanetSiderealRotationS;
+         * (1.0 / periodSeconds_ - 1.0 / siderealRotationS_);
 }
 
 double StellarExposureEvaluator::directFluxWPerM2(const std::array<double, 3>& outwardNormal,

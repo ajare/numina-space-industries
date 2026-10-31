@@ -89,16 +89,20 @@ The surface area of a Sector facing void, comprising its sides, roof and exposed
 _Avoid_: Exterior Wall (only an edge contributing to side area), Hull (the physical assembly, not an area), perimeter
 
 **Orbital period**:
-The time for the Installation to complete one revolution about its planet, measured in the inertial frame. It sets the period of both stellar exposure and eclipse; the planet's own rotation affects neither.
-_Avoid_: Relative speed, rotation period (for the Installation's motion), orbit speed
+The time for the Installation to complete one revolution about its planet, measured in the inertial frame. It sets the period of both stellar exposure and eclipse; the planet's own rotation affects neither. It is **derived**, not authored: with the world's mass on the record there is exactly one period a free orbit at the authored Height above ground can have, so writing a second number for the same fact would only create a way to be wrong.
+_Avoid_: Relative speed, rotation period (for the Installation's motion), orbit speed, authored period (it follows from the world mass and the height)
+
+**Height above ground**:
+How far the Installation rides above the surface of the world it orbits, in metres. The one quantity about the ride an author plans and can picture, and the only one left to type now the Orbital period is derived. Distinct from the orbital radius, which is this plus the planet's radius and is what the shadow and planet-shine geometry works in.
+_Avoid_: Altitude (ambiguous with height above sea level), orbital radius (measured from the centre, not the surface), clearance
 
 **Nadir lock**:
 The Installation's attitude convention: one face continuously faces the planet, so the Installation turns once per orbit. It makes each hull panel's solar incidence well defined from that panel's outward normal.
-_Avoid_: Geostationary (an orbital condition, not an attitude), tumbling, spin-stabilised
+_Avoid_: Synchronous (an orbital condition, not an attitude), tumbling, spin-stabilised
 
-**Geostationary**:
-The special case where the Installation's Orbital period equals the planet's sidereal rotation, so it holds one position over the surface. A derived condition shown to the author, never an input.
-_Avoid_: Hovering, stationary, locked orbit
+**Synchronous height**:
+The height above ground at which the Installation's derived Orbital period equals the planet's sidereal rotation, so it holds one position over the surface. A derived readout printed beside the Height above ground field rather than flagged as a condition: seeing that the synchronous height is 35,794 km while typing 420 says more than a marker that only arrives if the author lands on it exactly.
+_Avoid_: Geostationary (the name of the condition this readout replaced, kept out so no marker is implied), hover height, stationary orbit
 
 **Stellar irradiance**:
 Stellar power per unit area at the planet's orbital distance, measured in W/m² (1361 for the Sun at Earth). A property of the star and the orbit, never of the hull.
@@ -137,11 +141,11 @@ The calendar day a run's clock begins on, authored as a day and always at midnig
 _Avoid_: Epoch (that is the zero the instant is measured from, not the field), start time (there is no time of day to author), launch date (nothing launches on it)
 
 **Ground drift**:
-The apparent motion of the Installation's sub-point across the planet's surface, in degrees per day. A derived readout for the author; zero means Geostationary.
+The apparent motion of the Installation's sub-point across the planet's surface, in degrees per day, measured against the world's own sidereal rotation. A derived readout for the author; zero means the Installation is sitting at the Synchronous height.
 _Avoid_: Relative speed (as an input), orbital drift
 
 **World preset**:
-One of the eight planets of the Sun authored as the body an Installation orbits — its stellar irradiance, Bond albedo, axial tilt and radius, applied together. The Sun itself is never a world preset: in this model the star and the orbited body are separate things, and every preset row already carries the Sun at that world's distance. **Deep space** ends the list rather than joining it: no star and no planet, which is no Orbit record at all rather than a world with zero radius.
+One of the eight planets of the Sun authored as the body an Installation orbits — its stellar irradiance, Bond albedo, axial tilt, radius, mass and sidereal rotation, applied together. The mass and the day are not decoration: the Orbital period and the Synchronous height are derived from them, so a catalogue that carried a radius but not a mass would draw the right ground and still get the ride wrong. The Sun itself is never a world preset: in this model the star and the orbited body are separate things, and every preset row already carries the Sun at that world's distance. **Deep space** ends the list rather than joining it: no star and no planet, which is no Orbit record at all rather than a world with zero radius.
 _Avoid_: Star preset (the star is the irradiance, not the world), system preset (ambiguous with the atmosphere preset), empty world / null planet (Deep space is an absent record, not a zeroed one)
 
 **Thermal transmittance (U-value)**:

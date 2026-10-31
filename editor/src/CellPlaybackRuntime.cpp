@@ -72,7 +72,9 @@ CellPlaybackRuntime::CellPlaybackRuntime(const nsi::core::Installation& installa
         case nsi::core::Installation::SolarCellTechnology::SpaceSilicon:
             array.cellTechnology=SolarCellTechnology::SpaceSilicon; break;
         }
-        array.enabled=installation.solarArrayEnabled(); settings.solarArrays={array};
+        // Always on: `SolarArraySettings::enabled` defaults to true and the
+        // Editor no longer authors a switch to override it.
+        settings.solarArrays={array};
         if (installation.orbit()) solarSky_=nsi::systems::StellarExposureEvaluator(*installation.orbit());
         // Edit-time preview of the next 10 Hz tick, obtained from the same
         // public systems snapshot as playback, not a duplicate GUI formula.

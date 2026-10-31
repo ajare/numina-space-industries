@@ -160,7 +160,7 @@ void hullCooling() {
         "Roof and underside must increase default cooling roughly sixfold");
     // A genuine v3 load retains the exact previous no-link behaviour.
     auto yaml=single.serialize();
-    yaml.replace(yaml.find("version: 4"),10,"version: 3");
+    yaml.replace(yaml.find("version: 5"),10,"version: 3");
     const auto start=yaml.find("hull:"); yaml.erase(start,yaml.find('\n',start)-start+1);
     Installation legacy; legacy.deserialize(yaml);
     auto settings=scene(legacy);

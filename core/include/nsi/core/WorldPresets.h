@@ -8,10 +8,18 @@
 
 namespace nsi::core {
 // One world an Installation can be authored to orbit, described in the
-// four quantities this model actually reads. Values come from the NASA
-// NSSDCA Planetary Fact Sheet - mean radius, Bond albedo, obliquity to
-// orbit - with the irradiance derived as 1361 W/m^2 divided by the square
-// of each world's mean distance from the Sun in AU.
+// six quantities this model actually reads. Values come from the NASA
+// NSSDCA Planetary Fact Sheet - mean radius, mass, Bond albedo, obliquity
+// and sidereal rotation - with the irradiance derived as 1361 W/m^2
+// divided by the square of each world's mean distance from the Sun in AU.
+//
+// The mass is here because the ride is no longer authored. An author sets
+// how high above the ground the Installation flies and the Orbital period
+// follows from the mass and that height by Kepler's third law, so a
+// catalogue that carried a radius but not a mass would draw the right
+// ground and still get the ride wrong. About Jupiter the same 420 km that
+// takes 5,545 s here takes 10,407 s there, and nothing in a radius-only
+// row could tell you that.
 //
 // The Sun is deliberately not in this list, and cannot be. In this model
 // the star and the orbited world are separate things: the star lights the
@@ -33,6 +41,21 @@ struct WorldPreset {
     double axialTiltDeg;
     // Mean radius in metres. The radius of the shadow cylinder.
     double planetRadiusM;
+    // Mass in kilograms. With the gravitational constant this is what turns
+    // an authored height into an Orbital period, and what makes the
+    // synchronous height a number worth showing.
+    double planetMassKg;
+    // Sidereal rotation in seconds, written as the published hours times
+    // 3600 so the published figure is the thing a reader checks and nobody
+    // has to redo the multiplication by hand. Nothing in the thermal
+    // model reads it - ADR-0008 settles that a planet spinning underneath
+    // its own shadow does not move the shadow - but Ground drift and the
+    // synchronous height cannot be stated without it, and reading Earth's
+    // day out of a constant under a Jovian sky is the same mistake the
+    // hardcoded radius was before this catalogue existed. Retrograde spin
+    // needs no sign: the tilt fold below already flips the pole, which is
+    // the same change of handedness, so this is the magnitude.
+    double siderealRotationS;
 };
 
 // Published obliquity is the angle between the spin axis and the orbit
@@ -48,8 +71,9 @@ constexpr double foldAxialTiltDegrees(double obliquityDeg) noexcept {
 }
 
 // The eight planets, Sun outward. Each tilt is written as the published
-// obliquity passed through the fold, so the published number is the only
-// thing a reader has to check and nobody has to redo the subtraction by
+// obliquity passed through the fold, and each day as the published hours
+// through the seconds conversion, so the published numbers are the only
+// thing a reader has to check and nobody has to redo the arithmetic by
 // hand - which matters, because 180 - 177.4 is not the same double as
 // 2.6 and a hand-folded table would not match itself on reload.
 // Earth is also what every Orbit field defaults to, so the default sky is
@@ -57,32 +81,41 @@ constexpr double foldAxialTiltDegrees(double obliquityDeg) noexcept {
 inline constexpr std::array<WorldPreset, 8> kWorldPresets{{
     // 0.387 AU, obliquity 0.034 deg - effectively none, but the real
     // number rather than a rounded one.
-    {"Mercury", 9086.0, 0.088, foldAxialTiltDegrees(0.034), 2439700.0},
+    {"Mercury", 9086.0, 0.088, foldAxialTiltDegrees(0.034), 2439700.0, 3.3011e23,
+     1407.6 * 3600.0},
     // 0.723 AU, obliquity 177.4 deg: retrograde, nearly upright, folding
-    // to a 2.6 deg solstice latitude.
-    {"Venus", 2602.0, 0.760, foldAxialTiltDegrees(177.4), 6051800.0},
+    // to a 2.6 deg solstice latitude. Its day is 243 of ours, which puts
+    // its synchronous height over a million kilometres out - a long way
+    // above the 5,449 s it takes to circle the planet at 400 km.
+    {"Venus", 2602.0, 0.760, foldAxialTiltDegrees(177.4), 6051800.0, 4.8675e24,
+     5832.5 * 3600.0},
     // 1.000 AU, obliquity 23.4 deg.
-    {"Earth", 1361.0, 0.306, foldAxialTiltDegrees(23.4), 6371000.0},
+    {"Earth", 1361.0, 0.306, foldAxialTiltDegrees(23.4), 6371000.0, 5.9724e24, 86164.0},
     // 1.524 AU, obliquity 25.2 deg.
-    {"Mars", 586.0, 0.250, foldAxialTiltDegrees(25.2), 3389500.0},
+    {"Mars", 586.0, 0.250, foldAxialTiltDegrees(25.2), 3389500.0, 6.4171e23,
+     24.6229 * 3600.0},
     // 5.204 AU, obliquity 3.1 deg. The albedo is the 2018 Cassini
     // revision, which returned about a third more light to space than the
     // figure it replaced and left Jupiter cooler than the old number did.
-    {"Jupiter", 50.3, 0.503, foldAxialTiltDegrees(3.1), 69911000.0},
+    {"Jupiter", 50.3, 0.503, foldAxialTiltDegrees(3.1), 69911000.0, 1.8982e27,
+     9.9250 * 3600.0},
     // 9.572 AU, obliquity 26.7 deg.
-    {"Saturn", 14.9, 0.342, foldAxialTiltDegrees(26.7), 58232000.0},
+    {"Saturn", 14.9, 0.342, foldAxialTiltDegrees(26.7), 58232000.0, 5.6834e26,
+     10.5560 * 3600.0},
     // 19.16 AU, obliquity 97.8 deg: tipped onto its side, folding to
     // 82.2 deg - a star that spends solstice almost over the pole.
-    {"Uranus", 3.7, 0.300, foldAxialTiltDegrees(97.8), 25362000.0},
+    {"Uranus", 3.7, 0.300, foldAxialTiltDegrees(97.8), 25362000.0, 8.6813e25,
+     17.24 * 3600.0},
     // 30.18 AU, obliquity 28.3 deg.
-    {"Neptune", 1.5, 0.290, foldAxialTiltDegrees(28.3), 24622000.0},
+    {"Neptune", 1.5, 0.290, foldAxialTiltDegrees(28.3), 24622000.0, 1.02413e26,
+     16.11 * 3600.0},
 }};
 
 // Returned when no listed world matches.
 inline constexpr std::size_t kNoWorldPreset = static_cast<std::size_t>(-1);
 
 // Which listed world an Orbit's authored fields describe, or
-// kNoWorldPreset. The comparison is exact on all four: a preset applied
+// kNoWorldPreset. The comparison is exact on all six: a preset applied
 // whole matches itself exactly, and the smallest hand edit moves the
 // record to Custom. That is the honest reading - a nudged albedo is not
 // Jupiter any more - and it declines to invent a tolerance that would have
@@ -90,15 +123,17 @@ inline constexpr std::size_t kNoWorldPreset = static_cast<std::size_t>(-1);
 std::size_t worldPresetMatching(const Installation::Orbit&);
 
 // Move an Orbit onto a listed world. The world fields are set from the
-// preset and the ride is left alone: the Orbital period and the phase
-// offset stay exactly as authored, because which world you are about does
-// not decide how fast you travel around it or where in the cycle you
-// open. Throws std::out_of_range for an index past the catalogue.
+// preset and the ride is left alone: the height above the surface and the
+// phase offset stay exactly as authored, because which world you are about
+// does not decide how high above it you fly or where in the cycle you open.
+// The Orbital period is not left alone because it is not left anywhere - it
+// is derived, so moving to a heavier world moves the period with it. That
+// is the ride following the world rather than the author having to go and
+// retune it, which is the whole reason the period stopped being authored.
 //
-// One thing has to follow. A Hull cannot be inside the world it orbits, so
-// if the new world would swallow the current orbit the radius moves out
-// with the ground and keeps the altitude above the surface that the author
-// already had. Refusing instead would leave them unpicking a radius by
-// hand to arrive back at the number they started from.
+// Nothing has to follow for the geometry. Because the height is measured
+// from the surface, a wider world cannot swallow an orbit the way a wider
+// radius-from-centre could: the ground comes up to meet the Installation
+// and the height it was told about is still the height it has.
 Installation::Orbit applyWorldPreset(const Installation::Orbit&, std::size_t index);
 } // namespace nsi::core

@@ -16,10 +16,12 @@ using nsi::systems::StellarExposureEvaluator;
 namespace {
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 constexpr double kPi = 3.14159265358979323846;
-// The documented default ride: Earth, 420 km up, noon to open.
+// The documented default ride: Earth, 420 km up, noon to open. The
+// Orbital period is derived from the world's mass and this height rather
+// than authored, so the tests read it back off the record instead of
+// carrying a constant that could fall out of step with the derivation.
 constexpr double kEarthRadiusM = 6371000.0;
 constexpr double kDefaultOrbitM = 6791000.0;
-constexpr double kDefaultPeriodS = 5570.0;
 
 void require(bool ok, const char* why) { if (!ok) throw std::runtime_error(why); }
 bool near(double value, double expected, double tolerance) {
@@ -39,8 +41,7 @@ OrbitDiagramLayout place(double planetRadiusM, double orbitRadiusM, double angle
 
 O defaultOrbit() {
     O orbit;
-    orbit.orbitalPeriodS = kDefaultPeriodS;
-    orbit.radiusFromPlanetCentreM = kDefaultOrbitM;
+    orbit.heightAboveGroundM = kDefaultOrbitM - kEarthRadiusM;
     orbit.planetRadiusM = kEarthRadiusM;
     return orbit;
 }
@@ -135,9 +136,10 @@ void theDotStaysInsideTheFrame() {
 void theAngleIsTheEvaluatorsOwnSweep() {
     O orbit = defaultOrbit();
     const StellarExposureEvaluator evaluator{orbit};
+    const double periodS = orbit.orbitalPeriodSeconds();
     for (int step = 0; step <= 20; ++step) {
         const double turns = step / 20.0;
-        const double elapsed = turns * kDefaultPeriodS;
+        const double elapsed = turns * periodS;
         const double angle = orbitAngleRadians(evaluator.evaluate(elapsed));
         require(sameDirection(angle, turns * 2.0 * kPi, 1e-9),
               "the read-back angle is not the evaluator's own phase");
@@ -152,9 +154,10 @@ void theTiltMovesTheShadowNotTheRide() {
     for (double tilt : {0.0, 12.5, 45.0, 89.0}) {
         O orbit = defaultOrbit();
         orbit.axialTiltDeg = tilt;
+        const double periodS = orbit.orbitalPeriodSeconds();
         const StellarExposureEvaluator evaluator{orbit};
         for (int step = 0; step <= 8; ++step) {
-            const double elapsed = step * kDefaultPeriodS / 8.0;
+            const double elapsed = step * periodS / 8.0;
             const double untilted =
                 orbitAngleRadians(StellarExposureEvaluator{defaultOrbit()}.evaluate(elapsed));
             require(sameDirection(orbitAngleRadians(evaluator.evaluate(elapsed)), untilted, 1e-9),

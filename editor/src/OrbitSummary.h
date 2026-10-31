@@ -17,33 +17,42 @@ namespace station::editor {
 //
 // A derived field that has no sky behind it reads NaN rather than zero:
 // an unavailable eclipse duration must not look like a sunlit orbit, and
-// an unavailable drift must not look like Geostationary.
+// an unavailable drift must not look like a hover.
 struct OrbitSummary {
     // An Orbit is authored and makes a sky the model can read.
     bool authored{};
     // A hand-authored solar profile owns the whole stellar term, so the
     // orbital sky is suppressed and nothing derived from it is live.
     bool overridden{};
-    // Orbital period equals the planet's sidereal rotation. A displayed
-    // condition only - it gates nothing.
-    bool geostationary{};
     // The authored inputs, exactly as the document holds them.
     double stellarIrradianceWPerM2{};
-    double orbitalPeriodS{};
-    double radiusFromPlanetCentreM{};
     double axialTiltDeg{};
     double phaseOffsetPercent{};
     double albedo{};
-    // The world being orbited. Defaults to the one constant this model
-    // carried before the radius was authored, so a summary built from a
-    // record that never set it still reads as Earth rather than zero.
+    // The world being orbited. Defaults to the constants this model
+    // carried before the world was authored, so a summary built from a
+    // record that never set them still reads as Earth rather than zero.
     double planetRadiusM{nsi::core::PlanetRadiusM};
+    double planetMassKg{nsi::core::PlanetMassKg};
+    double siderealRotationS{nsi::core::PlanetSiderealRotationS};
+    // The authored ride: how high above the surface, and the period and
+    // radius that follow from that and the world's mass. The height is the
+    // typed number; the other two are what it means.
+    double heightAboveGroundM{};
+    double orbitalPeriodS{};
+    double orbitalRadiusM{};
     // Derived from the authored inputs. NaN when nothing can be derived,
     // which is the default so a summary that never reached a sky cannot
     // report a plausible zero.
     double eclipseDurationS{std::numeric_limits<double>::quiet_NaN()};
     double sunlitDurationS{std::numeric_limits<double>::quiet_NaN()};
     double groundDriftDegPerDay{std::numeric_limits<double>::quiet_NaN()};
+    // The height at which the Installation would hold over one spot on
+    // the surface. Shown beside the height field rather than flagged as a
+    // condition: the author can see for themselves whether the number
+    // they typed is this one, which says more than a marker that only
+    // arrives if they land on it exactly.
+    double synchronousHeightM{std::numeric_limits<double>::quiet_NaN()};
     // The thermal model and preset this environment is being read against,
     // so a changed physical default reads as a model change rather than as
     // a data migration the author somehow caused.
@@ -71,13 +80,8 @@ OrbitSummary orbitSummary(const nsi::core::Installation&,
                          const nsi::systems::CellAtmosphereTransport* runtime = nullptr);
 
 // The summary as the panel's lines, built apart from any draw list so the
-// badge and the derived readouts are assertable without ImGui. The badge
-// line is present exactly when OrbitSummary::geostationary holds.
+// derived readouts are assertable without ImGui.
 std::vector<std::string> orbitSummaryLines(const OrbitSummary&);
-
-// The badge text, shared by the summary lines and anything else that wants
-// to say the same thing the same way.
-inline constexpr std::string_view kGeostationaryBadge = "Geostationary";
 
 void drawOrbitSummary(const nsi::core::Installation&,
                       const nsi::systems::CellAtmosphereTransport* runtime = nullptr);

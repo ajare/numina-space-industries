@@ -32,7 +32,12 @@ struct StellarExposure {
 // geometry, no solver and no Editor: it turns authored numbers and simulated
 // seconds into a sky. No other module may recompute these.
 //
-// See ADR-0008: the planet's rotation drives nothing, so it is not an input.
+// See ADR-0008: the planet's rotation drives nothing, so it is not an
+// input to anything thermal. The one exception is the author-facing Ground
+// drift readout, which cannot be stated without it. The Kepler derivation of
+// the Orbital period is the one formula that lives in core rather than here,
+// next to the world mass it is derived from; this evaluator takes that
+// period as given and owns everything that turns it into a sky.
 class StellarExposureEvaluator {
 public:
     // The axial tilt is authored on the Orbit record itself, in degrees:
@@ -89,12 +94,25 @@ public:
     double phaseOffsetSeconds() const noexcept {
         return dark_ ? kUnavailable : phaseOffsetPercent_ / 100.0 * periodSeconds_;
     }
-    // The authored Orbital period and orbital radius, as the record carried
-    // them. Unavailable with no sky, so a summary cannot print a period of
-    // zero for an Installation that has no orbit at all.
+    // The derived Orbital period and the orbital radius, both following from
+    // the authored world mass and the authored height. Unavailable with no
+    // sky, so a summary cannot print a period of zero for an Installation
+    // that has no orbit at all.
     double orbitalPeriodSeconds() const noexcept { return dark_ ? kUnavailable : periodSeconds_; }
     double radiusFromPlanetCentreMeters() const noexcept {
         return dark_ ? kUnavailable : radiusMeters_;
+    }
+    // The authored height above the world's surface, as distinct from the
+    // radius above its centre. This is the number the author typed.
+    double heightAboveGroundMeters() const noexcept {
+        return dark_ ? kUnavailable : radiusMeters_ - planetRadiusM_;
+    }
+    // The authored world's mass, and its own day length. Neither drives the
+    // thermal model; both are here so a readout can say what world the sky
+    // belongs to without going back to the record.
+    double planetMassKg() const noexcept { return dark_ ? kUnavailable : planetMassKg_; }
+    double siderealRotationSeconds() const noexcept {
+        return dark_ ? kUnavailable : siderealRotationS_;
     }
     // The authored world's radius. This is the radius of the shadow
     // cylinder, so it is the number that decides how much of the orbit
@@ -118,19 +136,15 @@ public:
     // Ground drift: the apparent motion of the Installation's sub-point
     // across the surface, degrees per day. The sub-point rides with the
     // Installation at 360 degrees per Orbital period while the ground turns
-    // beneath it at 360 degrees per sidereal rotation; the residue is what
-    // an author on the surface would watch. Positive means the Installation
-    // outruns the surface and its sub-point creeps east, negative means the
-    // surface outruns it. Exactly zero at Geostationary, which is the only
-    // reason to show it. This is a readout, not a thermal input: ADR-0008
-    // keeps the planet's rotation out of the exposure model entirely.
+    // beneath it at 360 degrees per the world's own sidereal rotation; the
+    // residue is what an author on the surface would watch. Positive means
+    // the Installation outruns the surface and its sub-point creeps east,
+    // negative means the surface outruns it. It reaches zero at the
+    // synchronous height, which the Orbit summary prints beside the height
+    // field rather than flagging with a condition of its own. This is a
+    // readout, not a thermal input: ADR-0008 keeps the planet's rotation
+    // out of the exposure model entirely.
     double groundDriftDegreesPerDay() const noexcept;
-
-    // The Geostationary condition: Orbital period equal to the planet's
-    // sidereal rotation. A displayed condition and never a mode - it gates
-    // nothing, changes nothing, and disappears the moment the two periods
-    // part.
-    bool geostationary() const noexcept;
 
     // elapsedSeconds is simulated time since Local noon, which is t = 0
     // while the authored phase offset is zero. A non-zero offset shifts the
@@ -209,6 +223,11 @@ private:
     double radiusMeters_{};
     // The authored world's radius, the Rp in every (Rp/r)^2 below.
     double planetRadiusM_{};
+    // The authored world's mass and day. The mass is what the period was
+    // derived from and the day what Ground drift is measured against; both
+    // are kept so a readout can name the world without the record.
+    double planetMassKg_{};
+    double siderealRotationS_{};
     double albedo_{};
     double axialTiltDeg_{};
     // The tilt in radians, which is what the sweep is actually built from.

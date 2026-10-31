@@ -394,16 +394,27 @@ void Installation::Orbit::validate() const {
     require(std::isfinite(stellarIrradianceWPerM2) && stellarIrradianceWPerM2 > 0.0
                 && stellarIrradianceWPerM2 <= MaxStellarIrradianceWPerM2,
             "Orbit Stellar irradiance must be finite and within (0, 1e100] W/m^2");
-    require(std::isfinite(orbitalPeriodS) && orbitalPeriodS > 0.0,
-            "Orbit Orbital period must be finite and positive");
     // The world is authored now, so the ground a Hull cannot be inside of
-    // is the authored one rather than a constant. Checked first: with a
-    // non-finite world radius the ordering test below would fail for the
-    // wrong reason and blame the orbit.
+    // is the authored one rather than a constant, and so is the mass that
+    // decides how long the ride takes.
     require(std::isfinite(planetRadiusM) && planetRadiusM > 0.0,
             "Orbit planet radius must be finite and positive");
-    require(std::isfinite(radiusFromPlanetCentreM) && radiusFromPlanetCentreM > planetRadiusM,
-            "Orbit radius must be finite and greater than the planet radius");
+    // A world with no mass has no gravity, and a period derived from one is
+    // not a period at all. Refused here rather than left to answer NaN
+    // downstream, where it would read as a broken readout instead of the
+    // broken world it actually is.
+    require(std::isfinite(planetMassKg) && planetMassKg > 0.0,
+            "Orbit planet mass must be finite and positive");
+    // A day of zero or negative length cannot be rotated against, so Ground
+    // drift and the synchronous height would have nothing to divide by.
+    require(std::isfinite(siderealRotationS) && siderealRotationS > 0.0,
+            "Orbit sidereal rotation must be finite and positive");
+    // The height is the ride, and a ride of zero is standing on the ground.
+    // This is the check that replaced "orbital radius must exceed the planet
+    // radius": the height is already measured from the surface, so zero is
+    // the boundary rather than some multiple of the radius.
+    require(std::isfinite(heightAboveGroundM) && heightAboveGroundM > 0.0,
+            "Orbit height above ground must be finite and positive");
     // A reflectivity is a fraction of the light that arrives, so the closed
     // interval is the whole legal range: 0 is a black world, 1 a perfect
     // mirror with no infrared left to emit.
@@ -416,8 +427,6 @@ void Installation::Orbit::validate() const {
     require(std::isfinite(axialTiltDeg) && axialTiltDeg > -MaxAxialTiltDegrees
                 && axialTiltDeg < MaxAxialTiltDegrees,
             "Orbit Axial tilt must be finite and within (-90, 90) degrees");
-    // The phase offset only ever shifts the cycle, so any finite number of
-    // seconds is meaningful: the evaluator folds it. Non-finite is not.
     // The phase offset is only a position on the cycle, so any finite
     // percentage is meaningful: the evaluator folds it. Non-finite is not.
     require(std::isfinite(phaseOffsetPercent), "Orbit phase offset must be finite");
@@ -489,7 +498,7 @@ double Installation::sideExteriorAreaM2(std::size_t l, std::size_t sector) const
 
 std::string Installation::serialize() const {
     validate();
-    YAML::Node root; root["version"]=4; root["name"]=name_;
+    YAML::Node root; root["version"]=5; root["name"]=name_;
     const char* hull = "none";
     if (hullType_) switch (*hullType_) {
     case HullType::BareSkin: hull = "BareSkin"; break;
@@ -504,8 +513,6 @@ std::string Installation::serialize() const {
     case PartitionType::InsulatedPartition: partition = "InsulatedPartition"; break;
     }
     root["partition"] = partition;
-    // Default enabled is omitted so feature-absent documents do not churn.
-    if (!solarArrayEnabled_) root["solarArrayEnabled"] = false;
     if (solarArray_) {
         root["solarArray"]["areaM2"] = solarArray_->areaM2;
         constexpr const char* names[]{"TripleJunctionGaAs", "SingleJunctionGaAs", "SpaceSilicon"};
@@ -518,12 +525,13 @@ std::string Installation::serialize() const {
     if (orbit_) {
         YAML::Node o;
         o["stellarIrradianceWPerM2"] = orbit_->stellarIrradianceWPerM2;
-        o["orbitalPeriodS"] = orbit_->orbitalPeriodS;
-        o["radiusFromPlanetCentreM"] = orbit_->radiusFromPlanetCentreM;
         o["albedo"] = orbit_->albedo;
         o["axialTiltDeg"] = orbit_->axialTiltDeg;
-        o["phaseOffsetPercent"] = orbit_->phaseOffsetPercent;
         o["planetRadiusM"] = orbit_->planetRadiusM;
+        o["planetMassKg"] = orbit_->planetMassKg;
+        o["siderealRotationS"] = orbit_->siderealRotationS;
+        o["heightAboveGroundM"] = orbit_->heightAboveGroundM;
+        o["phaseOffsetPercent"] = orbit_->phaseOffsetPercent;
         root["orbit"] = o;
     }
     root["levels"]=YAML::Node(YAML::NodeType::Sequence);
@@ -579,9 +587,9 @@ void Installation::deserialize(const std::string& text) {
         auto documents=YAML::LoadAll(text); require(documents.size()==1,"Expected one YAML document");
         auto root=documents.front(); mapNode(root,"Installation");
         const int version = root["version"].as<int>();
-        require(version == 3 || version == 4,"Unsupported Installation format");
+        require(version == 3 || version == 4 || version == 5,"Unsupported Installation format");
         std::optional<HullType> hull;
-        if (version == 4 && root["hull"]) {
+        if (version >= 4 && root["hull"]) {
             const auto value = root["hull"].as<std::string>();
             if (value == "BareSkin") hull = HullType::BareSkin;
             else if (value == "StandardInsulated") hull = HullType::StandardInsulated;
@@ -603,7 +611,7 @@ void Installation::deserialize(const std::string& text) {
                     "startDate must be an ISO date of the form YYYY-MM-DD");
             startDate = *parsed;
         }
-        if (version == 4 && root["partition"]) {
+        if (version >= 4 && root["partition"]) {
             const auto value = root["partition"].as<std::string>();
             if (value == "BarePartition") partition = PartitionType::BarePartition;
             else if (value == "ThermalBreak") partition = PartitionType::ThermalBreak;
@@ -622,9 +630,23 @@ void Installation::deserialize(const std::string& text) {
             };
             Orbit o;
             o.stellarIrradianceWPerM2 = number(on, "stellarIrradianceWPerM2");
-            o.orbitalPeriodS = number(on, "orbitalPeriodS");
-            o.radiusFromPlanetCentreM = number(on, "radiusFromPlanetCentreM");
             o.albedo = number(on, "albedo");
+            // The Orbital period and the radius from the planet's centre used
+            // to be authored here. Both are derived now, from the world's
+            // mass and this height, so a document still carrying either is
+            // describing a ride the model can neither honour nor reproduce.
+            // Refused rather than reinterpreted, exactly as betaAngleRad and
+            // phaseOffsetS were before them: reading a stale number as the
+            // new one would move the sky away from where the author left it.
+            require(!on["orbitalPeriodS"],
+                    "Orbit orbitalPeriodS is no longer supported: the Orbital period is derived "
+                    "from planetMassKg and heightAboveGroundM");
+            require(!on["radiusFromPlanetCentreM"],
+                    "Orbit radiusFromPlanetCentreM is no longer supported: author "
+                    "heightAboveGroundM above the planet's surface");
+            o.heightAboveGroundM = number(on, "heightAboveGroundM");
+            o.planetMassKg = number(on, "planetMassKg");
+            o.siderealRotationS = number(on, "siderealRotationS");
             // The tilt and the phase offset were added to a record that
             // already existed, so an authored Orbit written before them is
             // not a partial record: absent means the documented default,
@@ -735,6 +757,10 @@ void Installation::deserialize(const std::string& text) {
         next.partitionType_ = partition;
         next.orbit_ = orbit; // Never apply creation-time defaults when loading.
         next.startDateUtcS_ = startDate;
+        // A document saved while the array carried its own enable switch
+        // still loads: a leftover solarArrayEnabled is ignored rather than
+        // refused, because an authored array is live whatever that field
+        // said. The area and technology the author chose carry over.
         if (const auto a = root["solarArray"]) {
             SolarArray array;
             array.areaM2 = a["areaM2"].as<double>();
@@ -744,8 +770,6 @@ void Installation::deserialize(const std::string& text) {
             else require(technology == "TripleJunctionGaAs", "Unknown solar cell technology");
             next.setSolarArray(array);
         }
-        next.solarArrayEnabled_ = root["solarArrayEnabled"]
-            ? root["solarArrayEnabled"].as<bool>() : true;
         *this=std::move(next);
     } catch (const std::exception& e) { throw serialization::SerializationException(e.what()); }
 }

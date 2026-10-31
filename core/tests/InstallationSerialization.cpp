@@ -200,7 +200,7 @@ void hullPersistence() {
         const auto spec=I::hullSpec(type);
         check(spec.transmittanceWPerM2K>0 && spec.emissivity>0 && spec.absorptivity>0,
               "Positive calibrated Hull properties");
-        check(YAML::Load(i.serialize())["version"].as<int>()==4,"Writer emits v4");
+        check(YAML::Load(i.serialize())["version"].as<int>()==5,"Writer emits v5");
     }
     I i(1,1); i.setHullType(std::nullopt); roundTrip(i);
     check(YAML::Load(i.serialize())["hull"].as<std::string>()=="none","Explicit no hull");
@@ -260,14 +260,18 @@ void persistence() {
 }
 void orbitPersistence() {
     using O=I::Orbit;
-    // A new Installation authors the ISS-like sky its fields already carry,
-    // following the MultiLayerBlanket new-Installation default: full Sun at
-    // Earth, a 92.8 minute inertial period at ISS altitude, an Earth-like
-    // Albedo and a coplanar star at Local noon.
-    const O iss{1361.0,5570.0,6791000.0,0.3,0.0,0.0};
-    check(I(1,1).orbit()==iss,"New Installation must author the ISS-like default orbit");
+    auto close=[](double a,double b,double tol){return std::abs(a-b)<=tol;};
+    // A new Installation authors the sky its fields already carry,
+    // following the MultiLayerBlanket new-Installation default: full Sun
+    // at Earth, 420 km above the surface, an Earth-like Albedo and a
+    // coplanar star at Local noon. The Orbital period is not one of the
+    // authored numbers - it follows from the world's mass and this height -
+    // so the default record describes a 5,569 s ride without storing one.
+    const O iss;
+    check(I(1,1).orbit()==iss,"New Installation must author the default Earth orbit");
     check(I(1,1).orbit()->axialTiltDeg==0.0,"Default orbit must start coplanar");
     check(I(1,1).orbit()->phaseOffsetPercent==0.0,"Default orbit must open at Local noon");
+    check(I(1,1).orbit()->heightAboveGroundM==420000.0,"Default orbit must be a low one");
     // Absent still means no orbit, never a substituted default: the author
     // who clears the orbit gets the old dark sky back unchanged.
     I dark(1,1); dark.setOrbit(std::nullopt);
@@ -279,33 +283,53 @@ void orbitPersistence() {
     roundTrip(i);
     const auto node=YAML::Load(i.serialize());
     check(node["orbit"]["stellarIrradianceWPerM2"].as<double>()==1361.0,"Irradiance persisted");
-    check(node["orbit"]["orbitalPeriodS"].as<double>()==5570.0,"Orbital period persisted");
-    check(node["orbit"]["radiusFromPlanetCentreM"].as<double>()==6791000.0,"Orbital radius persisted");
     check(node["orbit"]["albedo"].as<double>()==0.3,"Albedo persisted");
-    // A geostationary author is just another set of numbers, not a mode.
-    I geo(1,1); geo.setOrbit(O{1361.0,86164.0,42164000.0}); roundTrip(geo);
+    check(node["orbit"]["heightAboveGroundM"].as<double>()==420000.0,
+          "Height above ground persisted");
+    check(node["orbit"]["planetMassKg"].as<double>()==5.9724e24,"World mass persisted");
+    check(node["orbit"]["siderealRotationS"].as<double>()==86164.0,"World day persisted");
+    // The Orbital period is derived, so writing it out would be writing a
+    // second number for one fact - and the whole point of the change is
+    // that there is no second number left to keep in step.
+    check(!node["orbit"]["orbitalPeriodS"].IsDefined(),
+          "The derived Orbital period must not be written to the record");
+    // A synchronous ride is just another set of numbers, not a mode. It
+    // persists like anything else, and what makes it synchronous is that
+    // the derived period comes back as the world's own day.
+    O hovering;
+    hovering.heightAboveGroundM=hovering.synchronousHeightM();
+    I geo(1,1); geo.setOrbit(hovering); roundTrip(geo);
+    check(close(geo.orbit()->orbitalPeriodSeconds(),86164.0,1e-6),
+          "A record restored at the synchronous height must derive the world's day");
     // Albedo is authored, so a non-default one survives the round trip.
-    I icy(1,1); icy.setOrbit(O{1361.0,5570.0,6791000.0,0.81}); roundTrip(icy);
-    check(YAML::Load(icy.serialize())["orbit"]["albedo"].as<double>()==0.81,"Non-default Albedo persisted");
+    O icy; icy.albedo=0.81;
+    I icyStation(1,1); icyStation.setOrbit(icy); roundTrip(icyStation);
+    check(YAML::Load(icyStation.serialize())["orbit"]["albedo"].as<double>()==0.81,
+         "Non-default Albedo persisted");
     // Both endpoints of the closed interval are legal and survive.
-    I black(1,1); black.setOrbit(O{1361.0,5570.0,6791000.0,0.0}); roundTrip(black);
-    I mirror(1,1); mirror.setOrbit(O{1361.0,5570.0,6791000.0,1.0}); roundTrip(mirror);
+    O black; black.albedo=0.0;
+    O mirror; mirror.albedo=1.0;
+    I blackStation(1,1); blackStation.setOrbit(black); roundTrip(blackStation);
+    I mirrorStation(1,1); mirrorStation.setOrbit(mirror); roundTrip(mirrorStation);
     // The axial tilt and the phase offset default to no tilt - the star
     // over the equator - and Local noon at t = 0, and a non-default pair
     // survives the round trip intact.
     check(O{}.axialTiltDeg==0.0 && O{}.phaseOffsetPercent==0.0,
           "Axial tilt and phase offset must default to none and unshifted");
-    I tilted(1,1); tilted.setOrbit(O{1361.0,5570.0,6791000.0,0.3,23.44,22.5}); roundTrip(tilted);
-    const auto tiltedNode=YAML::Load(tilted.serialize());
-    check(tiltedNode["orbit"]["axialTiltDeg"].as<double>()==23.44,"Axial tilt persisted in degrees");
-    check(tiltedNode["orbit"]["phaseOffsetPercent"].as<double>()==22.5,"Phase offset persisted as a percentage");
+    O tilted; tilted.axialTiltDeg=23.44; tilted.phaseOffsetPercent=22.5;
+    I tiltedStation(1,1); tiltedStation.setOrbit(tilted); roundTrip(tiltedStation);
+    const auto tiltedNode=YAML::Load(tiltedStation.serialize());
+    check(tiltedNode["orbit"]["axialTiltDeg"].as<double>()==23.44,
+          "Axial tilt persisted in degrees");
+    check(tiltedNode["orbit"]["phaseOffsetPercent"].as<double>()==22.5,
+          "Phase offset persisted as a percentage");
     // A negative tilt and a negative offset are both legal: they lean the
     // world and shift the clock the other way, not into a different model.
-    I mirrored(1,1); mirrored.setOrbit(O{1361.0,5570.0,6791000.0,0.3,-23.44,-22.5});
-    roundTrip(mirrored);
-    check(YAML::Load(mirrored.serialize())["orbit"]["axialTiltDeg"].as<double>()==-23.44,
+    O mirrored; mirrored.axialTiltDeg=-23.44; mirrored.phaseOffsetPercent=-22.5;
+    I mirroredStation(1,1); mirroredStation.setOrbit(mirrored); roundTrip(mirroredStation);
+    check(YAML::Load(mirroredStation.serialize())["orbit"]["axialTiltDeg"].as<double>()==-23.44,
           "Negative axial tilt persisted");
-    check(YAML::Load(mirrored.serialize())["orbit"]["phaseOffsetPercent"].as<double>()==-22.5,
+    check(YAML::Load(mirroredStation.serialize())["orbit"]["phaseOffsetPercent"].as<double>()==-22.5,
           "Negative phase offset persisted");
     // Zero is a value, not an absence: an authored zero tilt - the
     // worst-case eclipse - is written out rather than skipped.
@@ -313,14 +337,26 @@ void orbitPersistence() {
               && YAML::Load(i.serialize())["orbit"]["axialTiltDeg"].IsScalar()
               && YAML::Load(i.serialize())["orbit"]["phaseOffsetPercent"].IsScalar(),
           "Default axial tilt and phase offset must still be written");
-    // The world radius persists, and a non-Earth world survives a save
-    // whole: a Jovian sky stays a Jovian sky rather than quietly falling
-    // back to a ground it was never orbiting.
-    I jovian(1,1);
-    jovian.setOrbit(O{50.3,5570.0,70331000.0,0.503,3.1,0.0,69911000.0});
-    roundTrip(jovian);
-    check(YAML::Load(jovian.serialize())["orbit"]["planetRadiusM"].as<double>()==69911000.0,
+    // A non-Earth world survives a save whole: a Jovian sky stays a Jovian
+    // sky rather than quietly falling back to a ground it was never
+    // orbiting. Both the radius and the mass have to make the trip, because
+    // the ride is derived from the mass and a radius-only save would put
+    // the station at the wrong speed around the right planet.
+    O jovian;
+    jovian.stellarIrradianceWPerM2=50.3;
+    jovian.albedo=0.503;
+    jovian.axialTiltDeg=3.1;
+    jovian.planetRadiusM=69911000.0;
+    jovian.planetMassKg=1.8982e27;
+    jovian.siderealRotationS=9.9250*3600.0;
+    I jovianStation(1,1); jovianStation.setOrbit(jovian); roundTrip(jovianStation);
+    const auto jovianNode=YAML::Load(jovianStation.serialize());
+    check(jovianNode["orbit"]["planetRadiusM"].as<double>()==69911000.0,
           "World radius persisted");
+    check(jovianNode["orbit"]["planetMassKg"].as<double>()==1.8982e27,
+          "World mass persisted");
+    check(jovianNode["orbit"]["siderealRotationS"].as<double>()==9.9250*3600.0,
+          "World day persisted");
     check(YAML::Load(i.serialize())["orbit"]["planetRadiusM"].IsScalar(),
           "Default world radius must still be written");
     // Absent key loads as no orbit rather than a substituted default.
@@ -328,34 +364,56 @@ void orbitPersistence() {
     YAML::Emitter bareOut; bareOut<<bare;
     I loaded; loaded.deserialize(bareOut.c_str());
     check(!loaded.orbit(),"Absent orbit key never applies a default");
-    // setOrbit refuses what the loader must refuse.
+    // setOrbit refuses what the loader must refuse. Each case is built off
+    // the defaults through the one field it breaks, so a change to the
+    // field order shows up as a changed test rather than as a silently
+    // different world.
     const double nan=std::numeric_limits<double>::quiet_NaN();
     const double inf=std::numeric_limits<double>::infinity();
-    const std::array<O,23> invalid{
-        O{std::nextafter(O::MaxStellarIrradianceWPerM2, inf),5570.0,6791000.0},
-        O{1e305,5570.0,6791000.0},O{std::numeric_limits<double>::max(),5570.0,6791000.0},
-        O{nan,5570.0,6791000.0},O{inf,5570.0,6791000.0},
-        O{0.0,5570.0,6791000.0},O{-1361.0,5570.0,6791000.0},
-        O{1361.0,0.0,6791000.0},O{1361.0,-5570.0,6791000.0},
-        O{1361.0,5570.0,nsi::core::PlanetRadiusM},
-        O{1361.0,5570.0,1000.0},
+    auto broken=[](auto tweak){ O o; tweak(o); return o; };
+    const std::array<O,29> invalid{
+        // Irradiance is supported over (0, 1e100] and nothing beyond.
+        broken([&](O& o){o.stellarIrradianceWPerM2=std::nextafter(O::MaxStellarIrradianceWPerM2, inf);}),
+        broken([&](O& o){o.stellarIrradianceWPerM2=1e305;}),
+        broken([&](O& o){o.stellarIrradianceWPerM2=std::numeric_limits<double>::max();}),
+        broken([&](O& o){o.stellarIrradianceWPerM2=nan;}),
+        broken([&](O& o){o.stellarIrradianceWPerM2=inf;}),
+        broken([&](O& o){o.stellarIrradianceWPerM2=0.0;}),
+        broken([&](O& o){o.stellarIrradianceWPerM2=-1361.0;}),
+        // The height is the ride, and a ride of zero is standing on the
+        // ground rather than orbiting it.
+        broken([&](O& o){o.heightAboveGroundM=0.0;}),
+        broken([&](O& o){o.heightAboveGroundM=-1.0;}),
+        broken([&](O& o){o.heightAboveGroundM=nan;}),
+        broken([&](O& o){o.heightAboveGroundM=inf;}),
+        // A world with no mass has no gravity, so there is no period to
+        // derive and no synchronous height to show.
+        broken([&](O& o){o.planetMassKg=0.0;}),
+        broken([&](O& o){o.planetMassKg=-1.0;}),
+        broken([&](O& o){o.planetMassKg=nan;}),
+        // A day of zero or negative length cannot be rotated against.
+        broken([&](O& o){o.siderealRotationS=0.0;}),
+        broken([&](O& o){o.siderealRotationS=-1.0;}),
+        broken([&](O& o){o.siderealRotationS=nan;}),
         // Albedo is a fraction of the light that arrives: the closed
         // interval [0, 1] is the whole legal range.
-        O{1361.0,5570.0,6791000.0,-0.1},O{1361.0,5570.0,6791000.0,1.1},
-        O{1361.0,5570.0,6791000.0,nan},O{1361.0,5570.0,6791000.0,inf},
+        broken([&](O& o){o.albedo=-0.1;}),
+        broken([&](O& o){o.albedo=1.1;}),
+        broken([&](O& o){o.albedo=nan;}),
+        broken([&](O& o){o.albedo=inf;}),
         // The axial tilt is an angle, so the open interval (-90, 90)
         // degrees is the whole legal range. The pole itself leaves no
         // in-plane sweep to make.
-        O{1361.0,5570.0,6791000.0,0.3,90.0},
-        O{1361.0,5570.0,6791000.0,0.3,-90.0},
-        O{1361.0,5570.0,6791000.0,0.3,90.5},
-        O{1361.0,5570.0,6791000.0,0.3,180.0},
-        O{1361.0,5570.0,6791000.0,0.3,nan},
-        O{1361.0,5570.0,6791000.0,0.3,inf},
+        broken([&](O& o){o.axialTiltDeg=90.0;}),
+        broken([&](O& o){o.axialTiltDeg=-90.0;}),
+        broken([&](O& o){o.axialTiltDeg=90.5;}),
+        broken([&](O& o){o.axialTiltDeg=180.0;}),
+        broken([&](O& o){o.axialTiltDeg=nan;}),
+        broken([&](O& o){o.axialTiltDeg=inf;}),
         // The phase offset only shifts the cycle, so any finite value is
         // legal - but not a non-finite one.
-        O{1361.0,5570.0,6791000.0,0.3,0.0,nan},
-        O{1361.0,5570.0,6791000.0,0.3,0.0,inf}};
+        broken([&](O& o){o.phaseOffsetPercent=nan;}),
+        broken([&](O& o){o.phaseOffsetPercent=inf;})};
     for (const auto& orbit:invalid) refused([&]{ i.setOrbit(orbit); });
     check(i.orbit()==iss,"Rejected setOrbit left the authored orbit intact");
     auto badOrbit=[&](auto change) {
@@ -379,13 +437,18 @@ void orbitPersistence() {
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::max();});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=0.0;});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=-1.0;});
-    badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]=0.0;});
-    badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]=-5570.0;});
-    badOrbit([](auto n){n["orbit"]["radiusFromPlanetCentreM"]=nsi::core::PlanetRadiusM;});
-    badOrbit([](auto n){n["orbit"]["radiusFromPlanetCentreM"]=1000.0;});
+    badOrbit([](auto n){n["orbit"]["heightAboveGroundM"]=0.0;});
+    badOrbit([](auto n){n["orbit"]["heightAboveGroundM"]=-420000.0;});
+    badOrbit([](auto n){n["orbit"]["heightAboveGroundM"]=std::numeric_limits<double>::quiet_NaN();});
+    badOrbit([](auto n){n["orbit"]["heightAboveGroundM"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["planetMassKg"]=0.0;});
+    badOrbit([](auto n){n["orbit"]["planetMassKg"]=-5.9724e24;});
+    badOrbit([](auto n){n["orbit"]["siderealRotationS"]=0.0;});
+    badOrbit([](auto n){n["orbit"]["siderealRotationS"]=-86164.0;});
     badOrbit([](auto n){n["orbit"].remove("stellarIrradianceWPerM2");});
-    badOrbit([](auto n){n["orbit"].remove("orbitalPeriodS");});
-    badOrbit([](auto n){n["orbit"].remove("radiusFromPlanetCentreM");});
+    badOrbit([](auto n){n["orbit"].remove("heightAboveGroundM");});
+    badOrbit([](auto n){n["orbit"].remove("planetMassKg");});
+    badOrbit([](auto n){n["orbit"].remove("siderealRotationS");});
     badOrbit([](auto n){n["orbit"].remove("albedo");});
     badOrbit([](auto n){n["orbit"]["albedo"]=-0.001;});
     badOrbit([](auto n){n["orbit"]["albedo"]=1.001;});
@@ -393,7 +456,7 @@ void orbitPersistence() {
     badOrbit([](auto n){n["orbit"]["albedo"]=std::numeric_limits<double>::infinity();});
     badOrbit([](auto n){n["orbit"]["albedo"]="icy";});
     badOrbit([](auto n){n["orbit"]="ISS";});
-    badOrbit([](auto n){n["orbit"]["orbitalPeriodS"]="92 minutes";});
+    badOrbit([](auto n){n["orbit"]["heightAboveGroundM"]="420 kilometres";});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::infinity();});
     badOrbit([](auto n){n["orbit"]["stellarIrradianceWPerM2"]=std::numeric_limits<double>::quiet_NaN();});
     // The axial tilt and the phase offset are validated on the way in
@@ -406,17 +469,23 @@ void orbitPersistence() {
     badOrbit([](auto n){n["orbit"]["phaseOffsetPercent"]=std::numeric_limits<double>::quiet_NaN();});
     badOrbit([](auto n){n["orbit"]["phaseOffsetPercent"]=std::numeric_limits<double>::infinity();});
     badOrbit([](auto n){n["orbit"]["phaseOffsetPercent"]="half an orbit";});
-    // The world radius is validated like every other number, and the orbit
-    // cannot sit at or below the authored ground: a Hull buried inside its
-    // own planet has no sky, and no eclipse geometry worth the name.
+    // The world radius is validated like every other number.
     badOrbit([](auto n){n["orbit"]["planetRadiusM"]=0.0;});
     badOrbit([](auto n){n["orbit"]["planetRadiusM"]=-6371000.0;});
     badOrbit([](auto n){n["orbit"]["planetRadiusM"]=std::numeric_limits<double>::quiet_NaN();});
     badOrbit([](auto n){n["orbit"]["planetRadiusM"]=std::numeric_limits<double>::infinity();});
     badOrbit([](auto n){n["orbit"]["planetRadiusM"]="the Earth";});
-    badOrbit([](auto n){n["orbit"]["planetRadiusM"]
-                            =n["orbit"]["radiusFromPlanetCentreM"].template as<double>();});
-    badOrbit([](auto n){n["orbit"]["planetRadiusM"]=1.0e12;});
+    // The world mass and the day are validated the same way, and a
+    // hand-written value that is not a number is refused rather than
+    // defaulted - the derived period depends on both, so a silently
+    // substituted Earth under a hand-authored sky is the exact thing
+    // this record exists to prevent.
+    badOrbit([](auto n){n["orbit"]["planetMassKg"]=std::numeric_limits<double>::quiet_NaN();});
+    badOrbit([](auto n){n["orbit"]["planetMassKg"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["planetMassKg"]="a Jupiter";});
+    badOrbit([](auto n){n["orbit"]["siderealRotationS"]=std::numeric_limits<double>::quiet_NaN();});
+    badOrbit([](auto n){n["orbit"]["siderealRotationS"]=std::numeric_limits<double>::infinity();});
+    badOrbit([](auto n){n["orbit"]["siderealRotationS"]="a day";});
     // A document authored before the tilt and the phase offset existed is
     // not a partial record: absent means the documented default, which is
     // the very behaviour that was current when it was written.
@@ -466,6 +535,30 @@ void orbitPersistence() {
         try { I target; target.deserialize(out.c_str()); }
         catch (const std::exception&) { refused=true; }
         check(refused,"A stale phaseOffsetS key must be refused, not read as a percentage");
+    }
+    // The Orbital period and the radius from the planet's centre used to be
+    // authored here and are derived now. A document still carrying either
+    // describes a ride the model can neither honour nor reproduce, so both
+    // keys are refused on the same terms as the two above rather than read
+    // back as a height that happens to match.
+    {
+        auto n=YAML::Load(i.serialize());
+        n["orbit"]["orbitalPeriodS"]=5570.0;
+        YAML::Emitter out; out<<n;
+        bool refused=false;
+        try { I target; target.deserialize(out.c_str()); }
+        catch (const std::exception&) { refused=true; }
+        check(refused,"A stale orbitalPeriodS key must be refused, not read as a height");
+    }
+    {
+        auto n=YAML::Load(i.serialize());
+        n["orbit"]["radiusFromPlanetCentreM"]=6791000.0;
+        YAML::Emitter out; out<<n;
+        bool refused=false;
+        try { I target; target.deserialize(out.c_str()); }
+        catch (const std::exception&) { refused=true; }
+        check(refused,
+              "A stale radiusFromPlanetCentreM key must be refused, not read as a height");
     }
 }
 

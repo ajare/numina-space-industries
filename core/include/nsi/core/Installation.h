@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <nsi/core/CivilDate.h>
 #include <nsi/core/Units.h>
 #include <optional>
@@ -31,14 +33,21 @@ public:
     enum class PartitionType { BarePartition, ThermalBreak, InsulatedPartition };
     struct PartitionSpec { double transmittanceWPerM2K; };
     static PartitionSpec partitionSpec(PartitionType type);
-    // The authored sky. Pure intensive authored data - irradiance, a period,
-    // a radius, a reflectivity, a Beta angle and a phase offset - with no
-    // temperatures, no runtime inventories and no solver state, exactly as
-    // the Hull's radiative properties already are. The planet's rotation is
-    // deliberately absent: it drives neither eclipse nor exposure
-    // (ADR-0008). Its infrared temperature is likewise absent, because it
-    // is derived from irradiance and Albedo by energy balance rather than
-    // typed: a dimmer star then cools the planet on its own.
+    // The authored sky: the world being orbited, and how high above it the
+    // Installation rides. Pure intensive authored data - a radius, a mass, a
+    // day length, a reflectivity, a tilt, an irradiance and a phase offset -
+    // with no temperatures, no runtime inventories and no solver state,
+    // exactly as the Hull's radiative properties already are. Two things are
+    // absent because they are derived rather than typed. The planet's
+    // infrared temperature follows from irradiance and Albedo by energy
+    // balance, so a dimmer star cools the planet on its own. The Orbital
+    // period follows from the world's mass and the authored height by
+    // Kepler's third law, so with the mass on the record there is exactly
+    // one period a free orbit at this height can have and typing a second
+    // number only creates a way to be wrong. What the author is left typing
+    // is the one quantity they can actually picture: how far above the
+    // ground. See ADR-0008 for what the planet's rotation does and does not
+    // drive.
     struct Orbit {
         // Numerical support limit, not a physical calibration: keeps derived
         // temperatures (~1e27 K), their fourth powers (~1e107 K^4), and
@@ -47,8 +56,6 @@ public:
         static constexpr double MaxStellarIrradianceWPerM2 = 1e100;
         // Supported interval: (0, MaxStellarIrradianceWPerM2], finite.
         double stellarIrradianceWPerM2{1361.0}; // Full Sun at Earth
-        double orbitalPeriodS{5570.0};          // Inertial period about the planet
-        double radiusFromPlanetCentreM{6791000.0}; // ISS-like altitude
         // The fraction of incident stellar light the planet reflects, in
         // [0, 1]. Earth-like. It is the only authored half of Planet shine:
         // the planet's infrared is derived from it by energy balance, so a
@@ -70,16 +77,24 @@ public:
         static constexpr double MaxAxialTiltDegrees = 90.0;
         // Supported interval: (-90, 90) degrees, finite.
         double axialTiltDeg{0.0};
+        // How far above the world's surface the Installation rides, in
+        // metres. This replaces both the authored Orbital period and the
+        // authored radius from the planet's centre: the height is the thing
+        // an author plans and can picture, and once the world's mass is on
+        // the record the ride follows from it. Must be positive - a Hull
+        // standing on the ground is not in orbit, and one below it has no
+        // sky at all.
+        double heightAboveGroundM{420000.0}; // ISS-like
         // Where in the orbit cycle the run starts, as a percentage of the
         // Orbital period: 0% is Local noon, 50% is local midnight. It lets
         // a run open part-way through an eclipse instead of always at the
         // same point. It moves when things happen, never what happens: the
         // eclipse fraction, the lit arc and every flux are untouched.
         // Authored as a percentage so it stays a position on the cycle when
-        // the Orbital period is edited, rather than a fixed number of
-        // seconds that means a different place each time. Any finite value
-        // is legal - the evaluator folds it, so 370% starts where 70% does
-        // and -10% where 90% does.
+        // the height is edited and the period moves with it, rather than a
+        // fixed number of seconds that means a different place each time.
+        // Any finite value is legal - the evaluator folds it, so 370%
+        // starts where 70% does and -10% where 90% does.
         double phaseOffsetPercent{0.0};
         // The radius of the world being orbited, in metres. This model had
         // exactly one world before this field existed: core::PlanetRadiusM,
@@ -94,9 +109,66 @@ public:
         // Must be positive and below the orbit radius - a Hull cannot sit
         // inside the ground it orbits.
         double planetRadiusM{PlanetRadiusM};
+        // The world's mass in kilograms. This is what makes the authored
+        // height mean anything: the Orbital period follows from the mass and
+        // the height together, so the same 420 km above Earth and above
+        // Jupiter are nothing alike - 5,545 s there against 10,407 s here.
+        // A catalogue of worlds that carries a radius but not a mass can
+        // draw the right ground and still get the ride wrong.
+        double planetMassKg{PlanetMassKg};
+        // How long the world takes to turn once, in seconds. Nothing in the
+        // thermal model reads it, because ADR-0008 settles that the shadow
+        // cylinder is fixed in the inertial frame and a planet spinning
+        // underneath its own shadow does not move it. Ground drift and the
+        // synchronous height cannot be stated without it though, and reading
+        // Earth's day out of a constant while the sky overhead is Jovian is
+        // the same mistake the hardcoded radius was before planetRadiusM.
+        // Retrograde spin needs no sign here: the axial tilt fold
+        // (foldAxialTiltDegrees in WorldPresets.h) already flips the pole,
+        // which is the same change of handedness, so this is the magnitude.
+        double siderealRotationS{PlanetSiderealRotationS};
+
+        // Distance from the world's centre out to the Installation: the
+        // ground, plus the height above it. This is the r in every orbital
+        // formula and the radius of the circle the Editor diagram draws.
+        double orbitalRadiusM() const noexcept { return planetRadiusM + heightAboveGroundM; }
+
+        // Kepler's third law: the inertial period a free orbit at this
+        // height about this world actually has. With the mass on the record
+        // this is no longer a free choice, which is the whole point - the
+        // author sets where they are and the model says how long that takes.
+        // Answers NaN on a record too broken to orbit rather than a plausible
+        // number, so a bad mass cannot quietly produce a believable sky.
+        double orbitalPeriodSeconds() const noexcept {
+            const double gm = GravitationalConstantM3PerKgS2 * planetMassKg;
+            if (!std::isfinite(gm) || gm <= 0.0) return unavailable();
+            const double r = orbitalRadiusM();
+            if (!std::isfinite(r) || r <= 0.0) return unavailable();
+            return 2.0 * kPi * std::sqrt(r * r * r / gm);
+        }
+
+        // The height at which the Installation would hover over one spot of
+        // the surface - a synchronous orbit. Derived from the same two world
+        // numbers and shown beside the height field, so the author can see
+        // where they are heading instead of recalling a period from memory.
+        double synchronousHeightM() const noexcept {
+            const double gm = GravitationalConstantM3PerKgS2 * planetMassKg;
+            if (!std::isfinite(gm) || gm <= 0.0) return unavailable();
+            const double t = siderealRotationS;
+            if (!std::isfinite(t) || t <= 0.0) return unavailable();
+            return std::cbrt(gm * t * t / (4.0 * kPi * kPi)) - planetRadiusM;
+        }
+
         // Throws std::invalid_argument for numbers no sky can be built from.
         void validate() const;
         bool operator==(const Orbit&) const = default;
+
+    private:
+        // What a derivation answers when the record cannot support one.
+        // Never zero: a zero period would read as an instant orbit and a
+        // zero synchronous height as a hover at the surface, and neither is
+        // a fact about a world this record has not authored.
+        static constexpr double unavailable() { return std::numeric_limits<double>::quiet_NaN(); }
     };
     // The starting condition of a Sector's air, referenced rather than stored.
     // A preset carries only intensive constants - composition fractions,
@@ -249,11 +321,10 @@ public:
         SolarCellTechnology cellTechnology{SolarCellTechnology::TripleJunctionGaAs};
         bool operator==(const SolarArray&) const = default;
     };
+    // An authored array is a live array: there is no separate enable choice,
+    // so presence alone decides whether the Installation generates.
     const std::optional<SolarArray>& solarArray() const noexcept { return solarArray_; }
     void setSolarArray(std::optional<SolarArray> array);
-    // Authored solar-array switch, independent of its size/technology.
-    bool solarArrayEnabled() const noexcept { return solarArrayEnabled_; }
-    void setSolarArrayEnabled(bool enabled) noexcept { solarArrayEnabled_ = enabled; }
     struct ExteriorSkin {
         double sideM2 = 0.0;
         double roofM2 = 0.0;
@@ -285,7 +356,6 @@ public:
     bool operator==(const Installation&) const = default;
 private:
     std::string name_;
-    bool solarArrayEnabled_ = true;
     std::optional<SolarArray> solarArray_;
     std::optional<HullType> hullType_ = HullType::MultiLayerBlanket;
     std::optional<PartitionType> partitionType_ = PartitionType::InsulatedPartition;

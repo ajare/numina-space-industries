@@ -100,12 +100,19 @@ OrbitSummary orbitSummary(const nsi::core::Installation& installation,
     summary.authored = orbit.has_value();
     if (!orbit) return summary;
     summary.stellarIrradianceWPerM2 = orbit->stellarIrradianceWPerM2;
-    summary.orbitalPeriodS = orbit->orbitalPeriodS;
-    summary.radiusFromPlanetCentreM = orbit->radiusFromPlanetCentreM;
     summary.axialTiltDeg = orbit->axialTiltDeg;
     summary.phaseOffsetPercent = orbit->phaseOffsetPercent;
     summary.albedo = orbit->albedo;
     summary.planetRadiusM = orbit->planetRadiusM;
+    summary.planetMassKg = orbit->planetMassKg;
+    summary.siderealRotationS = orbit->siderealRotationS;
+    // The height is what was typed; the period and the radius are what it
+    // means about this world. Both are read off the record so the summary
+    // cannot drift from the derivation the sky is actually built on.
+    summary.heightAboveGroundM = orbit->heightAboveGroundM;
+    summary.orbitalPeriodS = orbit->orbitalPeriodSeconds();
+    summary.orbitalRadiusM = orbit->orbitalRadiusM();
+    summary.synchronousHeightM = orbit->synchronousHeightM();
     summary.overridden = runtime && runtime->solarCycleOverrides();
 
     // Read the derived numbers off the evaluator that is actually running
@@ -126,7 +133,6 @@ OrbitSummary orbitSummary(const nsi::core::Installation& installation,
     summary.eclipseDurationS = evaluator->eclipseDurationSeconds();
     summary.sunlitDurationS = evaluator->sunlitDurationSeconds();
     summary.groundDriftDegPerDay = evaluator->groundDriftDegreesPerDay();
-    summary.geostationary = evaluator->geostationary();
     return summary;
 }
 
@@ -144,10 +150,15 @@ std::vector<std::string> orbitSummaryLines(const OrbitSummary& summary) {
     lines.push_back(reading("Axial tilt", summary.axialTiltDeg, "%+.2f deg"));
     lines.push_back(reading("Planet radius", summary.planetRadiusM, "%.0f m (%.0f km)",
                             summary.planetRadiusM / 1000.0));
+    lines.push_back(reading("Planet mass", summary.planetMassKg, "%.4e kg"));
+    lines.push_back(reading("Sidereal day", summary.siderealRotationS, "%.1f s (%.2f h)",
+                            summary.siderealRotationS / 3600.0));
+    lines.push_back(reading("Height above ground", summary.heightAboveGroundM, "%.0f m (%.0f km)",
+                            summary.heightAboveGroundM / 1000.0));
     lines.push_back(reading("Orbital period", summary.orbitalPeriodS, "%.1f s (%.1f min)",
                             summary.orbitalPeriodS / 60.0));
-    lines.push_back(reading("Orbital radius", summary.radiusFromPlanetCentreM, "%.0f m (%.0f km)",
-                            summary.radiusFromPlanetCentreM / 1000.0));
+    lines.push_back(reading("Orbital radius", summary.orbitalRadiusM, "%.0f m (%.0f km)",
+                            summary.orbitalRadiusM / 1000.0));
     lines.push_back(phaseReading(summary.phaseOffsetPercent, summary.orbitalPeriodS));
     if (!std::isfinite(summary.eclipseDurationS) || !std::isfinite(summary.sunlitDurationS)
         || !std::isfinite(summary.groundDriftDegPerDay)) {
@@ -167,7 +178,13 @@ std::vector<std::string> orbitSummaryLines(const OrbitSummary& summary) {
     if (summary.groundDriftDegPerDay > 0.0) drift += " east";
     else if (summary.groundDriftDegPerDay < 0.0) drift += " west";
     lines.push_back(drift);
-    if (summary.geostationary) lines.emplace_back(kGeostationaryBadge);
+    // The synchronous height is printed rather than flagged. Seeing that it
+    // is 35,794 km while sitting at 420 km says more than a marker that
+    // only appears if the typed number lands on it exactly, and there is
+    // no condition to raise either: the drift reaching zero already says
+    // the same thing, and this says where that actually is.
+    lines.push_back(reading("Synchronous height", summary.synchronousHeightM,
+                           "%.0f m (%.0f km)", summary.synchronousHeightM / 1000.0));
     lines.push_back(revisionLine(summary));
     return lines;
 }
@@ -176,12 +193,7 @@ void drawOrbitSummary(const nsi::core::Installation& installation,
                       const nsi::systems::CellAtmosphereTransport* runtime) {
     const auto summary = orbitSummary(installation, runtime);
     if (!ImGui::TreeNodeEx("Orbit summary", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    for (const auto& text : orbitSummaryLines(summary)) {
-        if (text == kGeostationaryBadge)
-            ImGui::TextColored({0.45f, 0.90f, 0.60f, 1.0f}, "%s", text.c_str());
-        else
-            ImGui::TextUnformatted(text.c_str());
-    }
+    for (const auto& text : orbitSummaryLines(summary)) ImGui::TextUnformatted(text.c_str());
     ImGui::TreePop();
 }
 

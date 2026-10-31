@@ -37,10 +37,11 @@ void drawSolarGenerationGraph(std::span<const SolarGenerationSample> history) {
         ImGui::TextUnformatted("Generation history unavailable.");
         return;
     }
-    // Every sample a gap - the array switched off, or no Orbit authored -
-    // leaves nothing honest to draw. Say so instead of showing an empty frame.
+    // Every sample a gap - an array the systems side reports disabled, or
+    // no Orbit authored - leaves nothing honest to draw. Say so instead of
+    // showing an empty frame.
     if (!std::any_of(history.begin(), history.end(), observable)) {
-        ImGui::TextUnformatted("No generation to plot while the array is switched off or there is no star.");
+        ImGui::TextUnformatted("No generation to plot while the array is disabled or there is no star.");
         return;
     }
     if (!ImPlot::BeginPlot("Solar generation — last minute###SolarGeneration", ImVec2(-1, 180),
@@ -77,7 +78,7 @@ std::vector<std::pair<double, double>> solarEclipseBands(
     };
     for (const auto& sample : generation) {
         // An unobservable sample closes the band rather than extending it:
-        // switched off is not night, and a shadow may not be carried across
+        // a dead array is not night, and a shadow may not be carried across
         // a stretch where nothing was read.
         if (!observable(sample)) {
             close();
@@ -96,14 +97,6 @@ std::vector<std::pair<double, double>> solarEclipseBands(
     return bands;
 }
 
-bool drawSolarArrayControls(EditorSession& session) {
-    bool enabled = session.installation().solarArrayEnabled();
-    ImGui::BeginDisabled(!session.editingEnabled());
-    const bool changed = ImGui::Checkbox("Solar array enabled", &enabled);
-    if (changed) session.setSolarArrayEnabled(enabled);
-    ImGui::EndDisabled();
-    return changed;
-}
 bool drawSolarArrayPanel(EditorSession& session, const std::optional<StationSystemsSnapshot>& snapshot,
                         std::span<const SolarGenerationSample> generation) {
     auto array=session.installation().solarArray();
@@ -117,15 +110,15 @@ bool drawSolarArrayPanel(EditorSession& session, const std::optional<StationSyst
     // Missing Orbit is semantic absence. Never infer it from the irradiance
     // scalar, which is also zero in eclipse. Disabled takes precedence.
     // #69: Eclipse comes from the published systems-side shadow state and
-    // never from zero output - a tracking failure, a fully worn blanket and
-    // the switch all produce a zero that is not night.
+    // never from zero output - a tracking failure and a fully worn blanket
+    // both produce a zero that is not night.
     const auto* source=snapshot && !snapshot->power.sources.empty() ? &snapshot->power.sources.front() : nullptr;
     // Below half a tenth, "%.1f" prints a generating array as "0.0 kW",
     // which reads as a dead panel. Say it is under the readable floor
     // instead of rounding a measurement away.
     constexpr double kReadableFloorKW=0.05;
     char title[128];
-    if (!session.installation().solarArrayEnabled() || (source && source->disabled))
+    if (source && source->disabled)
         std::snprintf(title,sizeof title,"Solar array — Disabled");
     else if (!session.installation().orbit()) std::snprintf(title,sizeof title,"Solar array — No star");
     else if (!source) std::snprintf(title,sizeof title,"Solar array — Unavailable");
@@ -136,7 +129,7 @@ bool drawSolarArrayPanel(EditorSession& session, const std::optional<StationSyst
     // Stable ID: changing power/state must not reset the user's collapsed state.
     const std::string label=std::string(title)+"###solar-array";
     if (!ImGui::CollapsingHeader(label.c_str(),ImGuiTreeNodeFlags_DefaultOpen)) return false;
-    bool changed=drawSolarArrayControls(session);
+    bool changed=false;
     ImGui::BeginDisabled(!session.editingEnabled());
     if (ImGui::InputDouble("Blanket area (m2)",&array->areaM2,1,10,"%.1f")) {
         if (std::isfinite(array->areaM2) && array->areaM2>=0) {
