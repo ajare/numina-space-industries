@@ -35,6 +35,7 @@ foreach(check IN ITEMS
     benchmarkWorkloads
     powerChainSeam
     solarArrayDerivedGeneration
+    solarArrayEnableDisable
     thermalReservoirSeam
     radiatorSeam
     rateAwareProtection

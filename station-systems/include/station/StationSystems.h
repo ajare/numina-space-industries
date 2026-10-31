@@ -593,13 +593,14 @@ namespace station
 
 	// One solar array as of the most recent tick: installed capacity
 	// and the generation it could deliver under the Station sun. A
-	// zero-capacity array is disabled and contributes nothing.
+	// switched-off or zero-capacity array is disabled and contributes nothing.
+	// Zero illumination alone does not mark an array disabled.
 	struct StationSolarSourceSnapshot
 	{
 		std::string id;
 		double capacityKW{0.0};
 		double availableKW{0.0};    // array availability before connection/dispatch clipping
-		bool disabled{false};       // zero installed capacity
+		bool disabled{false};       // authored off or zero usable installed capacity
 		// #845: the availability the array's fault ledger leaves it - the
 		// string-loss remainder and the tracking-failure fixed value
 		// composed by minimum. 1.0 with no Fault active.

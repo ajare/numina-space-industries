@@ -588,9 +588,10 @@ namespace station
 		{
 			array.lastIllumination = array.authored.areaM2 ? 1.0
 				: evaluateStationProfile(runtime.settings.solarCycle.value_or(ProfileSettings{}), profileElapsed);
-			array.lastDisabled = array.authored.areaM2
-				? (!array.authored.enabled || *array.authored.areaM2 == 0.0)
-				: array.effectiveWearCapability() <= 0.0;
+			// Authored enable is independent of the capacity/illumination mode.
+			array.lastDisabled = !array.authored.enabled || (array.authored.areaM2
+				? *array.authored.areaM2 == 0.0
+				: array.effectiveWearCapability() <= 0.0);
 			// #845: the availability the array's fault ledger leaves it.
 			// A string loss takes a frozen fraction of the installed
 			// capacity; a tracking failure pins the array to its frozen
