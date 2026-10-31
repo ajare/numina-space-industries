@@ -2135,6 +2135,12 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 				: ", " + std::to_string(settings.wasteEjections.size()) + " terminal-waste ejection(s)"));
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
+	bool StationSystemsRuntime::setDirectSolarIrradianceWPerM2(double irradiance)
+	{
+		if (!std::isfinite(irradiance) || irradiance < 0.0) return false;
+		for (auto& array : mImpl->solarArrays) array.directIrradianceWPerM2 = irradiance;
+		return true;
+	}
 	StationSystemsUpdateMode StationSystemsRuntime::updateMode() const
 	{
 		return mImpl->clock.variable() ? StationSystemsUpdateMode::Variable : StationSystemsUpdateMode::Fixed;

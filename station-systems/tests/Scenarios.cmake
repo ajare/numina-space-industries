@@ -34,7 +34,7 @@ foreach(check IN ITEMS
     recoveryConvergence
     benchmarkWorkloads
     powerChainSeam
-    solarArrayAuthoringOnly
+    solarArrayDerivedGeneration
     thermalReservoirSeam
     radiatorSeam
     rateAwareProtection

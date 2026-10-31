@@ -134,8 +134,8 @@ namespace station
 			sourceResult.wear = { array.authored.cellDegradation ? "cell-degradation" : "", array.cellDegradation.fraction,
 				array.cellDegradation.operatingHours, array.cellDegradation.throughputKg, array.cellDegradation.calendarHours,
 				array.effectiveWearCapability(), array.cellDegradation.fraction };
-			sourceResult.capacityKW = array.authored.capacityKW;
-			sourceResult.availableKW = array.lastAvailableKW;
+			sourceResult.capacityKW = array.capacityKW();
+			sourceResult.availableKW = array.lastUnclippedAvailableKW;
 			sourceResult.disabled = array.lastDisabled;
 			// #845: the availability the array's fault ledger leaves it,
 			// and the ledger itself. A pending Fault is not published as

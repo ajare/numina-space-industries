@@ -617,7 +617,8 @@ namespace station
 		{
 			auto const where = "solar array '" + array.authored.id + "' ";
 			if (!requireFinite(array.lastIllumination, where + "evaluated illumination")) return false;
-			if (!requireFinite(array.lastAvailableKW, where + "available generation")) return false;
+			if (!requireFinite(array.lastAvailableKW, where + "available generation")
+				|| !requireFinite(array.lastUnclippedAvailableKW, where + "unclipped available generation")) return false;
 		}
 		for (auto const& load : runtime.loads)
 		{

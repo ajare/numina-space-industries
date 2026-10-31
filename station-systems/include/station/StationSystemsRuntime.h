@@ -54,6 +54,11 @@ namespace station
 		// Disabled settings are a no-op. Failed steps retain committed time and
 		// retire the run, just like advanceTo. Never mix the two drive modes.
 		bool update(double deltaSeconds);
+		// Station-wide direct stellar irradiance in W/m², already attenuated by
+		// eclipse. Held until replaced; defaults to zero. Derived arrays only:
+		// legacy arrays continue to use the authored solar cycle. Invalid
+		// (negative or non-finite) values are refused without changing input.
+		bool setDirectSolarIrradianceWPerM2(double irradiance);
 		~StationSystemsRuntime();
 		StationSystemsRuntime(StationSystemsRuntime const&) = delete;
 		StationSystemsRuntime& operator=(StationSystemsRuntime const&) = delete;

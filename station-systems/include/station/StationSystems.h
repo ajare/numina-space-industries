@@ -598,7 +598,7 @@ namespace station
 	{
 		std::string id;
 		double capacityKW{0.0};
-		double availableKW{0.0};    // capacity * Station sun * availabilityFactor
+		double availableKW{0.0};    // array availability before connection/dispatch clipping
 		bool disabled{false};       // zero installed capacity
 		// #845: the availability the array's fault ledger leaves it - the
 		// string-loss remainder and the tracking-failure fixed value

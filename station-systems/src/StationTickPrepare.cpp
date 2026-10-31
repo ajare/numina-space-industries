@@ -586,8 +586,11 @@ namespace station
 		initializeBuses();
 		for (auto& array : runtime.solarArrays)
 		{
-			array.lastIllumination = evaluateStationProfile(runtime.settings.solarCycle.value_or(ProfileSettings{}), profileElapsed);
-			array.lastDisabled = array.effectiveWearCapability() <= 0.0;
+			array.lastIllumination = array.authored.areaM2 ? 1.0
+				: evaluateStationProfile(runtime.settings.solarCycle.value_or(ProfileSettings{}), profileElapsed);
+			array.lastDisabled = array.authored.areaM2
+				? (!array.authored.enabled || *array.authored.areaM2 == 0.0)
+				: array.effectiveWearCapability() <= 0.0;
 			// #845: the availability the array's fault ledger leaves it.
 			// A string loss takes a frozen fraction of the installed
 			// capacity; a tracking failure pins the array to its frozen
@@ -606,6 +609,7 @@ namespace station
 			array.lastAvailableKW = array.lastDisabled
 				? 0.0 : array.effectiveWearCapability() * array.lastIllumination * array.availabilityFactor;
 			array.lastEclipse = !array.lastDisabled && array.lastAvailableKW <= 0.0;
+			array.lastUnclippedAvailableKW = array.lastAvailableKW;
 			array.lastAvailableKW = addGeneration("Solar", array.authored.id, "Solar generation",
 				array.authored.busIds, array.lastAvailableKW);
 			availableGeneration += array.lastAvailableKW;

@@ -452,7 +452,8 @@ namespace station
 				double available = 0, slope = 0;
 				for (auto const& a : solarArrays)
 					if (onBus(a.authored.busIds)) available += collected.connections.available(collected.connections.port("Solar", a.authored.id, "Solar generation", bus.id),
-						a.effectiveWearCapability() * evaluateStationProfile(settings.solarCycle.value_or(ProfileSettings{}), cursor + maximum * 0.5));
+						a.effectiveWearCapability() * (a.authored.areaM2 ? (a.authored.enabled ? 1.0 : 0.0)
+							: evaluateStationProfile(settings.solarCycle.value_or(ProfileSettings{}), cursor + maximum * 0.5)));
 				for (size_t i = 0; i < generators.size(); ++i)
 				{
 					auto const& g = generators[i]; auto const& a = g.authored;
@@ -612,7 +613,7 @@ namespace station
 		mean({&lastAvailableGenerationKW, &lastPoolGenerationKW, &lastConnectionPowerLossKW, &lastPoolResidualKW});
 		for (auto& pathway : atmospherePathways)
 			for (auto& rate : pathway.flowRateKgPerS) mean({&rate});
-		for (auto& a : solarArrays) mean({&a.lastAvailableKW});
+		for (auto& a : solarArrays) mean({&a.lastAvailableKW, &a.lastUnclippedAvailableKW});
 		for (auto& l : loads) mean({&l.lastRequestedKW, &l.lastSuppliedKW, &l.lastUnmetKW,
 			&l.lastUnmetCriticalKW, &l.lastHeatExportedKW, &l.lastHeatRoutedKW, &l.lastProfileLevel, &l.lastSurgeKW});
 		for (auto& fixture : lightingFixtures)

@@ -175,13 +175,14 @@ using namespace station_detail;
 			}
 		};
 		// The authoritative ledger of one configured solar array. Output
-		// follows installed capacity and evaluated illumination; a
-		// zero-capacity array is disabled and contributes nothing.
+		// follows derived or legacy capacity and its one illumination source.
 		struct SolarState
 		{
 			SolarArraySettings authored;
 			double lastIllumination{0.0};
-			double lastAvailableKW{0.0};
+			double lastAvailableKW{0.0}; // bus-side availability used by dispatch/accounting
+			double lastUnclippedAvailableKW{0.0};
+			double directIrradianceWPerM2{0.0};
 			bool lastDisabled{false};
 			bool lastEclipse{true};
 			// #845: the array's fault ledger. `string-loss` removes a
@@ -204,7 +205,22 @@ using namespace station_detail;
 			// tick reads the faded figure, so a worn machine never books what
 			// it can no longer do. Repair never touches it.
 			WearState cellDegradation;
-			double effectiveWearCapability() const { return authored.capacityKW * (1.0 - cellDegradation.fraction); }
+			double capacityKW() const
+			{
+				if (!authored.areaM2) return authored.capacityKW;
+				auto const spec = solarCellSpec(authored.cellTechnology);
+				// Perfect star-tracking: cos(incidence) = 1. Fixed cell temperature:
+				// no temperature coefficient. No degradation by default; only the
+				// opt-in wear ledger below fades this derived capacity.
+				// The supplied direct irradiance already includes (1 - eclipse).
+				// Derived arrays never also read the authored solar cycle.
+				// Planet IR is below the cells' bandgaps, so cannot produce
+				// photocurrent; albedo is excluded under perfect tracking
+				// (a star-pointing array sees no planet while sunlit).
+				return *authored.areaM2 * spec.packingFactor * spec.efficiency
+					* directIrradianceWPerM2 / 1000.0;
+			}
+			double effectiveWearCapability() const { return capacityKW() * (1.0 - cellDegradation.fraction); }
 		};
 		// The authoritative ledger of one External equipment load group.
 		// Allocation runs in two passes: protected critical floors first,
