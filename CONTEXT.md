@@ -160,8 +160,12 @@ _Avoid_: Cell area, active area, panel size
 The fraction of a Solar array's Blanket area that is active solar cell. It is a property of the **Cell technology** rather than an authored number: how tightly a panel is built is a manufacturing fact, not an authoring guess.
 _Avoid_: Fill factor (the current–voltage curve term, not this), active fraction, cell coverage
 
+**Array factor**:
+The derate between a bare cell's datasheet output and the output of a built blanket in service — coverglass, interconnect, cell mismatch and bypass-diode loss carried as one aggregate figure rather than modelled individually. Unlike **Packing factor**, which is a fraction of _area_, this is a fraction of _output_.
+_Avoid_: Array derate factor, packing loss (that is area, not output), system margin
+
 **Cell technology**:
-The semiconductor architecture of a Solar array's cells — triple-junction GaAs, single-junction GaAs, or space-grade silicon — which sets both its conversion efficiency and its **Packing factor**.
+The semiconductor architecture of a Solar array's cells — triple-junction GaAs, single-junction GaAs, or space-grade silicon — which sets its conversion efficiency, **Packing factor** and **Array factor**.
 _Avoid_: Material (what varies is an architecture, not a substance), cell type, panel type
 
 **Wear ledger**:

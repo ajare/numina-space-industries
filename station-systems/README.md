@@ -220,8 +220,8 @@ Solar arrays can also carry authoring-only `areaM2` (deployed blanket area in mÂ
 including gaps, harness and frame), `cellTechnology`, and `enabled`. Area is
 optional, finite and non-negative; technology defaults to `TripleJunctionGaAs`
 and enabled defaults to true. `solarCellSpec` selects conversion efficiency,
-packing factor and array derate factor from the closed technology catalogue and
-rejects unknown values. Schema 141 is emitted only for a present area (including
+packing factor and Array factor from the closed technology catalogue and rejects
+unknown values. Schema 141 is emitted only for a present area (including
 zero), a non-default technology, or a false enabled flag. Otherwise those fields
 are omitted, keeping legacy bytes and schema stamps unchanged.
 
