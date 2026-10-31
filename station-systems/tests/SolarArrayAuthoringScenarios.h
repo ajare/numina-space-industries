@@ -40,11 +40,12 @@ inline void catalogue()
 		char const* name;
 		double efficiency;
 		double packingFactor;
+		double arrayFactor;
 	};
 	constexpr Expected expected[]{
-		{station::SolarCellTechnology::TripleJunctionGaAs, "triple-junction-gaas", 0.32, 0.85},
-		{station::SolarCellTechnology::SingleJunctionGaAs, "single-junction-gaas", 0.19, 0.85},
-		{station::SolarCellTechnology::SpaceSilicon, "space-silicon", 0.14, 0.80},
+		{station::SolarCellTechnology::TripleJunctionGaAs, "triple-junction-gaas", 0.32, 0.85, 0.85},
+		{station::SolarCellTechnology::SingleJunctionGaAs, "single-junction-gaas", 0.19, 0.85, 0.85},
+		{station::SolarCellTechnology::SpaceSilicon, "space-silicon", 0.14, 0.80, 0.75},
 	};
 	require(station::SolarCellTechnologyNames.size() == std::size(expected),
 		"cell technology catalogue is not the three decided entries");
@@ -55,7 +56,32 @@ inline void catalogue()
 		auto const spec = station::solarCellSpec(entry.technology);
 		require(spec.efficiency == entry.efficiency, "incorrect cell technology conversion efficiency");
 		require(spec.packingFactor == entry.packingFactor, "incorrect cell technology packing factor");
+		require(spec.arrayFactor == entry.arrayFactor, "incorrect cell technology array derate factor");
 	}
+}
+
+// The catalogue must keep producing real hardware numbers, not datasheet numbers.
+// These bands are the measured blanket-level output of flown arrays at 1 AU, so a
+// retune that drifts off flight hardware fails here rather than in the Editor.
+inline void realWorldCalibration()
+{
+	constexpr double sun = 1361.0; // W/m^2, Sun at 1 AU
+	auto blanket = [&](station::SolarCellTechnology t) {
+		auto const s = station::solarCellSpec(t);
+		return s.packingFactor * s.efficiency * s.arrayFactor * sun;
+	};
+	// Dawn: 10.3 kW over 36.4 m^2 of triple-junction blanket = 283 W/m^2.
+	// Modern triple-junction hardware is quoted 280-330 W/m^2 deployed.
+	auto const tj = blanket(station::SolarCellTechnology::TripleJunctionGaAs);
+	require(tj >= 280.0 && tj <= 330.0, "triple-junction blanket left the flight-hardware band");
+	// ISS silicon fleet: 248 kW over 2 500 m^2 = 99 W/m^2; Rosetta 7.1 kW / 61.5 m^2 = 115.
+	auto const si = blanket(station::SolarCellTechnology::SpaceSilicon);
+	require(si >= 95.0 && si <= 120.0, "space silicon blanket left the flight-hardware band");
+	// A 20 kW pair at Earth should need roughly 60-70 m^2 of triple-junction blanket.
+	auto const area = 20000.0 / tj;
+	require(area >= 58.0 && area <= 74.0, "20 kW sizing left the flight-hardware range");
+	// Triple junction must stay clearly ahead of silicon, as it does in reality.
+	require(tj > 2.4 * si, "technology ordering no longer matches real hardware");
 }
 
 inline void unknownTechnologyRefused()

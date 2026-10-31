@@ -2,11 +2,18 @@
 
 **Status: Accepted.** Recorded for [#66](https://github.com/ajare/numina-space-industries/issues/66), which is the documentation ticket under the specification of [#59](https://github.com/ajare/numina-space-industries/issues/59); that issue is authoritative for the whole feature. Vocabulary is defined in [CONTEXT.md](../../CONTEXT.md). This ADR sits on top of [ADR-0008](0008-orbital-period-drives-hull-exposure.md) and reuses its sun vector, its Nadir-lock frame and its planet view factor unchanged: it decides what the **Solar array** does with the sky that evaluator produces. It changes no code — it records why the derived generation formula is shaped the way it is, and which tempting "fixes" were considered and declined.
 
-A **Solar array**'s generation is computed from its **Blanket area**, its **Cell technology**'s conversion efficiency and **Packing factor**, and the direct stellar irradiance the authored **Orbit** actually delivers:
+A **Solar array**'s generation is computed from its **Blanket area**, its **Cell technology**'s conversion efficiency, **Packing factor** and **Array factor**, and the direct stellar irradiance the authored **Orbit** actually delivers:
 
 ```
-P = A_blanket × packing × η_cell × G_direct × (1 − eclipse)
+P = A_blanket × packing × η_cell × f_array × G_direct × (1 − eclipse)
 ```
+
+`f_array` is the blanket-level derate between a bare cell on a test bench and a built
+blanket on orbit — coverglass reflection and absorption, interconnect resistance,
+cell mismatch and bypass-diode loss. None of those is modelled individually (there
+is no per-loss input for them); the one factor carries the whole gap, and it is
+calibrated so blanket output matches flight hardware rather than the datasheet of
+a bare cell. Without it the model ran ~23–54% above real arrays.
 
 Three assumptions are load-bearing in that one line, and each is restated in the code beside the formula (`SolarState::capacityKW()` in `station-systems/src/StationSystemsImpl.h`):
 
@@ -52,7 +59,7 @@ The planet's peak sits at 11.6 µm, six times the longest wavelength even the ge
 
 ## The error being declined is large, which is why it is written down
 
-The exclusion is **not** justified by the planet being dim. In a low Earth orbit at this project's own numbers, a downward-facing surface collects roughly **210 W/m²** of planetary infrared plus **359 W/m²** of reflected sunlight — about **42% of full sun** (ADR-0008). Fold that into the convertible term for a 60 m² **Blanket area** and the model is handed 34 kW of incident power that no cell can turn into electricity; the infrared half alone is 12.6 kW. Counted through the array's own efficiency chain the invented figure is about 9 kW, counted whole it is 34 kW, and the headline worth carrying is **roughly 18 kW invented on a 60 m² Earth-orbit array** against the ≈22 kW that same blanket actually makes from the star. That is the same order as the real contribution — a phantom second array, bolted on underneath, powered by warmth.
+The exclusion is **not** justified by the planet being dim. In a low Earth orbit at this project's own numbers, a downward-facing surface collects roughly **210 W/m²** of planetary infrared plus **359 W/m²** of reflected sunlight — about **42% of full sun** (ADR-0008). Fold that into the convertible term for a 60 m² **Blanket area** and the model is handed 34 kW of incident power that no cell can turn into electricity; the infrared half alone is 12.6 kW. Counted through the array's own efficiency chain the invented figure is about 8 kW, counted whole it is 34 kW, and either way it is **the same order as the ≈19 kW that same blanket actually makes from the star** — a phantom second array, bolted on underneath, powered by warmth.
 
 So the reasoning is deliberately the opposite of the intuitive one. The planet is excluded not because its shine is negligible, but because it is unconvertible (infrared) and, under the tracking assumption, not even visible (albedo). Both halves matter, and a future contributor who "corrects" the exclusion by adding a planet-shine term would be inventing power, not recovering it.
 

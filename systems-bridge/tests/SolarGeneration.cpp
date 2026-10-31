@@ -11,6 +11,9 @@ using namespace station;
 namespace {
 void require(bool ok,const char* message) {if (!ok) throw std::runtime_error(message);}
 void close(double actual,double expected) {require(std::abs(actual-expected)<1e-8,"Solar generation mismatch");}
+// Full-sun output of the 60 m^2 triple-junction fixture, computed the same way the
+// runtime derives it so exact-equality flags compare like for like.
+const double kFullSunKW=60*0.85*0.32*0.85*1361.0/1000.0;
 StationSystemsSettings settings() {
     StationSystemsSettings s;s.enabled=true;
     SolarArraySettings a;a.id="array";a.areaM2=60;s.solarArrays={a};
@@ -38,7 +41,7 @@ void worlds() {
         StellarExposureEvaluator sky(orbit);
         StationSystemsRuntime run(settings(),StationSystemsUpdateMode::Variable);
         require(updateSystemsWithAuthoredSky(run,sky,0.1),"World step failed");
-        close(run.snapshot().power.sources[0].availableKW,60*0.85*0.32*nsi::core::kWorldPresets[index].stellarIrradianceWPerM2/1000);
+        close(run.snapshot().power.sources[0].availableKW,60*0.85*0.32*0.85*nsi::core::kWorldPresets[index].stellarIrradianceWPerM2/1000);
         require(run.snapshot().healthy,"World audit failed");
         replay(run);
     }
@@ -51,8 +54,8 @@ void boundaryChecks() {
     StationSystemsRuntime run(s,StationSystemsUpdateMode::Variable);
     StellarExposureEvaluator sky(nsi::core::Installation::Orbit{});
     require(updateSystemsWithAuthoredSky(run,sky,0.1),"Shared sky step failed");
-    close(run.snapshot().power.sources[0].availableKW,22.21152);
-    close(run.snapshot().power.sources[1].availableKW,22.21152);
+    close(run.snapshot().power.sources[0].availableKW,kFullSunKW);
+    close(run.snapshot().power.sources[1].availableKW,kFullSunKW);
     close(run.snapshot().power.sources[2].availableKW,0);
     const auto journal=serializeStationReplay(run);
     for (double invalid:{0.0,-1.0,std::numeric_limits<double>::infinity(),
@@ -83,9 +86,9 @@ void eclipseAndDark() {
         require(updateSystemsWithAuthoredSky(quiet,sky,0.1),"Quiet step failed");
         require(run.snapshot()==quiet.snapshot(),"Observation changed generation");
         const auto power=run.snapshot().power.sources[0].availableKW;
-        const auto expected=22.21152*(1-sky.evaluate(run.snapshot().elapsedSeconds-0.05).eclipse);
-        close(power,expected);full|=power==22.21152;dark|=power==0;
-        ramp|=power>0 && power<22.21152;recovered|=dark && power==22.21152;
+        const auto expected=kFullSunKW*(1-sky.evaluate(run.snapshot().elapsedSeconds-0.05).eclipse);
+        close(power,expected);full|=power==kFullSunKW;dark|=power==0;
+        ramp|=power>0 && power<kFullSunKW;recovered|=dark && power==kFullSunKW;
         require(run.snapshot().healthy,"Orbit audit failed");
     }
     require(full && dark && ramp && recovered,"Missing eclipse/penumbra recovery");

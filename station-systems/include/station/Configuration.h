@@ -542,9 +542,10 @@ namespace station
 		double availability{0.0}; // fixed availability while failed, [0, 1)
 		bool operator==(SolarTrackingFailureSettings const&) const = default;
 	};
-	// Closed cell-architecture catalogue; efficiencies are beginning-of-life
-	// AM0 figures and packing factors describe blanket coverage. These are
-	// provisional engineering assumptions; provenance is recorded in #59.
+	// Closed cell-architecture catalogue. Efficiencies are beginning-of-life
+	// bare-cell AM0 datasheet figures; packing factors describe blanket coverage;
+	// the array factor carries everything between a bare cell on a test bench and
+	// a built blanket on orbit. Calibrated against flight hardware (#59).
 	enum class SolarCellTechnology : std::uint8_t
 	{
 		TripleJunctionGaAs,
@@ -558,17 +559,30 @@ namespace station
 	// Manufacturing properties, selected together rather than authored.
 	struct SolarCellSpec
 	{
-		double efficiency;    // BOL conversion efficiency of illuminated cell, (0, 1]
+		double efficiency;    // BOL conversion efficiency of the bare cell, (0, 1]
 		double packingFactor; // fraction of blanket area that is active cell, (0, 1]
+		// Array-level optical and electrical derate, (0, 1]. A bare cell's datasheet
+		// efficiency is not what a built blanket delivers: coverglass reflection and
+		// absorption, interconnect resistance, cell mismatch and bypass-diode loss
+		// all sit in between. None is modelled individually; this one factor carries
+		// the whole gap, so blanket output matches real arrays without inventing a
+		// per-loss thermal or optical model we have no inputs for.
+		double arrayFactor;
 	};
 	// Refuse unknown selections instead of silently substituting a technology.
 	inline constexpr SolarCellSpec solarCellSpec(SolarCellTechnology technology)
 	{
 		switch (technology)
 		{
-		case SolarCellTechnology::TripleJunctionGaAs: return {0.32, 0.85};
-		case SolarCellTechnology::SingleJunctionGaAs: return {0.19, 0.85};
-		case SolarCellTechnology::SpaceSilicon: return {0.14, 0.80};
+		// 0.85 puts a triple-junction blanket at ~315 W/m^2 at 1 AU, inside the
+		// 280-330 W/m^2 of Dawn (10.3 kW / 36.4 m^2) and the NASA 300 kW-class
+		// BOL figure. Single junction shares it: the derate is an assembly property,
+		// not a function of junction count.
+		case SolarCellTechnology::TripleJunctionGaAs: return {0.32, 0.85, 0.85};
+		case SolarCellTechnology::SingleJunctionGaAs: return {0.19, 0.85, 0.85};
+		// 0.75 puts the silicon blanket at ~114 W/m^2, between the ISS fleet's
+		// ~99 W/m^2 (248 kW over 2 500 m^2) and Rosetta's ~115 W/m^2.
+		case SolarCellTechnology::SpaceSilicon: return {0.14, 0.80, 0.75};
 		}
 		throw std::invalid_argument("Unknown solar cell technology");
 	}

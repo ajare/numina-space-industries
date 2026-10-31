@@ -214,13 +214,16 @@ using namespace station_detail;
 				// Perfect star-tracking: cos(incidence) = 1. Fixed cell temperature:
 				// no temperature coefficient. No degradation by default; only the
 				// opt-in wear ledger below fades this derived capacity.
+				// spec.arrayFactor is the blanket-level derate between bare-cell datasheet
+				// efficiency and built-array output (coverglass, interconnect, mismatch,
+				// bypass diodes); it is what keeps these figures at flight hardware levels.
 				// The supplied direct irradiance already includes (1 - eclipse).
 				// Derived arrays never also read the authored solar cycle.
 				// Planet IR is below the cells' bandgaps, so cannot produce
 				// photocurrent; albedo is excluded under perfect tracking
 				// (a star-pointing array sees no planet while sunlit).
 				return *authored.areaM2 * spec.packingFactor * spec.efficiency
-					* directIrradianceWPerM2 / 1000.0;
+					* spec.arrayFactor * directIrradianceWPerM2 / 1000.0;
 			}
 			double effectiveWearCapability() const { return capacityKW() * (1.0 - cellDegradation.fraction); }
 		};

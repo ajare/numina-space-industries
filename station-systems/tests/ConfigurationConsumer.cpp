@@ -78,6 +78,7 @@ int main()
     try {
         checkConfiguration();
         station_test::solar::catalogue();
+        station_test::solar::realWorldCalibration();
         station_test::solar::unknownTechnologyRefused();
         station_test::solar::settingsCarryTheFields();
         station_test::solar::blanketAreaBounds();

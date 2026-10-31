@@ -219,13 +219,21 @@ version selection. Simulation-facing headers do not include backend headers.
 Solar arrays can also carry authoring-only `areaM2` (deployed blanket area in m²,
 including gaps, harness and frame), `cellTechnology`, and `enabled`. Area is
 optional, finite and non-negative; technology defaults to `TripleJunctionGaAs`
-and enabled defaults to true. `solarCellSpec` selects conversion efficiency and
-packing factor from the closed technology catalogue and rejects unknown values.
-Schema 141 is emitted only for a present area (including zero), a non-default
-technology, or a false enabled flag. Otherwise those fields are omitted, keeping
-legacy bytes and schema stamps unchanged. This prefactor does **not** change
-generation: all arrays still use `capacityKW` and the Station solar cycle, even
-when the newly authored enabled flag is false.
+and enabled defaults to true. `solarCellSpec` selects conversion efficiency,
+packing factor and array derate factor from the closed technology catalogue and
+rejects unknown values. Schema 141 is emitted only for a present area (including
+zero), a non-default technology, or a false enabled flag. Otherwise those fields
+are omitted, keeping legacy bytes and schema stamps unchanged.
+
+Derived generation (present `areaM2`) is
+`areaM2 × packing × efficiency × arrayFactor × directIrradiance / 1000`, where
+the irradiance is the value pushed by the bridge. The `arrayFactor` is the
+blanket-level derate between bare-cell datasheet efficiency and built-array output
+(coverglass, interconnect, mismatch, bypass diodes) and is calibrated against
+flight hardware: ~315 W/m² for triple-junction GaAs at 1 AU (Dawn ran
+10.3 kW over 36.4 m²) and ~114 W/m² for space silicon (the ISS fleet runs
+~99 W/m²). Legacy arrays (absent `areaM2`) still use `capacityKW` and the
+Station solar cycle unchanged.
 
 World wrappers, reference-document descriptions/provenance, and editor diagram
 positions, pan, zoom, and prefab grouping/provenance remain client-owned. Existing

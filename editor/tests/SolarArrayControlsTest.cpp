@@ -89,18 +89,19 @@ void header() {
     };
     render();
     require(render().find("Solar array —")==std::string::npos,"absent array header visible");
+    const double kFullSunKW=60*0.85*0.32*0.85*1361.0/1000.0;
     const auto original=session.installation().serialize();
     session.setSolarArray(Installation::SolarArray{60});
     require(session.unsavedChanges(),"array creation did not dirty document");
     session.undo(); require(session.installation().serialize()==original,"array undo changed legacy bytes");
     session.redo();
-    require(render().find("Solar array — 22.2 kW")!=std::string::npos,"lit header not rendered");
+    require(render().find("Solar array — 18.9 kW")!=std::string::npos,"lit header not rendered");
     auto snapshot=playback.snapshotFor(session.installation());
-    require(std::abs(snapshot->power.sources.front().availableKW-22.21152)<1e-8,"wrong unclipped generation");
+    require(std::abs(snapshot->power.sources.front().availableKW-kFullSunKW)<1e-8,"wrong unclipped generation");
     require(snapshot->elapsedSeconds==0,"preview advanced the playback clock");
     playback.togglePlaying(); playback.update(.1);
     snapshot=playback.snapshotFor(session.installation());
-    require(snapshot->healthy && std::abs(snapshot->power.sources.front().availableKW-22.21152)<1e-8,
+    require(snapshot->healthy && std::abs(snapshot->power.sources.front().availableKW-kFullSunKW)<1e-8,
         "running output was clipped by consumer-less bus");
     require(std::abs(snapshot->elapsedSeconds-.1)<1e-8,"power clock changed native playback");
     auto orbit=*session.installation().orbit();
@@ -113,7 +114,7 @@ void header() {
     nsi::systems::StellarExposureEvaluator sky(orbit);
     orbit.phaseOffsetPercent=50-50*sky.eclipseDurationSeconds()/orbit.orbitalPeriodS-5;
     session.setOrbit(orbit);
-    require(render().find("Solar array — 11.1 kW")!=std::string::npos,"penumbra generation not rendered");
+    require(render().find("Solar array — 9.4 kW")!=std::string::npos,"penumbra generation not rendered");
     orbit.orbitalPeriodS=5570; orbit.phaseOffsetPercent=50;
     session.setOrbit(orbit);
     require(render().find("Solar array — Eclipse")!=std::string::npos,"eclipse shown as a measured zero");
@@ -127,7 +128,7 @@ void header() {
         "disabled choice not mapped into running systems");
     session.setSolarArrayEnabled(true); orbit.phaseOffsetPercent=0; session.setOrbit(orbit);
     session.setSolarArray(Installation::SolarArray{60,Installation::SolarCellTechnology::SpaceSilicon});
-    require(render().find("Solar array — 9.1 kW")!=std::string::npos,"technology not mapped");
+    require(render().find("Solar array — 6.9 kW")!=std::string::npos,"technology not mapped");
     Installation restored; restored.deserialize(session.installation().serialize());
     require(restored==session.installation(),"array round trip lost authored properties");
     auto noArray=restored; noArray.setSolarArray(std::nullopt);

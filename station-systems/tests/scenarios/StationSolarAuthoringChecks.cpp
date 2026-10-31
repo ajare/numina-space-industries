@@ -48,8 +48,12 @@ void solarArrayDerivedGeneration(smoke::Context const&)
             double efficiency = technology == station::SolarCellTechnology::TripleJunctionGaAs ? 0.32
                 : technology == station::SolarCellTechnology::SingleJunctionGaAs ? 0.19 : 0.14;
             double packing = technology == station::SolarCellTechnology::SpaceSilicon ? 0.80 : 0.85;
+            // Blanket-level derate between bare-cell datasheet efficiency and built-array
+            // output; silicon-era assembly is the lossier of the two.
+            double derate = technology == station::SolarCellTechnology::SpaceSilicon ? 0.75 : 0.85;
             auto const snapshot = runtime.snapshot();
-            close(snapshot.power.sources[0].availableKW, enabled ? area * packing * efficiency * irradiance / 1000.0 : 0.0);
+            close(snapshot.power.sources[0].availableKW,
+                enabled ? area * packing * efficiency * derate * irradiance / 1000.0 : 0.0);
             close(snapshot.power.sources[1].availableKW, enabled ? 20.0 * sunlight : 0.0);
             smoke::require(runtime.effectiveSettings().solarArrays[0] == array, "generation changed authored array");
         }
@@ -74,7 +78,7 @@ void solarArrayDerivedGeneration(smoke::Context const&)
         station::StationSystemsRuntime runtime(settings, station::StationSystemsUpdateMode::Variable);
         smoke::require(runtime.setDirectSolarIrradianceWPerM2(1361.0)
             && runtime.update(1.0) && runtime.snapshot().healthy, "clipped solar step failed");
-        close(runtime.snapshot().power.sources[0].availableKW, 22.21152);
+        close(runtime.snapshot().power.sources[0].availableKW, 18.879792);
         smoke::require(runtime.snapshot().power.poolGenerationKW < 1.0,
             "solar connection did not clip bus-side availability");
     }
@@ -96,8 +100,8 @@ void solarArrayDerivedGeneration(smoke::Context const&)
             "wear solar step failed");
         return runtime.snapshot().power.sources[0].availableKW;
     };
-    close(measure(false), 22.21152);
-    close(measure(true), 22.21152 * 0.9);
+    close(measure(false), 18.879792);
+    close(measure(true), 18.879792 * 0.9);
 }
 
 void solarArrayEnableDisable(smoke::Context const&)
