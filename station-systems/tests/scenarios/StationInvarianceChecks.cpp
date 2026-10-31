@@ -357,6 +357,60 @@ namespace
 		}
 	}
 
+	void manualDisabledSolarForecast(smoke::Context const&)
+	{
+		::station::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
+		for (bool enabled : {false, true})
+		for (uint32_t ratio : representativeRatios)
+		{
+			::station::StationSystemsSettings settings;
+			settings.enabled = true; settings.systemsStepWorldTicks = ratio;
+			settings.dispatchMode = ::station::StationDispatchMode::Manual;
+			settings.stores = {{"fuel", "kWh", 100, 100}};
+			::station::ThermalReservoirSettings sink;
+			sink.id = "sink"; sink.thermalClass = "warm"; sink.heatCapacityKJPerK = 1e6;
+			sink.startingTemperatureC = 20; sink.minTemperatureC = 0; sink.maxTemperatureC = 100;
+			settings.thermalReservoirs = {sink};
+			::station::GeneratorSettings source;
+			source.id = "source"; source.fuelStoreId = "fuel"; source.heatSinkId = "sink";
+			source.thermalClass = "warm"; source.ratedOutputKW = 2; source.commandedOutputKW = 2;
+			source.efficiency = 0.5; source.maxRampKWPerSecond = 100; source.maxSinkTemperatureC = 90;
+			auto crank = source; crank.id = "crank"; crank.ratedOutputKW = 1; crank.commandedOutputKW = 1;
+			crank.startupPowerKW = 1; crank.startupSeconds = 1;
+			settings.generators = {source, crank};
+			settings.solarArrays = {{"sun", 2}};
+			settings.solarArrays.front().enabled = enabled;
+			::station::EquipmentLoadSettings load;
+			load.id = "load"; load.electricalDemandKW = 1; load.thermalClass = "warm";
+			settings.equipmentLoads = {load};
+			::station::StationSystemsRuntime runtime(settings, quantum);
+			auto const seconds = std::ceil(30.0 / ratio) * ratio * static_cast<double>(quantum);
+			require(runtime.advanceTo(seconds), "Manual solar forecast scenario failed runtime audits");
+			auto const snapshot = runtime.snapshot();
+			// No storage or fuel cells: without solar, the ramping source must
+			// reach 1 kW at 0.01 s before the second generator can crank.
+			auto const expectedCrankKJ = std::min(1.0, enabled ? seconds : seconds - 0.01);
+			std::cout << "MANUAL-SOLAR enabled=" << enabled << " ratio=" << ratio
+				<< " crank-kJ=" << snapshot.power.generators[1].startupReceivedKJ
+				<< " analytical=" << expectedCrankKJ << '\n';
+			require(std::abs(snapshot.power.generators[1].startupReceivedKJ - expectedCrankKJ) < 1e-8,
+				"Manual forecast did not qualify crank at the enabled sources' power threshold");
+			size_t loadAccounts = 0;
+			for (auto const& connection : snapshot.connections)
+				if (connection.key.ownerType == "Equipment" && connection.key.ownerId == "load"
+					&& connection.key.relation == "Electrical supply")
+				{
+					++loadAccounts;
+					// Without solar the load receives two triangular ramp slices:
+					// 0..0.01 before crank, then 0.01..0.02 after its reservation.
+					auto const expectedLoadKJ = enabled ? seconds : seconds - 0.01;
+					require(std::abs(connection.deliveredTotal - expectedLoadKJ) < 1e-8,
+						"Manual load admission did not preserve the source/crank ramp overlap");
+				}
+			require(loadAccounts == 1, "Manual solar forecast has no authoritative load account");
+		}
+	}
+
 	void invarianceProfileRollback(smoke::Context const&)
 	{
 		::station::ScopedStationStepRatioForTesting explicitClock(std::nullopt);
@@ -421,6 +475,7 @@ void registerStationInvarianceChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"invarianceProfileRollback", invarianceProfileRollback});
 	checks.push_back({"invarianceGeneratorTiming", invarianceGeneratorTiming});
 	checks.push_back({"invarianceGeneratorFunding", invarianceGeneratorFunding});
+	checks.push_back({"manualDisabledSolarForecast", manualDisabledSolarForecast});
 	checks.push_back({"invarianceLongRun", invarianceLongRun});
 	checks.push_back({"invariancePerformance", invariancePerformance});
 }

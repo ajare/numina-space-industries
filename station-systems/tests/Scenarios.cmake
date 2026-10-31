@@ -24,6 +24,7 @@ foreach(check IN ITEMS
     invarianceProfileRollback
     invarianceGeneratorTiming
     invarianceGeneratorFunding
+    manualDisabledSolarForecast
     invarianceLongRun
     invariancePerformance
     radiatorSI
