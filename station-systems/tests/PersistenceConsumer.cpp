@@ -2,6 +2,7 @@
 #include "serialization/BinarySerializer.h"
 #include "serialization/YamlSerializer.h"
 #include "ConfigurationScenarios.h"
+#include "SolarArrayAuthoringScenarios.h"
 #include <iostream>
 #include <stdexcept>
 
@@ -38,6 +39,12 @@ int main()
     try {
         checkEmbedding<serialization::YamlSerializer>();
         checkEmbedding<serialization::BinarySerializer>();
+        station_test::solar::roundTrip<serialization::YamlSerializer>();
+        station_test::solar::roundTrip<serialization::BinarySerializer>();
+        station_test::solar::featureAbsentKeepsItsBytes<serialization::YamlSerializer>("yaml");
+        station_test::solar::featureAbsentKeepsItsBytes<serialization::BinarySerializer>("bin");
+        station_test::solar::newTierOnlyWhenPresent();
+        station_test::solar::invalidFieldsRefused();
     }
     catch (std::exception const& error) { std::cerr << error.what() << '\n'; return 1; }
 }

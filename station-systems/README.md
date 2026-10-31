@@ -216,6 +216,17 @@ the existing draft-tolerant validation, not for starting a runtime unchecked.
 `stationConfigurationSchemaVersion` preserves the existing feature-dependent
 version selection. Simulation-facing headers do not include backend headers.
 
+Solar arrays can also carry authoring-only `areaM2` (deployed blanket area in m²,
+including gaps, harness and frame), `cellTechnology`, and `enabled`. Area is
+optional, finite and non-negative; technology defaults to `TripleJunctionGaAs`
+and enabled defaults to true. `solarCellSpec` selects conversion efficiency and
+packing factor from the closed technology catalogue and rejects unknown values.
+Schema 141 is emitted only for a present area (including zero), a non-default
+technology, or a false enabled flag. Otherwise those fields are omitted, keeping
+legacy bytes and schema stamps unchanged. This prefactor does **not** change
+generation: all arrays still use `capacityKW` and the Station solar cycle, even
+when the newly authored enabled flag is false.
+
 World wrappers, reference-document descriptions/provenance, and editor diagram
 positions, pan, zoom, and prefab grouping/provenance remain client-owned. Existing
 editor document APIs continue to combine that metadata with the shared codecs.

@@ -5,6 +5,7 @@ add_executable(station-scenario-consumer
     scenarios/StationInvarianceChecks.cpp
     scenarios/StationPhysicalFidelityChecks.cpp
     scenarios/StationPowerChecks.cpp
+    scenarios/StationSolarAuthoringChecks.cpp
     scenarios/StationProtectionChecks.cpp
     scenarios/StationRuntimeRegressionChecks.cpp
     scenarios/StationSharedSupplyChecks.cpp
@@ -33,6 +34,7 @@ foreach(check IN ITEMS
     recoveryConvergence
     benchmarkWorkloads
     powerChainSeam
+    solarArrayAuthoringOnly
     thermalReservoirSeam
     radiatorSeam
     rateAwareProtection

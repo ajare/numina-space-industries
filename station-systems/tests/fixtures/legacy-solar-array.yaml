@@ -1,0 +1,10 @@
+schemaVersion: 137
+stationSystems:
+  enabled: true
+  systemsStepWorldTicks: 6
+  observationIntervalSeconds: 1
+  trendRetentionSeconds: 3600
+  dispatchMode: manual
+  solarArrays:
+    - id: sun
+      capacityKW: 20

@@ -59,6 +59,8 @@ set_tests_properties(station-library-runtime PROPERTIES
 add_executable(station-persistence-consumer PersistenceConsumer.cpp)
 target_link_libraries(station-persistence-consumer PRIVATE
     StationSystems::StationSystems Promethium::Serialization)
+target_compile_definitions(station-persistence-consumer PRIVATE
+    STATION_FIXTURE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../..")
 add_test(NAME station-library-persistence COMMAND station-persistence-consumer)
 set_tests_properties(station-library-persistence PROPERTIES
     LABELS "station;persistence;functional;validation-fast" TIMEOUT 30)

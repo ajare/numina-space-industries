@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -541,6 +542,36 @@ namespace station
 		double availability{0.0}; // fixed availability while failed, [0, 1)
 		bool operator==(SolarTrackingFailureSettings const&) const = default;
 	};
+	// Closed cell-architecture catalogue; efficiencies are beginning-of-life
+	// AM0 figures and packing factors describe blanket coverage. These are
+	// provisional engineering assumptions; provenance is recorded in #59.
+	enum class SolarCellTechnology : std::uint8_t
+	{
+		TripleJunctionGaAs,
+		SingleJunctionGaAs,
+		SpaceSilicon,
+	};
+	inline constexpr std::array<char const*, 3> SolarCellTechnologyNames{
+		"triple-junction-gaas", "single-junction-gaas", "space-silicon"};
+	inline constexpr std::array<char const*, 3> SolarCellTechnologyLabels{
+		"Triple-junction GaAs", "Single-junction GaAs", "Space silicon"};
+	// Manufacturing properties, selected together rather than authored.
+	struct SolarCellSpec
+	{
+		double efficiency;    // BOL conversion efficiency of illuminated cell, (0, 1]
+		double packingFactor; // fraction of blanket area that is active cell, (0, 1]
+	};
+	// Refuse unknown selections instead of silently substituting a technology.
+	inline constexpr SolarCellSpec solarCellSpec(SolarCellTechnology technology)
+	{
+		switch (technology)
+		{
+		case SolarCellTechnology::TripleJunctionGaAs: return {0.32, 0.85};
+		case SolarCellTechnology::SingleJunctionGaAs: return {0.19, 0.85};
+		case SolarCellTechnology::SpaceSilicon: return {0.14, 0.80};
+		}
+		throw std::invalid_argument("Unknown solar cell technology");
+	}
 	// A configured solar array: declared installed capacity in kW, using
 	// the Station solar cycle. Sunshine is not firm continuous
 	// capacity; zero installed capacity disables the array entirely.
@@ -559,6 +590,15 @@ namespace station
 		// already banked.
 		std::optional<InstallationWearSettings> cellDegradation{};
 		std::vector<std::string> busIds{"main"};
+		// #60 authoring-only fields: generation still uses capacityKW, even
+		// when enabled is false. Appended to preserve positional initializers.
+		// Deployed blanket area includes gaps, harness and frame, not just
+		// active cells. Absent preserves the legacy form; zero is valid.
+		std::optional<double> areaM2{};
+		SolarCellTechnology cellTechnology{SolarCellTechnology::TripleJunctionGaAs};
+		// Defaults to on for legacy documents; switching preserves the size
+		// and technology. Runtime behaviour follows in the generation ticket.
+		bool enabled{true};
 		bool operator==(SolarArraySettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationSolarArrays{4};

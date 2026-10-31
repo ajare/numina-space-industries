@@ -2,6 +2,7 @@
 #include "station/Persistence.h"
 #include "station/StationConnections.h"
 #include "ConfigurationScenarios.h"
+#include "SolarArrayAuthoringScenarios.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -76,6 +77,10 @@ int main()
 {
     try {
         checkConfiguration();
+        station_test::solar::catalogue();
+        station_test::solar::unknownTechnologyRefused();
+        station_test::solar::settingsCarryTheFields();
+        station_test::solar::blanketAreaBounds();
         auto settings = station_test::pathwaySettings();
         auto text = station::serializeStationConfiguration(settings);
         station::StationSystemsSettings restored;

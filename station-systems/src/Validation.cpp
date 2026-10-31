@@ -1411,6 +1411,12 @@ namespace
 			if (array.trackingFailure && (!std::isfinite(array.trackingFailure->availability)
 				|| array.trackingFailure->availability < 0.0 || array.trackingFailure->availability >= 1.0))
 				return refuse(where + " tracking-failure availability must be finite and from 0 up to (but not including) 1");
+			// Authoring-only for now; absent and zero areas are both legal.
+			if (array.areaM2 && (!std::isfinite(*array.areaM2) || *array.areaM2 < 0.0))
+				return refuse(where + " blanket area must be finite and non-negative");
+			// Refuse unknown catalogue selections rather than defaulting them.
+			if (static_cast<size_t>(array.cellTechnology) >= SolarCellTechnologyNames.size())
+				return refuse(where + " has unknown cell technology; declared technologies are: triple-junction-gaas, single-junction-gaas, space-silicon");
 		}
 		if (settings.equipmentLoads.size() > MaxStationEquipmentLoads)
 			return refuse("Station external equipment loads are limited to "

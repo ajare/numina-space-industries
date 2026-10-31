@@ -435,6 +435,12 @@ namespace station
 				serializer.writeString("id", array.id);
 				if (array.cellDegradation) writeWearBlock(serializer, "cellDegradation", *array.cellDegradation);
 				serializer.writeDouble("capacityKW", array.capacityKW);
+				// Omit defaults so legacy arrays retain their exact wire shape.
+				if (array.areaM2) serializer.writeDouble("areaM2", *array.areaM2);
+				if (array.cellTechnology != SolarCellTechnology::TripleJunctionGaAs)
+					serializer.writeString("cellTechnology",
+						SolarCellTechnologyNames.at(static_cast<size_t>(array.cellTechnology)));
+				if (!array.enabled) serializer.writeBool("enabled", false);
 				// #845: the array's fault opt-ins travel only when set, so
 				// a feature-absent array keeps its pre-118 byte shape.
 				if (array.stringLoss)
@@ -1874,6 +1880,35 @@ namespace station
 				array.capacityKW = serializer.readDouble("capacityKW");
 				if (serializer.hasField("illumination"))
 					throw SerializationException("Solar array illumination was retired in schema 137; author stationSystems.solarCycle instead");
+				// #60: a pre-141 document carrying any of the area-and-
+				// technology fields is refused rather than silently dropped,
+				// the same way the solar fault opt-ins are handled above.
+				if (serializer.hasField("areaM2"))
+				{
+					if (version < 141) throw SerializationException(
+						"Solar array blanket area requires schema 141");
+					array.areaM2 = serializer.readDouble("areaM2");
+				}
+				if (serializer.hasField("cellTechnology"))
+				{
+					if (version < 141) throw SerializationException(
+						"Solar array cell technology requires schema 141");
+					auto const technology = serializer.readString("cellTechnology");
+					auto const found = std::find(SolarCellTechnologyNames.begin(),
+						SolarCellTechnologyNames.end(), technology);
+					if (found == SolarCellTechnologyNames.end())
+						throw SerializationException("Station solar array '" + array.id
+							+ "' has unknown cell technology '" + technology
+							+ "'; declared technologies are: triple-junction-gaas, single-junction-gaas, space-silicon");
+					array.cellTechnology = static_cast<SolarCellTechnology>(
+						found - SolarCellTechnologyNames.begin());
+				}
+				if (serializer.hasField("enabled"))
+				{
+					if (version < 141) throw SerializationException(
+						"Solar array enabled flag requires schema 141");
+					array.enabled = serializer.readBool("enabled");
+				}
 				// #845: a pre-118 document carrying a solar fault opt-in is
 				// refused rather than silently dropped.
 				if (serializer.hasField("stringLoss"))
@@ -3376,6 +3411,13 @@ namespace station
 
 	std::uint32_t stationConfigurationSchemaVersion(StationSystemsSettings const& settings)
 	{
+		// Match the writer: schema 141 is required only when a new solar
+		// authoring field travels on the wire. Feature-absent stamps stay put.
+		if (std::any_of(settings.solarArrays.begin(), settings.solarArrays.end(),
+				[](auto const& array) { return array.areaM2.has_value()
+					|| array.cellTechnology != SolarCellTechnology::TripleJunctionGaAs
+					|| !array.enabled; }))
+			return 141;
 		if (!settings.atmospherePathways.empty()) return 140;
 		// Keep feature-absent documents byte-identical; schema 112 is required
 		// only when the new opt-in contract actually travels on the wire, and
