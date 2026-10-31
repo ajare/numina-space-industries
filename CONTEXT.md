@@ -148,6 +148,26 @@ _Avoid_: Star preset (the star is the irradiance, not the world), system preset 
 Heat flow per unit surface area per unit temperature difference through a hull or partition assembly, measured in W/(m²·K).
 _Avoid_: Thermal conductivity (a material property), conductance (the whole-surface value after multiplying by area), insulation rating
 
+**Solar array**:
+The systems node that converts direct starlight into electrical power, defined by its deployed **Blanket area** and **Cell technology** and assumed to point continuously at the star. One record may stand for both wings of a satellite; under the tracking assumption they are optically identical.
+_Avoid_: Solar panel (for the node), wing, PV array
+
+**Blanket area**:
+The deployed collecting area of a Solar array, measured in square metres as the area the array actually presents — including the gaps, harness, hinges and frame between the cells, not only the cells themselves.
+_Avoid_: Cell area, active area, panel size
+
+**Packing factor**:
+The fraction of a Solar array's Blanket area that is active solar cell. It is a property of the **Cell technology** rather than an authored number: how tightly a panel is built is a manufacturing fact, not an authoring guess.
+_Avoid_: Fill factor (the current–voltage curve term, not this), active fraction, cell coverage
+
+**Cell technology**:
+The semiconductor architecture of a Solar array's cells — triple-junction GaAs, single-junction GaAs, or space-grade silicon — which sets both its conversion efficiency and its **Packing factor**.
+_Avoid_: Material (what varies is an architecture, not a substance), cell type, panel type
+
+**Wear ledger**:
+An opt-in account of a machine's real operation and elapsed time — equivalent full cycles, operating hours, mass actually flowed, calendar hours — converted into a permanent fade of rated capacity. It is explicitly **not** a radiation or fluence model: nothing in it knows about particles, and this simulation has no radiation environment to apply one against.
+_Avoid_: Radiation damage, degradation model (implying physics the ledger does not have)
+
 **Floor Layer**, **Wiring Layer**, **Piping Layer**:
 The floor, electrical wiring, and piping content associated with a Cell, respectively.
 
