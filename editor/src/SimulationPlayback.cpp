@@ -17,6 +17,7 @@ void SimulationPlayback::synchronize(const nsi::core::Installation* installation
         pressureHistory_.clear();
         atmosphereHistory_.clear();
         exposureHistory_.clear();
+        solarHistory_.clear();
         source_.reset();
         remainder_ = 0;pendingStepSeconds_.reset();pendingInjection_.reset();injected_=false;
     } else if (!source_ || *source_ != *installation) reset(*installation);
@@ -31,6 +32,7 @@ void SimulationPlayback::reset(const nsi::core::Installation& installation) {
     pressureHistory_.clear();
     atmosphereHistory_.clear();
     exposureHistory_.clear();
+    solarHistory_.clear();
     source_ = installation;
     remainder_ = 0;pendingStepSeconds_.reset();pendingInjection_.reset();injected_=false;
     runtime_=std::make_unique<CellPlaybackRuntime>(installation,observationOptions_,lifecycleSource_);
@@ -118,6 +120,21 @@ void SimulationPlayback::recordAtmosphereHistory(bool instantaneous) {
             air.spatial ? std::optional<double>(air.maxCellPressureKPa) : std::nullopt});
         record(atmosphereHistory_[air.id],atmosphereSample(snapshot.elapsedSeconds,air));
     }
+    // The Solar array's own trace, sampled at the same committed instant as
+    // the exposure and atmosphere histories so all of them read against one
+    // clock. The Editor's playback runtime publishes exactly one solar
+    // source and the header reads that same front entry; the graph follows
+    // it rather than inventing a second notion of which array is "the" one.
+    const auto& solarSources=snapshot.power.sources;
+    const auto* solar=solarSources.empty() ? nullptr : &solarSources.front();
+    // Switched off, or no Orbit to work under, are the states the header
+    // spells out in words instead of a figure. The graph agrees and leaves a
+    // gap rather than plotting a zero nobody measured. Eclipse is not one of
+    // them: it is a real reading of a real sky, and keeps its zero.
+    const bool solarPlotted=solar!=nullptr && !solar->disabled && source_ && source_->orbit().has_value();
+    record(solarHistory_,SolarGenerationSample{snapshot.elapsedSeconds,
+        solarPlotted ? solar->availableKW : std::numeric_limits<double>::quiet_NaN(),
+        solar!=nullptr && solar->eclipse});
 }
 
 std::optional<StationSystemsSnapshot> SimulationPlayback::snapshotFor(

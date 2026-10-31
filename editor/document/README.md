@@ -96,6 +96,20 @@ advancing playback time; during playback it reports the last committed tick.
 See [ADR-0006](../../docs/adr/0006-native-playback-lifecycle-stage.md) for the
 power-only exception: no second runtime owns any native gas or heat.
 
+Opened, the header also plots that same unclipped generation over the last
+minute of simulation time, on the same terms as the Atmosphere Pressure and
+Thermal Temperature graphs: sixty seconds pinned to the newest observation,
+kilowatts fitted to what is actually in the window, one sample per committed
+10 Hz tick. Eclipse is shaded behind the curve in the same band colour the
+Stellar exposure trace uses, so a flat stretch reads as night rather than as
+a dead panel. The states the header reports in words leave the curve blank
+rather than drawing a zero the header refuses to print — switched off, or no
+`Orbit` authored, the graph says there is nothing to plot. A gap breaks an
+eclipse band too: a shadow is never carried across a stretch where nothing
+was read. The history is recorded by the playback runtime alongside the
+atmosphere histories, so the graph and the readout are the same number at two
+scales rather than two numbers that could disagree.
+
 The left inspector's **Update time** chart stacks native fluid/thermal solver
 and Lua lifecycle durations for the last **50 successful updates** (five seconds
 at 10 Hz). Its horizontal axis uses update cadence, not simulated time, so changing

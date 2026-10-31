@@ -4,6 +4,7 @@
 #include "StructuralView.h"
 #include "PressureSample.h"
 #include "ExposureSample.h"
+#include "SolarGenerationSample.h"
 #include "SectorAtmosphere.h"
 #include <nsi/core/Installation.h>
 #include "CellPlaybackRuntime.h"
@@ -59,6 +60,12 @@ public:
     // observation and shared by every Sector because the sky is one thing.
     // NaN where no orbital sky is available, which renders as a gap.
     std::span<const ExposureSample> exposureHistory() const noexcept { return exposureHistory_; }
+    // The committed Solar generation trace, one sample per committed
+    // observation. Like the exposure trace it is one thing rather than a
+    // per-Sector copy: a Station has one Solar array record. Samples are NaN
+    // where the header would refuse a figure - no array, no authored Orbit,
+    // or the array switched off - which renders as a gap.
+    std::span<const SolarGenerationSample> solarHistory() const noexcept { return solarHistory_; }
 private:
     void recordAtmosphereHistory(bool instantaneous=false);
     struct DoorState { bool open=false; };
@@ -68,6 +75,7 @@ private:
     std::map<std::string, std::vector<PressureSample>> pressureHistory_;
     std::map<std::string, std::vector<AtmosphereSample>> atmosphereHistory_;
     std::vector<ExposureSample> exposureHistory_;
+    std::vector<SolarGenerationSample> solarHistory_;
     static constexpr double historySeconds = 60.0;
     static constexpr double historySampleIntervalSeconds = 0.1;
     static constexpr double updateIntervalSeconds = 0.1;

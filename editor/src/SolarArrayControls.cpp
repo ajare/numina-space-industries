@@ -1,11 +1,101 @@
 #include "SolarArrayControls.h"
 #include "station/editor/EditorSession.h"
 #include "imgui.h"
-#include <cstdio>
+#include "implot.h"
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 namespace station::editor {
+namespace {
+// The same shade the Stellar exposure trace uses for a shadow, so an
+// Eclipse reads as one thing across both graphs: a cause lying behind the
+// curve, not a series competing with it.
+constexpr ImU32 kEclipseBandColour{IM_COL32(38, 58, 92, 120)};
+
+bool observable(const SolarGenerationSample& sample) { return std::isfinite(sample.availableKW); }
+
+// A band spanning the whole visible height of the plot, so the shadow is
+// read against the generation curve rather than measured off it.
+void shadeEclipseBand(std::pair<double, double> band) {
+    const auto [from, to] = band;
+    if (!(to > from)) return;
+    const auto limits = ImPlot::GetPlotLimits(ImAxis_X1, ImAxis_Y1);
+    const ImVec2 start = ImPlot::PlotToPixels(from, limits.Y.Min, ImAxis_X1, ImAxis_Y1);
+    const ImVec2 end = ImPlot::PlotToPixels(to, limits.Y.Max, ImAxis_X1, ImAxis_Y1);
+    ImPlot::GetPlotDrawList()->AddRectFilled(ImVec2{start.x, end.y}, ImVec2{end.x, start.y},
+                                            kEclipseBandColour);
+}
+
+// The rolling last-minute generation graph, on the same terms as the
+// Atmosphere Pressure and Thermal Temperature plots beside it: simulation
+// time along the bottom, a sixty second window pinned to the newest
+// observation, the value axis fitted to what is actually in the window.
+void drawSolarGenerationGraph(std::span<const SolarGenerationSample> history) {
+    if (history.empty()) {
+        ImGui::TextUnformatted("Generation history unavailable.");
+        return;
+    }
+    // Every sample a gap - the array switched off, or no Orbit authored -
+    // leaves nothing honest to draw. Say so instead of showing an empty frame.
+    if (!std::any_of(history.begin(), history.end(), observable)) {
+        ImGui::TextUnformatted("No generation to plot while the array is switched off or there is no star.");
+        return;
+    }
+    if (!ImPlot::BeginPlot("Solar generation — last minute###SolarGeneration", ImVec2(-1, 180),
+                          ImPlotFlags_NoLegend))
+        return;
+    const double now = history.back().seconds;
+    ImPlot::SetupAxes("Simulation time (s)", "Generation (kW)", ImPlotAxisFlags_None,
+                     ImPlotAxisFlags_AutoFit);
+    ImPlot::SetupAxisLimits(ImAxis_X1, std::max(0.0, now - 60.0), std::max(60.0, now),
+                           ImGuiCond_Always);
+    ImPlot::PushPlotClipRect();
+    for (const auto& band : solarEclipseBands(history)) shadeEclipseBand(band);
+    ImPlot::PopPlotClipRect();
+    ImPlot::PlotLineG("Generation", [](int index, void* data) {
+        const auto& sample = (*static_cast<std::span<const SolarGenerationSample>*>(data))[index];
+        return ImPlotPoint(sample.seconds, sample.availableKW);
+    }, &history, static_cast<int>(history.size()));
+    ImPlot::EndPlot();
+}
+} // namespace
+
+std::vector<std::pair<double, double>> solarEclipseBands(
+    std::span<const SolarGenerationSample> generation) {
+    std::vector<std::pair<double, double>> bands;
+    bool inBand = false;
+    double from = 0.0;
+    double to = 0.0;
+    auto close = [&] {
+        // Only a band with width is a band. A lone eclipsed observation
+        // touches zero at an instant, and the line drawn between samples is
+        // interpolated rather than held, so there is no stretch to shade.
+        if (inBand && to > from) bands.push_back({from, to});
+        inBand = false;
+    };
+    for (const auto& sample : generation) {
+        // An unobservable sample closes the band rather than extending it:
+        // switched off is not night, and a shadow may not be carried across
+        // a stretch where nothing was read.
+        if (!observable(sample)) {
+            close();
+            continue;
+        }
+        if (sample.eclipse) {
+            if (!inBand) {
+                inBand = true;
+                from = sample.seconds;
+            }
+            to = sample.seconds;
+        } else
+            close();
+    }
+    close();
+    return bands;
+}
+
 bool drawSolarArrayControls(EditorSession& session) {
     bool enabled = session.installation().solarArrayEnabled();
     ImGui::BeginDisabled(!session.editingEnabled());
@@ -14,7 +104,8 @@ bool drawSolarArrayControls(EditorSession& session) {
     ImGui::EndDisabled();
     return changed;
 }
-bool drawSolarArrayPanel(EditorSession& session, const std::optional<StationSystemsSnapshot>& snapshot) {
+bool drawSolarArrayPanel(EditorSession& session, const std::optional<StationSystemsSnapshot>& snapshot,
+                        std::span<const SolarGenerationSample> generation) {
     auto array=session.installation().solarArray();
     if (!array) {
         ImGui::BeginDisabled(!session.editingEnabled());
@@ -71,6 +162,10 @@ bool drawSolarArrayPanel(EditorSession& session, const std::optional<StationSyst
     ImGui::TextUnformatted("Power is not connected to station consumers.");
     if (ImGui::Button("Remove solar array")) { session.setSolarArray(std::nullopt); changed=true; }
     ImGui::EndDisabled();
+    // The header above is one instant; this is the same number over the last
+    // minute of it, so an orbit's day and night read as a shape rather than
+    // being inferred from a title that changes twice a period.
+    drawSolarGenerationGraph(generation);
     return changed;
 }
 }
