@@ -59,7 +59,7 @@ saving preserves it. Rendering, native dialogs and file I/O remain adapters.
 Installation editing is disabled while playback is playing (even at time zero)
 or elapsed simulation time is non-zero (even when paused). Reset returns to the
 start and re-enables editing. The inspector explains why editing is unavailable.
-This covers names, Hull and Partition types, Cells, Walls, Sector properties,
+This covers names, Hull and Partition types, the solar-array enabled choice, Cells, Walls, Sector properties,
 Level operations and undo/redo, including keyboard shortcuts. Level and Sector
 selection remain available for inspection; saving is still allowed. Runtime
 Door toggles are the exception to locked interaction, not to locked authoring:
@@ -70,6 +70,14 @@ The host applies `SimulationPlayback::editingAllowed()` through
 locked, and locking finishes an in-flight stroke as one undo step. New/Open
 replace the scenario and reset playback, rather than mutate the running scenario;
 cancelled or failed actions preserve the existing lock and preview.
+
+The inspector's **Solar array enabled** checkbox writes the Installation's
+`solarArrayEnabled` choice through `EditorSession`, including dirty tracking and
+undo/redo. Missing YAML fields mean enabled; only a disabled choice is emitted,
+so existing documents gain no default-only field. This control authors the
+choice only: solar-array creation, mapping this choice to systems settings and
+the live generation header are the follow-up Editor integration in #65. It does
+not construct a second systems runtime alongside native gas/heat playback.
 
 The left inspector's **Update time** chart stacks native fluid/thermal solver
 and Lua lifecycle durations for the last **50 successful updates** (five seconds

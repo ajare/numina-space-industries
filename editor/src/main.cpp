@@ -25,6 +25,7 @@
 #include "OrbitDiagram.h"
 #include "OrbitSummary.h"
 #include "SimulationPlayback.h"
+#include "SolarArrayControls.h"
 #include "StartDatePicker.h"
 #include "SectorSystemsView.h"
 #include "SectorThermalPanel.h"
@@ -522,6 +523,9 @@ int runEditor() {
             ImGui::SetTooltip("Midnight UTC on the day you pick. There is no\n"
                              "time of day to set: the mission starts at 00:00Z.");
         ImGui::EndDisabled();
+        try {
+            if (station::editor::drawSolarArrayControls(session)) file_status.clear();
+        } catch (const std::exception& error) { file_status = error.what(); }
         // The authored sky splits into the world and the ride around it.
         // The star's light and the planet's answer to it - how much it
         // reflects, how far it leans - hold whatever path the Installation

@@ -116,6 +116,7 @@ add_executable(editor
     src/EditorFonts.cpp
     src/DeckGridWidget.cpp
     src/InstallationRenderControls.cpp
+    src/SolarArrayControls.cpp
     src/GasInjectorControls.cpp
     src/StartDatePicker.cpp
     src/OrbitDiagram.cpp
@@ -166,6 +167,13 @@ if(BUILD_TESTING)
     target_link_libraries(editor-structural-view-test PRIVATE editor-simulation editor::implot)
     add_test(NAME editor-structural-view COMMAND editor-structural-view-test)
     set_tests_properties(editor-structural-view PROPERTIES
+        LABELS "editor;functional;validation-fast" TIMEOUT 30)
+
+    add_executable(editor-solar-array-controls-test tests/SolarArrayControlsTest.cpp src/SolarArrayControls.cpp)
+    target_link_libraries(editor-solar-array-controls-test PRIVATE
+        editor-simulation editor::document editor::implot)
+    add_test(NAME editor-solar-array-controls COMMAND editor-solar-array-controls-test)
+    set_tests_properties(editor-solar-array-controls PROPERTIES
         LABELS "editor;functional;validation-fast" TIMEOUT 30)
 
     add_executable(editor-start-date-picker-test tests/StartDatePickerTest.cpp src/StartDatePicker.cpp)

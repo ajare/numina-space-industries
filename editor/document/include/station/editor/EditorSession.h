@@ -58,6 +58,7 @@ public:
     // The authored sky. Clearing it means no orbit: a dark sky and no
     // stellar gain, never a substituted default.
     void setOrbit(std::optional<Installation::Orbit> orbit);
+    void setSolarArrayEnabled(bool enabled);
     void undo();
     void redo();
     bool canUndo() const noexcept { return mEditingEnabled && !mUndoHistory.empty(); }

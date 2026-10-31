@@ -209,6 +209,9 @@ void EditorSession::setStartDateUtcS(std::int64_t seconds) {
 void EditorSession::setOrbit(std::optional<Installation::Orbit> orbit) {
     edit([&](auto& i){ i.setOrbit(orbit); });
 }
+void EditorSession::setSolarArrayEnabled(bool enabled) {
+    edit([&](auto& i){ i.setSolarArrayEnabled(enabled); });
+}
 void EditorSession::undo() {
     if (!mEditingEnabled) return;
     endStroke(); if (mUndoHistory.empty()) return;

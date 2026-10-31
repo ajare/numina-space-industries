@@ -494,6 +494,8 @@ std::string Installation::serialize() const {
     case PartitionType::InsulatedPartition: partition = "InsulatedPartition"; break;
     }
     root["partition"] = partition;
+    // Default enabled is omitted so feature-absent documents do not churn.
+    if (!solarArrayEnabled_) root["solarArrayEnabled"] = false;
     // Written as a calendar date rather than the epoch integer the record
     // holds, because a bare 2524608000 in a hand-read save tells nobody
     // anything and the field means a day, not a count of seconds.
@@ -718,6 +720,8 @@ void Installation::deserialize(const std::string& text) {
         next.partitionType_ = partition;
         next.orbit_ = orbit; // Never apply creation-time defaults when loading.
         next.startDateUtcS_ = startDate;
+        next.solarArrayEnabled_ = root["solarArrayEnabled"]
+            ? root["solarArrayEnabled"].as<bool>() : true;
         *this=std::move(next);
     } catch (const std::exception& e) { throw serialization::SerializationException(e.what()); }
 }

@@ -243,6 +243,9 @@ public:
     // never applies this default - see deserialize.
     std::optional<Orbit> orbit() const noexcept { return orbit_; }
     void setOrbit(std::optional<Orbit> orbit);
+    // Authored solar-array switch, independent of its size/technology.
+    bool solarArrayEnabled() const noexcept { return solarArrayEnabled_; }
+    void setSolarArrayEnabled(bool enabled) noexcept { solarArrayEnabled_ = enabled; }
     struct ExteriorSkin {
         double sideM2 = 0.0;
         double roofM2 = 0.0;
@@ -274,6 +277,7 @@ public:
     bool operator==(const Installation&) const = default;
 private:
     std::string name_;
+    bool solarArrayEnabled_ = true;
     std::optional<HullType> hullType_ = HullType::MultiLayerBlanket;
     std::optional<PartitionType> partitionType_ = PartitionType::InsulatedPartition;
     // The member initialisers above are the ISS-like sky: full Sun at
