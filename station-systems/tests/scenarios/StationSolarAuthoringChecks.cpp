@@ -3,7 +3,9 @@
 #include "station/StationConnections.h"
 
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace
@@ -104,6 +106,122 @@ void solarArrayDerivedGeneration(smoke::Context const&)
     close(measure(true), 18.879792 * 0.9);
 }
 
+// #68: a fast-saturating wear fixture. A fade of 1.0 per calendar hour
+// drives an array to its maxWearFraction ceiling inside one simulated
+// hour, so a fully worn array is reached without a long wall-clock run.
+// The pair - one derived array, one legacy array - runs together so the
+// two modes are read under identical wear. Each mode reads its own light:
+// the derived array takes direct irradiance, the legacy array the authored
+// solar cycle, so a dark run has to put out both.
+struct WornPairRun
+{
+    station::StationSystemsSnapshot snapshot;
+    // Events announced after the ledger saturated, i.e. everything the
+    // worn arrays had to say once they were dead.
+    std::vector<station::StationSystemsEvent> lateEvents;
+};
+
+WornPairRun runWornPair(double irradiance, double cycleLevel, std::optional<double> wearCeiling)
+{
+    station::StationSystemsSettings settings;
+    settings.enabled = true;
+    station::SolarArraySettings derived;
+    derived.id = "derived";
+    derived.areaM2 = 60.0;
+    derived.cellTechnology = station::SolarCellTechnology::TripleJunctionGaAs;
+    derived.capacityKW = 999.0; // Must never reach the derived nameplate.
+    auto legacy = derived;
+    legacy.id = "legacy";
+    legacy.areaM2.reset();
+    legacy.capacityKW = 20.0;
+    if (wearCeiling)
+        for (auto* array : {&derived, &legacy})
+        {
+            array->cellDegradation.emplace().fadePerCalendarHour = 1.0;
+            array->cellDegradation->maxWearFraction = *wearCeiling;
+        }
+    settings.solarArrays = {derived, legacy};
+    settings.solarCycle.emplace().constantLevel = cycleLevel;
+    station::StationSystemsRuntime runtime(settings, station::StationSystemsUpdateMode::Variable);
+    smoke::require(runtime.setDirectSolarIrradianceWPerM2(irradiance), "irradiance refused");
+    // The hour saturates the ledger while the array is still lit, so the
+    // death is caused by wear and never by the light going out.
+    smoke::require(runtime.update(3600.0) && runtime.snapshot().healthy,
+        "wear saturation step failed");
+    auto const mark = runtime.events().size();
+    for (int step = 0; step < 4; ++step)
+        smoke::require(runtime.update(1.0) && runtime.snapshot().healthy,
+            "post-saturation step failed");
+    auto const& events = runtime.events();
+    return {runtime.snapshot(),
+        std::vector<station::StationSystemsEvent>(events.begin() + static_cast<std::ptrdiff_t>(mark),
+            events.end())};
+}
+
+bool announcedSolarTransition(std::vector<station::StationSystemsEvent> const& events)
+{
+    for (auto const& event : events)
+        if (event.category == "solar") return true;
+    return false;
+}
+
+void solarArrayWearDisablesDerivedArray(smoke::Context const&)
+{
+    auto const fullSunNameplateKW = 60 * 0.85 * 0.32 * 0.85 * 1361.0 / 1000.0;
+    // Both modes at the same 100% wear ceiling reach the same verdict.
+    auto const worn = runWornPair(1361.0, 1.0, 1.0);
+    for (auto const& source : worn.snapshot.power.sources)
+    {
+        smoke::require(source.wear.wearFraction == 1.0, "wear fixture did not reach its ceiling");
+        smoke::require(source.disabled,
+            "a fully worn array reported itself as not disabled (derived and legacy alike)");
+        smoke::require(source.availableKW == 0.0, "a fully worn array still delivered power");
+    }
+    // A dead array cannot transition, so it must not keep the event log
+    // describing a day/night cycle it no longer has.
+    smoke::require(!announcedSolarTransition(worn.lateEvents),
+        "a fully worn array announced an eclipse transition");
+    // Half-worn is diminished, not dead: the array still delivers, and
+    // the disabled test must not fire early.
+    auto const halfWorn = runWornPair(1361.0, 1.0, 0.5);
+    smoke::require(!halfWorn.snapshot.power.sources[0].disabled
+        && !halfWorn.snapshot.power.sources[1].disabled,
+        "a half-worn array reported itself as disabled");
+    smoke::require(std::abs(halfWorn.snapshot.power.sources[0].availableKW
+        - fullSunNameplateKW * 0.5) < 1e-9, "half-worn derived array did not deliver half its nameplate");
+    smoke::require(halfWorn.snapshot.power.sources[1].availableKW > 0.0,
+        "half-worn legacy array stopped delivering");
+    // Unworn in full sun is neither disabled nor dark.
+    auto const healthy = runWornPair(1361.0, 1.0, std::nullopt);
+    for (auto const& source : healthy.snapshot.power.sources)
+        smoke::require(!source.disabled, "an unworn lit array reported itself as disabled");
+    smoke::require(std::abs(healthy.snapshot.power.sources[0].availableKW - fullSunNameplateKW) < 1e-9,
+        "unworn derived array did not deliver its full nameplate");
+    // Zero illumination alone never marks an array disabled: an unlit
+    // array is in eclipse, not switched off.
+    auto const dark = runWornPair(0.0, 0.0, std::nullopt);
+    for (auto const& source : dark.snapshot.power.sources)
+    {
+        smoke::require(source.availableKW == 0.0, "a dark array delivered power");
+        smoke::require(!source.disabled, "zero illumination was reported as disabled");
+    }
+    // A derived blanket with no area at all is still zero installed
+    // capacity, and stays disabled with the light on.
+    {
+        station::StationSystemsSettings settings;
+        settings.enabled = true;
+        station::SolarArraySettings array;
+        array.id = "no-blanket";
+        array.areaM2 = 0.0;
+        settings.solarArrays = {array};
+        station::StationSystemsRuntime runtime(settings, station::StationSystemsUpdateMode::Variable);
+        smoke::require(runtime.setDirectSolarIrradianceWPerM2(1361.0) && runtime.update(1.0)
+            && runtime.snapshot().healthy, "zero-area solar step failed");
+        smoke::require(runtime.snapshot().power.sources[0].disabled,
+            "a zero-area derived array stopped reporting disabled");
+    }
+}
+
 void solarArrayEnableDisable(smoke::Context const&)
 {
     // Exercise both modes together through settings, stepping and snapshots only.
@@ -162,4 +280,5 @@ void registerStationSolarAuthoringChecks(std::vector<smoke::Check>& checks)
 {
     checks.push_back({"solarArrayDerivedGeneration", solarArrayDerivedGeneration});
     checks.push_back({"solarArrayEnableDisable", solarArrayEnableDisable});
+    checks.push_back({"solarArrayWearDisablesDerivedArray", solarArrayWearDisablesDerivedArray});
 }

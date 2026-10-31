@@ -588,10 +588,14 @@ namespace station
 		{
 			array.lastIllumination = array.authored.areaM2 ? 1.0
 				: evaluateStationProfile(runtime.settings.solarCycle.value_or(ProfileSettings{}), profileElapsed);
-			// Authored enable is independent of the capacity/illumination mode.
-			array.lastDisabled = !array.authored.enabled || (array.authored.areaM2
-				? *array.authored.areaM2 == 0.0
-				: array.effectiveWearCapability() <= 0.0);
+			// Authored enable is independent of the capacity/illumination
+			// mode, and so is the capacity half of the test (#68): it reads
+			// the wear-scaled nameplate, never the irradiance-scaled
+			// instantaneous value. An array whose nameplate has worn to zero
+			// can deliver nothing in any light and is disabled in both
+			// modes, while an unlit array that has merely lost the sun is in
+			// eclipse, not switched off.
+			array.lastDisabled = !array.authored.enabled || array.wearScaledNameplateKW() <= 0.0;
 			// #845: the availability the array's fault ledger leaves it.
 			// A string loss takes a frozen fraction of the installed
 			// capacity; a tracking failure pins the array to its frozen

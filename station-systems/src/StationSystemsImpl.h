@@ -207,9 +207,13 @@ using namespace station_detail;
 			// tick reads the faded figure, so a worn machine never books what
 			// it can no longer do. Repair never touches it.
 			WearState cellDegradation;
-			double capacityKW() const
+			// The derived product with its illumination term supplied. Passing
+			// directIrradianceWPerM2 gives the instantaneous capacity; passing
+			// the 1000 W/m^2 reference the W->kW conversion is written
+			// against gives the same product with illumination held out, so
+			// the two readings can never drift apart.
+			double derivedCapacityAtWPerM2(double irradiance) const
 			{
-				if (!authored.areaM2) return authored.capacityKW;
 				auto const spec = solarCellSpec(authored.cellTechnology);
 				// Perfect star-tracking: cos(incidence) = 1. Fixed cell temperature:
 				// no temperature coefficient. No degradation by default; only the
@@ -223,9 +227,30 @@ using namespace station_detail;
 				// photocurrent; albedo is excluded under perfect tracking
 				// (a star-pointing array sees no planet while sunlit).
 				return *authored.areaM2 * spec.packingFactor * spec.efficiency
-					* spec.arrayFactor * directIrradianceWPerM2 / 1000.0;
+					* spec.arrayFactor * irradiance / 1000.0;
+			}
+			double capacityKW() const
+			{
+				if (!authored.areaM2) return authored.capacityKW;
+				return derivedCapacityAtWPerM2(directIrradianceWPerM2);
+			}
+			// The installed rating with illumination held out: the blanket
+			// nameplate at the 1000 W/m^2 reference for a derived array, the
+			// authored rating for a legacy one. Wear is a property of the
+			// machine, not of the light it happens to be standing in, so the
+			// disabled test reads this and never the irradiance-scaled
+			// instantaneous value below.
+			double nameplateKW() const
+			{
+				if (!authored.areaM2) return authored.capacityKW;
+				return derivedCapacityAtWPerM2(1000.0);
 			}
 			double effectiveWearCapability() const { return capacityKW() * (1.0 - cellDegradation.fraction); }
+			// What the array can deliver in full sun with its wear applied.
+			// Zero here means the machine is permanently spent: no orbit and
+			// no light can bring it back, which is what makes it disabled
+			// rather than merely dark (#68).
+			double wearScaledNameplateKW() const { return nameplateKW() * (1.0 - cellDegradation.fraction); }
 		};
 		// The authoritative ledger of one External equipment load group.
 		// Allocation runs in two passes: protected critical floors first,
