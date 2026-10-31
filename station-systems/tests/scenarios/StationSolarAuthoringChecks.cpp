@@ -305,6 +305,58 @@ void solarEclipseStateIsIllumination(smoke::Context const&)
     }
 }
 
+// #71: installed and wear-scaled ratings describe the machine, not its sky.
+void solarArraySnapshotNameplate(smoke::Context const&)
+{
+    auto close = [](double actual, double expected, char const* message) {
+        smoke::require(std::abs(actual - expected) < 1e-9, message);
+    };
+    for (bool worn : {false, true})
+    {
+        station::StationSystemsSettings settings;
+        settings.enabled = true;
+        station::SolarArraySettings derived;
+        derived.id = "derived";
+        derived.areaM2 = 60.0;
+        derived.cellTechnology = station::SolarCellTechnology::TripleJunctionGaAs;
+        derived.capacityKW = 999.0; // Ignored for a derived array's nameplate too.
+        if (worn)
+        {
+            derived.cellDegradation.emplace().fadePerCalendarHour = 1.0;
+            derived.cellDegradation->maxWearFraction = 0.5;
+        }
+        auto legacy = derived;
+        legacy.id = "legacy";
+        legacy.areaM2.reset();
+        legacy.capacityKW = 20.0;
+        settings.solarArrays = {derived, legacy};
+        settings.solarCycle.emplace().constantLevel = 0.0;
+        station::StationSystemsRuntime runtime(settings, station::StationSystemsUpdateMode::Variable);
+        // Saturate optional wear before comparing readings, keeping permanent
+        // fade constant while the same array passes into eclipse and back.
+        smoke::require(runtime.update(3600.0) && runtime.snapshot().healthy, "nameplate setup failed");
+        auto const retained = worn ? 0.5 : 1.0;
+        auto const nameplate = 60.0 * 0.85 * 0.32 * 0.85; // fixed 1000 W/m^2 reference
+        for (double irradiance : {1361.0, 0.0, 680.5, 9086.0, 1361.0})
+        {
+            smoke::require(runtime.setDirectSolarIrradianceWPerM2(irradiance)
+                && runtime.update(1.0) && runtime.snapshot().healthy, "nameplate step failed");
+            auto const snapshot = runtime.snapshot();
+            auto const& source = snapshot.power.sources[0];
+            close(source.capacityKW, nameplate, "derived installed capacity varied with irradiance");
+            close(source.wear.effectiveCapability, nameplate * retained,
+                "derived wear capability varied with irradiance");
+            close(source.wear.wearFraction, 1.0 - retained, "nameplate wear fixture did not saturate");
+            close(source.availableKW, nameplate * retained * irradiance / 1000.0,
+                "nameplate reporting changed instantaneous generation");
+            auto const& legacySource = snapshot.power.sources[1];
+            close(legacySource.capacityKW, 20.0, "legacy installed capacity changed");
+            close(legacySource.wear.effectiveCapability, 20.0 * retained, "legacy wear capability changed");
+            close(legacySource.availableKW, 0.0, "legacy array ignored its dark solar cycle");
+        }
+    }
+}
+
 void solarArrayEnableDisable(smoke::Context const&)
 {
     // Exercise both modes together through settings, stepping and snapshots only.
@@ -363,6 +415,7 @@ void registerStationSolarAuthoringChecks(std::vector<smoke::Check>& checks)
 {
     checks.push_back({"solarArrayDerivedGeneration", solarArrayDerivedGeneration});
     checks.push_back({"solarArrayEnableDisable", solarArrayEnableDisable});
+    checks.push_back({"solarArraySnapshotNameplate", solarArraySnapshotNameplate});
     checks.push_back({"solarArrayWearDisablesDerivedArray", solarArrayWearDisablesDerivedArray});
     checks.push_back({"solarEclipseStateIsIllumination", solarEclipseStateIsIllumination});
 }

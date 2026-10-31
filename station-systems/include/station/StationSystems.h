@@ -598,6 +598,10 @@ namespace station
 	struct StationSolarSourceSnapshot
 	{
 		std::string id;
+		// Installed nameplate, before Wear: for derived arrays, blanket area ×
+		// packing × cell efficiency × array factor × 1000 W/m² / 1000;
+		// for legacy arrays, the constant authored capacityKW. This fixed
+		// reference rating is independent of the operating stellar irradiance.
 		double capacityKW{0.0};
 		double availableKW{0.0};    // array availability before connection/dispatch clipping
 		bool disabled{false};       // authored off or zero usable installed capacity
@@ -613,6 +617,8 @@ namespace station
 		double availabilityFactor{1.0};
 		std::vector<StationFaultSnapshot> activeFaults;
 		// #848: the permanent Wear this machine has accumulated.
+		// effectiveCapability is capacityKW × (1 - wearFraction), in kW:
+		// the wear-scaled nameplate, never the instantaneous generation.
 		StationMachineWearSnapshot wear;
 		bool operator==(StationSolarSourceSnapshot const&) const = default;
 	};

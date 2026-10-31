@@ -37,6 +37,7 @@ foreach(check IN ITEMS
     powerChainSeam
     solarArrayDerivedGeneration
     solarArrayEnableDisable
+    solarArraySnapshotNameplate
     solarArrayWearDisablesDerivedArray
     solarEclipseStateIsIllumination
     thermalReservoirSeam

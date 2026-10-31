@@ -133,8 +133,8 @@ namespace station
 			sourceResult.id = array.authored.id;
 			sourceResult.wear = { array.authored.cellDegradation ? "cell-degradation" : "", array.cellDegradation.fraction,
 				array.cellDegradation.operatingHours, array.cellDegradation.throughputKg, array.cellDegradation.calendarHours,
-				array.effectiveWearCapability(), array.cellDegradation.fraction };
-			sourceResult.capacityKW = array.capacityKW();
+				array.wearScaledNameplateKW(), array.cellDegradation.fraction };
+			sourceResult.capacityKW = array.nameplateKW();
 			sourceResult.availableKW = array.lastUnclippedAvailableKW;
 			sourceResult.disabled = array.lastDisabled;
 			// #69: the shadow state travels with the numbers so a reader never
